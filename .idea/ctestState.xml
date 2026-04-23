@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CidrCTestProjectState">
+    <ctestState>
+      <lineNumber testId="path:null test:unit_cpp_regression" value="110" />
+      <lineNumber testId="path:null test:unit_cpp_regression2" value="118" />
+      <lineNumber testId="path:null test:unit_cpp_regression3" value="126" />
+      <lineNumber testId="path:null test:unit_cpp_regression4" value="134" />
+      <lineNumber testId="path:null test:unit_cpp_regression5" value="142" />
+      <lineNumber testId="path:null test:unit_cpp_regression6" value="150" />
+      <lineNumber testId="path:null test:unit_cpp_regression7" value="158" />
+      <lineNumber testId="path:null test:unit_cpp_smoke" value="102" />
+      <lineNumber testId="path:null test:unit_types" value="94" />
+    </ctestState>
+  </component>
+</project>
