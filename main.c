@@ -493,11 +493,19 @@ int main(int argc, char** argv) {
         lib.tcc_set_error_func(s, NULL, tcc_error_cb);
         lib.tcc_set_lib_path(s, tcc_dir);
         lib.tcc_set_output_type(s, TCC_OUTPUT_EXE);
-        lib.tcc_add_include_path(s, tcc_dir);
-        lib.tcc_add_sysinclude_path(s, tcc_dir);
+        char tcc_inc[512];
+        snprintf(tcc_inc, sizeof(tcc_inc), "%s/include", tcc_dir);
+        lib.tcc_add_include_path(s, tcc_inc);
+        lib.tcc_add_sysinclude_path(s, tcc_inc);
         char lib_dir_path[512];
         snprintf(lib_dir_path, sizeof(lib_dir_path), "%s/lib", tcc_dir);
         lib.tcc_add_library_path(s, lib_dir_path);
+
+        /* Debug: write cbuf to temp file for inspection */
+        {
+            FILE* dbg = fopen("debug_tcc_input.c", "wb");
+            if (dbg) { fwrite(cbuf.data, 1, cbuf.len, dbg); fclose(dbg); }
+        }
 
         int tcc_rc = lib.tcc_compile_string(s, cbuf.data);
         sb_free(&cbuf);

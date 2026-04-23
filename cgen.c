@@ -1438,6 +1438,18 @@ void cgen_buf(Node* prog, SymTable* st, StrBuf* sb) {
         "#include <stdint.h>\n"
         "#include <stdbool.h>\n"
         "#include <stddef.h>\n"
+        "typedef int8_t   i8;\n"
+        "typedef int16_t  i16;\n"
+        "typedef int32_t  i32;\n"
+        "typedef int64_t  i64;\n"
+        "typedef uint8_t  u8;\n"
+        "typedef uint16_t u16;\n"
+        "typedef uint32_t u32;\n"
+        "typedef uint64_t u64;\n"
+        "typedef float    f32;\n"
+        "typedef double   f64;\n"
+        "typedef intptr_t isize;\n"
+        "typedef uintptr_t usize;\n"
         "\n");
 
     for (int i = 0; i < st->nexterns; i++) {
