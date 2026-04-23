@@ -50,6 +50,83 @@ Sharp 不保证：
 | 泛型（monomorphize） | C 只能靠宏模拟 |
 ---
 
+## 类型系统
+
+Sharp 使用独立的类型名，与 C 语言的类型名不同。所有 Sharp 类型在代码生成时会被映射为对应的 C 标准类型。
+
+### 整型类型
+
+| Sharp 类型 | C 翻译结果 | 说明 |
+|-----------|-----------|------|
+| `i8` | `int8_t` | 8 位有符号整数 |
+| `i16` | `int16_t` | 16 位有符号整数 |
+| `i32` | `int32_t` | 32 位有符号整数 |
+| `i64` | `int64_t` | 64 位有符号整数 |
+| `u8` | `uint8_t` | 8 位无符号整数 |
+| `u16` | `uint16_t` | 16 位无符号整数 |
+| `u32` | `uint32_t` | 32 位无符号整数 |
+| `u64` | `uint64_t` | 64 位无符号整数 |
+
+### 浮点类型
+
+| Sharp 类型 | C 翻译结果 | 说明 |
+|-----------|-----------|------|
+| `f32` | `float` | 32 位浮点数 |
+| `f64` | `double` | 64 位浮点数 |
+
+### 指针尺寸类型
+
+| Sharp 类型 | C 翻译结果 | 说明 |
+|-----------|-----------|------|
+| `isize` | `intptr_t` | 有符号指针尺寸整数 |
+| `usize` | `uintptr_t` | 无符号指针尺寸整数 |
+
+### 其他类型
+
+| Sharp 类型 | C 翻译结果 | 说明 |
+|-----------|-----------|------|
+| `bool` | `bool` | 布尔类型（`#include <stdbool.h>`） |
+| `void` | `void` | 空类型 |
+
+### 生成的 C 头文件
+
+编译器在输出的 C 文件头部自动生成 typedef，使 Sharp 类型名在 C 中可用：
+
+```c
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+typedef int8_t   i8;
+typedef int16_t  i16;
+typedef int32_t  i32;
+typedef int64_t  i64;
+typedef uint8_t  u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef float    f32;
+typedef double   f64;
+typedef intptr_t isize;
+typedef uintptr_t usize;
+```
+
+### `const` 类型修饰符
+
+Sharp 是 C 语言的超集，支持 `const` 类型修饰符：
+
+```sharp
+extern i32 puts(const u8* s);
+```
+
+**当前状态（v0.4）：** `const` 关键字在词法分析阶段被识别，在语法分析阶段被跳过（忽略），不做语义检查。代码生成时不保留 `const` 修饰符。这是一个临时方案，后续版本将完整支持 const 正确性检查。
+
+**支持的位置：**
+- `const T*` — 指向 const 数据的指针
+- `T* const` — const 指针（指向可变数据）
+- `const T* const` — const 指针指向 const 数据
+
+---
+
 ## 预处理器 (Preprocessor)
 
 Sharp 内置一个完整的 C11 预处理器（`cpp/` 模块），在词法分析之前运行。

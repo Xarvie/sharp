@@ -237,12 +237,18 @@ struct Type {
      * and the name holds the parameter identifier (e.g. "T"). */
     Type**        targs;
     int           ntargs;
+    /* Const qualifier — applies to the type itself, not transitively
+     * into the base. For `const u8*`, the TY_PTR has is_const=false
+     * and its base (TY_U8) has is_const=true. For `u8* const`, the
+     * TY_PTR itself has is_const=true. */
+    bool          is_const;
 };
 
 Type* type_prim  (Arena** a, TypeKind k);
 Type* type_ptr   (Arena** a, Type* base);
 Type* type_named (Arena** a, const char* name);  /* name must be arena-owned and NUL-terminated */
 Type* type_named_generic(Arena** a, const char* name, Type** targs, int ntargs); /* phase 4 */
+Type* type_const (Arena** a, Type* base);        /* const-qualified type */
 
 bool  type_is_primitive (TypeKind k);
 bool  type_is_pointerlike(Type* t);   /* TY_PTR only */

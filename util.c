@@ -292,6 +292,7 @@ Type* type_ptr (Arena** a, Type* base)                       { (void)a; return t
 Type* type_named(Arena** a, const char* name)                { (void)a; return ty_named(name); }
 Type* type_named_generic(Arena** a, const char* name,
                          Type** targs, int ntargs)           { (void)a; return ty_generic(name, targs, ntargs); }
+Type* type_const(Arena** a, Type* base)                      { (void)a; return ty_const(base); }
 
 bool type_is_primitive(TypeKind k) {
     return (k >= TY_VOID && k <= TY_USIZE);

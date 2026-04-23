@@ -41,6 +41,7 @@ Type* ty_prim   (TypeKind kind);
 Type* ty_ptr    (Type* base);
 Type* ty_named  (const char* name);
 Type* ty_generic(const char* name, Type** targs, int ntargs);
+Type* ty_const  (Type* base);   /* const-qualified type */
 
 /* ===================================================================== *
  *   Queries
@@ -51,6 +52,7 @@ Type*        ty_base  (const Type* t);     /* NULL for non-ptr/ref */
 const char*  ty_name  (const Type* t);     /* NULL for primitives */
 int          ty_ntargs(const Type* t);
 Type*        ty_targ  (const Type* t, int i);
+bool         ty_is_const(const Type* t);   /* true if const-qualified */
 
 /* ===================================================================== *
  *   Comparison, hashing

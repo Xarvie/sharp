@@ -2,38 +2,49 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdio.h>
+typedef int8_t   i8;
+typedef int16_t  i16;
+typedef int32_t  i32;
+typedef int64_t  i64;
+typedef uint8_t  u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef float    f32;
+typedef double   f64;
+typedef intptr_t isize;
+typedef uintptr_t usize;
 
 typedef struct Point Point;
 
-static int factorial(int n);
-static int fib(int n);
-static int sum_to(int n);
-static int count_even(int n);
-int main(void);
+static i32 factorial(i32 n);
+static i32 fib(i32 n);
+static i32 sum_to(i32 n);
+static i32 count_even(i32 n);
+i32 main(void);
 
 struct Point {
-    int x;
-    int y;
+    i32 x;
+    i32 y;
 };
 
-static int factorial(int n) {
+static i32 factorial(i32 n) {
     if ((n <= 1)) {
         return 1;
     }
     return (n * factorial((n - 1)));
 }
 
-static int fib(int n) {
+static i32 fib(i32 n) {
     if ((n < 2)) {
         return n;
     }
     return (fib((n - 1)) + fib((n - 2)));
 }
 
-static int sum_to(int n) {
-    int total = 0;
-    int i = 1;
+static i32 sum_to(i32 n) {
+    i32 total = 0;
+    i32 i = 1;
     while ((i <= n))
     {
         (total = (total + i));
@@ -42,10 +53,10 @@ static int sum_to(int n) {
     return total;
 }
 
-static int count_even(int n) {
-    int c = 0;
+static i32 count_even(i32 n) {
+    i32 c = 0;
     {
-        int i = 0;
+        i32 i = 0;
         for (; (i < n); (i = (i + 1)))
         {
             if (((i % 2) == 0)) {
@@ -56,12 +67,12 @@ static int count_even(int n) {
     return c;
 }
 
-int main(void) {
-    int a = factorial(5);
-    int b = fib(8);
-    int c = sum_to(10);
-    int d = count_even(10);
-    int result = (((a - b) - c) - d);
+i32 main(void) {
+    i32 a = factorial(5);
+    i32 b = fib(8);
+    i32 c = sum_to(10);
+    i32 d = count_even(10);
+    i32 result = (((a - b) - c) - d);
     return result;
 }
 

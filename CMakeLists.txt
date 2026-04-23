@@ -22,7 +22,12 @@ add_compile_options(
     -Wno-unused-parameter
     -Wno-unused-function
     -Wno-switch
+    -wd4028
 )
+# Disable Runtime Checks (/RTC1) which conflicts with /O2 in MSVC
+if(MSVC)
+    add_compile_options(-RTC1-)
+endif()
 
 # Source files — compiler
 set(SOURCES

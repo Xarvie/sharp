@@ -120,7 +120,8 @@ static const char* intern_name_z(const char* s) {
  * ===================================================================== */
 
 static uint64_t type_shape_hash(TypeKind k, Type* base,
-                                const char* name, Type** targs, int ntargs) {
+                                const char* name, Type** targs, int ntargs,
+                                bool is_const) {
     uint64_t h = fnv_init();
     h = fnv_mix(h, (uint64_t)k);
     if (base) h = fnv_mix(h, (uint64_t)(uintptr_t)base);
@@ -128,17 +129,20 @@ static uint64_t type_shape_hash(TypeKind k, Type* base,
     h = fnv_mix(h, (uint64_t)ntargs);
     for (int i = 0; i < ntargs; i++)
         h = fnv_mix(h, (uint64_t)(uintptr_t)targs[i]);
+    h = fnv_mix(h, (uint64_t)(is_const ? 1 : 0));
     return h;
 }
 
 static bool type_shape_eq(const Type* t, TypeKind k, Type* base,
-                          const char* name, Type** targs, int ntargs) {
+                          const char* name, Type** targs, int ntargs,
+                          bool is_const) {
     if (t->kind != k)            return false;
     if (t->base != base)         return false;
     if (t->name != name)         return false;     /* interned → ptr eq */
     if (t->ntargs != ntargs)     return false;
     for (int i = 0; i < ntargs; i++)
         if (t->targs[i] != targs[i]) return false;
+    if (t->is_const != is_const) return false;
     return true;
 }
 
@@ -159,14 +163,15 @@ static void table_grow(void) {
 
 static Type* intern_lookup_or_insert(uint64_t hash, TypeKind k, Type* base,
                                      const char* name,
-                                     Type** targs, int ntargs) {
+                                     Type** targs, int ntargs,
+                                     bool is_const) {
     if (!s_table_cap || s_table_len * 2 >= s_table_cap) table_grow();
 
     size_t mask = s_table_cap - 1;
     size_t slot = (size_t)(hash & mask);
     while (s_table[slot].type) {
         if (s_table[slot].hash == hash &&
-            type_shape_eq(s_table[slot].type, k, base, name, targs, ntargs))
+            type_shape_eq(s_table[slot].type, k, base, name, targs, ntargs, is_const))
             return s_table[slot].type;
         slot = (slot + 1) & mask;
     }
@@ -174,10 +179,11 @@ static Type* intern_lookup_or_insert(uint64_t hash, TypeKind k, Type* base,
     /* Insert. */
     Type* t = (Type*)arena_alloc(&s_arena, sizeof(Type));
     memset(t, 0, sizeof(*t));
-    t->kind   = k;
-    t->base   = base;
-    t->name   = name;
-    t->ntargs = ntargs;
+    t->kind      = k;
+    t->base      = base;
+    t->name      = name;
+    t->ntargs    = ntargs;
+    t->is_const  = is_const;
     if (ntargs > 0) {
         t->targs = (Type**)arena_alloc(&s_arena, (size_t)ntargs * sizeof(Type*));
         memcpy(t->targs, targs, (size_t)ntargs * sizeof(Type*));
@@ -233,15 +239,15 @@ Type* ty_prim(TypeKind k) {
 
 Type* ty_ptr(Type* base) {
     if (!s_arena) ty_init();
-    uint64_t h = type_shape_hash(TY_PTR, base, NULL, NULL, 0);
-    return intern_lookup_or_insert(h, TY_PTR, base, NULL, NULL, 0);
+    uint64_t h = type_shape_hash(TY_PTR, base, NULL, NULL, 0, false);
+    return intern_lookup_or_insert(h, TY_PTR, base, NULL, NULL, 0, false);
 }
 
 Type* ty_named(const char* name) {
     if (!s_arena) ty_init();
     const char* n = intern_name_z(name);
-    uint64_t h = type_shape_hash(TY_NAMED, NULL, n, NULL, 0);
-    return intern_lookup_or_insert(h, TY_NAMED, NULL, n, NULL, 0);
+    uint64_t h = type_shape_hash(TY_NAMED, NULL, n, NULL, 0, false);
+    return intern_lookup_or_insert(h, TY_NAMED, NULL, n, NULL, 0, false);
 }
 
 Type* ty_generic(const char* name, Type** targs, int ntargs) {
@@ -249,8 +255,27 @@ Type* ty_generic(const char* name, Type** targs, int ntargs) {
     if (ntargs == 0)
         return ty_named(name);
     const char* n = intern_name_z(name);
-    uint64_t h = type_shape_hash(TY_NAMED, NULL, n, targs, ntargs);
-    return intern_lookup_or_insert(h, TY_NAMED, NULL, n, targs, ntargs);
+    uint64_t h = type_shape_hash(TY_NAMED, NULL, n, targs, ntargs, false);
+    return intern_lookup_or_insert(h, TY_NAMED, NULL, n, targs, ntargs, false);
+}
+
+/* ===================================================================== *
+ *   Const qualifier
+ * ===================================================================== */
+
+Type* ty_const(Type* base) {
+    if (!s_arena) ty_init();
+    if (!base) return NULL;
+    if (base->is_const) return base;   /* already const, return same ptr */
+
+    uint64_t h = type_shape_hash(base->kind, base->base, base->name,
+                                 base->targs, base->ntargs, true);
+    return intern_lookup_or_insert(h, base->kind, base->base, base->name,
+                                   base->targs, base->ntargs, true);
+}
+
+bool ty_is_const(const Type* t) {
+    return t && t->is_const;
 }
 
 /* ===================================================================== *
@@ -326,13 +351,23 @@ Type* ty_subst(Type* t, const char** names, Type** repls, int n) {
     switch (t->kind) {
         case TY_PTR: {
             Type* b = ty_subst(t->base, names, repls, n);
-            return b == t->base ? t : ty_ptr(b);
+            Type* result = (b == t->base) ? t : ty_ptr(b);
+            /* Preserve is_const if we created a new pointer. */
+            if (t->is_const && result != t)
+                result = ty_const(result);
+            return result;
         }
         case TY_NAMED: {
             /* A bare named type with no targs may itself be a type-parameter. */
             if (t->ntargs == 0 && t->name) {
                 for (int i = 0; i < n; i++)
-                    if (strcmp(t->name, names[i]) == 0) return repls[i];
+                    if (strcmp(t->name, names[i]) == 0) {
+                        Type* r = repls[i];
+                        /* Preserve is_const on the original type. */
+                        if (t->is_const && r && !r->is_const)
+                            r = ty_const(r);
+                        return r;
+                    }
                 return t;
             }
             if (t->ntargs == 0) return t;
@@ -346,6 +381,8 @@ Type* ty_subst(Type* t, const char** names, Type** repls, int n) {
                 if (nta[i] != t->targs[i]) changed = true;
             }
             Type* out = changed ? ty_generic(t->name, nta, t->ntargs) : t;
+            if (t->is_const && out != t)
+                out = ty_const(out);
             if (nta != stack_targs) free(nta);
             return out;
         }
@@ -365,6 +402,18 @@ bool ty_assignable(const Type* to, const Type* from) {
     /* NULL literal has type void* — assignable to any pointer. */
     if (from->kind == TY_PTR && from->base && from->base->kind == TY_VOID) {
         if (to->kind == TY_PTR) return true;
+    }
+
+    /* Const discard check: you cannot assign const T* to T*. */
+    if (to->kind == TY_PTR && from->kind == TY_PTR) {
+        /* Pointee: const T* → T* is not allowed (discard const). */
+        if (from->base && to->base) {
+            if (from->base->is_const && !to->base->is_const) {
+                return false;
+            }
+        }
+        /* If both pointees are compatible (same kind), allow T* → const T*. */
+        if (ty_eq(from->base, to->base)) return true;
     }
 
     /* Numeric ↔ numeric (C's usual arithmetic conversions). */
@@ -397,23 +446,69 @@ static RenderCacheEntry* cache_find(const Type* t, bool insert_if_missing) {
 static void render_into(StrBuf* sb, const Type* t) {
     if (!t) { sb_puts(sb, "<unknown>"); return; }
     switch (t->kind) {
-        case TY_VOID:  sb_puts(sb, "void");  return;
-        case TY_BOOL:  sb_puts(sb, "bool");  return;
-        case TY_I8:    sb_puts(sb, "i8");    return;
-        case TY_I16:   sb_puts(sb, "i16");   return;
-        case TY_I32:   sb_puts(sb, "i32");   return;
-        case TY_I64:   sb_puts(sb, "i64");   return;
-        case TY_U8:    sb_puts(sb, "u8");    return;
-        case TY_U16:   sb_puts(sb, "u16");   return;
-        case TY_U32:   sb_puts(sb, "u32");   return;
-        case TY_U64:   sb_puts(sb, "u64");   return;
-        case TY_F32:   sb_puts(sb, "f32");   return;
-        case TY_F64:   sb_puts(sb, "f64");   return;
-        case TY_ISIZE: sb_puts(sb, "isize"); return;
-        case TY_USIZE: sb_puts(sb, "usize"); return;
+        case TY_VOID:
+            if (t->is_const) sb_puts(sb, "const void");
+            else             sb_puts(sb, "void");
+            return;
+        case TY_BOOL:
+            if (t->is_const) sb_puts(sb, "const bool");
+            else             sb_puts(sb, "bool");
+            return;
+        case TY_I8:
+            if (t->is_const) sb_puts(sb, "const i8");
+            else             sb_puts(sb, "i8");
+            return;
+        case TY_I16:
+            if (t->is_const) sb_puts(sb, "const i16");
+            else             sb_puts(sb, "i16");
+            return;
+        case TY_I32:
+            if (t->is_const) sb_puts(sb, "const i32");
+            else             sb_puts(sb, "i32");
+            return;
+        case TY_I64:
+            if (t->is_const) sb_puts(sb, "const i64");
+            else             sb_puts(sb, "i64");
+            return;
+        case TY_U8:
+            if (t->is_const) sb_puts(sb, "const u8");
+            else             sb_puts(sb, "u8");
+            return;
+        case TY_U16:
+            if (t->is_const) sb_puts(sb, "const u16");
+            else             sb_puts(sb, "u16");
+            return;
+        case TY_U32:
+            if (t->is_const) sb_puts(sb, "const u32");
+            else             sb_puts(sb, "u32");
+            return;
+        case TY_U64:
+            if (t->is_const) sb_puts(sb, "const u64");
+            else             sb_puts(sb, "u64");
+            return;
+        case TY_F32:
+            if (t->is_const) sb_puts(sb, "const f32");
+            else             sb_puts(sb, "f32");
+            return;
+        case TY_F64:
+            if (t->is_const) sb_puts(sb, "const f64");
+            else             sb_puts(sb, "f64");
+            return;
+        case TY_ISIZE:
+            if (t->is_const) sb_puts(sb, "const isize");
+            else             sb_puts(sb, "isize");
+            return;
+        case TY_USIZE:
+            if (t->is_const) sb_puts(sb, "const usize");
+            else             sb_puts(sb, "usize");
+            return;
         case TY_PTR:
-            render_into(sb, t->base); sb_putc(sb, '*'); return;
+            render_into(sb, t->base);
+            sb_putc(sb, '*');
+            if (t->is_const) sb_puts(sb, " const");
+            return;
         case TY_NAMED:
+            if (t->is_const) sb_puts(sb, "const ");
             sb_puts(sb, t->name ? t->name : "<anon>");
             if (t->ntargs > 0) {
                 sb_putc(sb, '<');
@@ -429,23 +524,28 @@ static void render_into(StrBuf* sb, const Type* t) {
 
 static void mangle_into(StrBuf* sb, const Type* t) {
     if (!t) { sb_puts(sb, "Q"); return; }
+    const char* cp = t->is_const ? "c" : "";
     switch (t->kind) {
-        case TY_VOID:  sb_puts(sb, "void");   return;
-        case TY_BOOL:  sb_puts(sb, "bool");   return;
-        case TY_I8:    sb_puts(sb, "i8");     return;
-        case TY_I16:   sb_puts(sb, "i16");    return;
-        case TY_I32:   sb_puts(sb, "i32");    return;
-        case TY_I64:   sb_puts(sb, "i64");    return;
-        case TY_U8:    sb_puts(sb, "u8");     return;
-        case TY_U16:   sb_puts(sb, "u16");    return;
-        case TY_U32:   sb_puts(sb, "u32");    return;
-        case TY_U64:   sb_puts(sb, "u64");   return;
-        case TY_F32:   sb_puts(sb, "f32");   return;
-        case TY_F64:   sb_puts(sb, "f64");   return;
-        case TY_ISIZE: sb_puts(sb, "isize"); return;
-        case TY_USIZE: sb_puts(sb, "usize"); return;
-        case TY_PTR:   sb_puts(sb, "p_"); mangle_into(sb, t->base); return;
+        case TY_VOID:  sb_puts(sb, cp); sb_puts(sb, "void");   return;
+        case TY_BOOL:  sb_puts(sb, cp); sb_puts(sb, "bool");   return;
+        case TY_I8:    sb_puts(sb, cp); sb_puts(sb, "i8");     return;
+        case TY_I16:   sb_puts(sb, cp); sb_puts(sb, "i16");    return;
+        case TY_I32:   sb_puts(sb, cp); sb_puts(sb, "i32");    return;
+        case TY_I64:   sb_puts(sb, cp); sb_puts(sb, "i64");    return;
+        case TY_U8:    sb_puts(sb, cp); sb_puts(sb, "u8");     return;
+        case TY_U16:   sb_puts(sb, cp); sb_puts(sb, "u16");    return;
+        case TY_U32:   sb_puts(sb, cp); sb_puts(sb, "u32");    return;
+        case TY_U64:   sb_puts(sb, cp); sb_puts(sb, "u64");    return;
+        case TY_F32:   sb_puts(sb, cp); sb_puts(sb, "f32");    return;
+        case TY_F64:   sb_puts(sb, cp); sb_puts(sb, "f64");    return;
+        case TY_ISIZE: sb_puts(sb, cp); sb_puts(sb, "isize");  return;
+        case TY_USIZE: sb_puts(sb, cp); sb_puts(sb, "usize");  return;
+        case TY_PTR:
+            if (t->is_const) { sb_puts(sb, "cp_"); mangle_into(sb, t->base); }
+            else               { sb_puts(sb, "p_");  mangle_into(sb, t->base); }
+            return;
         case TY_NAMED:
+            if (t->is_const) sb_puts(sb, "c");
             sb_puts(sb, t->name ? t->name : "Q");
             for (int i = 0; i < t->ntargs; i++) {
                 sb_putc(sb, '_');

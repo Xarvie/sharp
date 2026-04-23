@@ -93,6 +93,73 @@ int main(void) {
                         ty_ptr(ty_prim(TY_VOID))),
           "T* ← void* (NULL literal)");
 
+    /* ─────────────────────────── const ──────────────────────────────── */
+    /* const basic: interned identity */
+    Type* ci32_a = ty_const(ty_prim(TY_I32));
+    Type* ci32_b = ty_const(ty_prim(TY_I32));
+    CHECK(ci32_a == ci32_b,                 "const i32 interned");
+    CHECK(ci32_a != ty_prim(TY_I32),        "const i32 ≠ i32");
+    CHECK(ty_is_const(ci32_a),              "const i32 is const");
+    CHECK(!ty_is_const(ty_prim(TY_I32)),    "i32 is not const");
+
+    /* const + pointer: const u8* */
+    Type* cu8 = ty_const(ty_prim(TY_U8));
+    Type* pcu8_a = ty_ptr(cu8);
+    Type* pcu8_b = ty_ptr(ty_const(ty_prim(TY_U8)));
+    CHECK(pcu8_a == pcu8_b,                 "const u8* interned");
+    CHECK(ty_base(pcu8_a) == cu8,           "base of const u8* is const u8");
+    CHECK(ty_is_const(ty_base(pcu8_a)),     "pointee is const");
+
+    /* pointer + const: u8* const */
+    Type* pu8 = ty_ptr(ty_prim(TY_U8));
+    Type* cpu8_a = ty_const(pu8);
+    Type* cpu8_b = ty_const(ty_ptr(ty_prim(TY_U8)));
+    CHECK(cpu8_a == cpu8_b,                 "u8* const interned");
+    CHECK(ty_is_const(cpu8_a),              "u8* const is const");
+    CHECK(!ty_is_const(ty_base(cpu8_a)),    "base of u8* const is not const");
+
+    /* double const: const u8* const */
+    Type* cpc = ty_const(ty_ptr(ty_const(ty_prim(TY_U8))));
+    CHECK(ty_is_const(cpc),                 "outer (ptr itself) is const");
+    CHECK(ty_is_const(ty_base(cpc)),        "inner (pointee) is const");
+
+    /* const + named */
+    Type* cpoint_a = ty_const(ty_named("Point"));
+    Type* cpoint_b = ty_const(ty_named("Point"));
+    CHECK(cpoint_a == cpoint_b,             "const Point interned");
+    CHECK(cpoint_a != ty_named("Point"),    "const Point ≠ Point");
+
+    /* const + generic */
+    Type* cspan_targs[] = { ty_const(ty_prim(TY_I32)) };
+    Type* cspan_a = ty_generic("Span", cspan_targs, 1);
+    Type* cspan_b = ty_generic("Span", cspan_targs, 1);
+    CHECK(cspan_a == cspan_b,               "Span<const i32> interned");
+
+    /* render const types */
+    CHECK(strcmp(ty_render(ty_const(ty_prim(TY_I32))), "const i32") == 0,
+          "render const i32");
+    CHECK(strcmp(ty_render(pcu8_a), "const u8*") == 0,
+          "render const u8*");
+    CHECK(strcmp(ty_render(cpu8_a), "u8* const") == 0,
+          "render u8* const");
+
+    /* mangle const types */
+    CHECK(strcmp(ty_mangle(ty_const(ty_prim(TY_I32))), "ci32") == 0,
+          "mangle const i32 → ci32");
+    CHECK(strcmp(ty_mangle(pcu8_a), "p_cu8") == 0,
+          "mangle const u8* → p_cu8");
+    CHECK(strcmp(ty_mangle(cpu8_a), "cp_u8") == 0,
+          "mangle u8* const → cp_u8");
+
+    /* substitution preserves const */
+    Type* tpl_targs2[] = { ty_named("T") };
+    Type* span_T2      = ty_generic("Span", tpl_targs2, 1);
+    const char* names_T2[] = { "T" };
+    Type*       repls_ci32[] = { ty_const(ty_prim(TY_I32)) };
+    Type* subst_const = ty_subst(span_T2, names_T2, repls_ci32, 1);
+    CHECK(subst_const == ty_generic("Span", cspan_targs, 1),
+          "subst T→const i32 yields Span<const i32>");
+
     /* ─────────────────────────── render ─────────────────────────────── */
     CHECK(strcmp(ty_render(ty_prim(TY_I32)), "i32") == 0,
           "render i32");

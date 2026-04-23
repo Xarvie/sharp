@@ -157,13 +157,17 @@ static TypeKind parse_c_type(P* p) {
 static bool is_type_start(TokKind k) {
     return is_prim_tk(k) || k == TK_IDENT ||
            k == TK_SHORT || k == TK_LONG || k == TK_UNSIGNED || k == TK_SIGNED ||
-           k == TK_INT_TYPE || k == TK_FLOAT_TYPE || k == TK_DOUBLE_TYPE;
+           k == TK_INT_TYPE || k == TK_FLOAT_TYPE || k == TK_DOUBLE_TYPE ||
+           k == TK_CONST;
 }
 
 static Type* parse_type(P* p) {
-    Tok t = lex_peek(p->lex);
+    /* Leading `const` — applies to the innermost (base) type. */
+    bool leading_const = false;
+    if (accept(p, TK_CONST)) leading_const = true;
 
     Type* base;
+    Tok t = lex_peek(p->lex);
     if (is_c_type_mod(t.kind)) {
         /* C-style type with modifiers: unsigned int, long long, etc. */
         base = type_prim(p->arena, parse_c_type(p));
@@ -246,18 +250,23 @@ static Type* parse_type(P* p) {
         char nm[256];
         int n = snprintf(nm, sizeof(nm), "union %.*s", tag.len, tag.start);
         base = type_named(p->arena, arena_strndup(p->arena, nm, n));
-    } else if (t.kind == TK_CONST) {
-        /* `const Type` — just ignore the const qualifier for now
-         * (C code gen doesn't need it). */
-        lex_next(p->lex);
-        return parse_type(p);
     } else {
         errtok(p, &t, "expected type");
         return type_prim(p->arena, TY_VOID);
     }
 
-    /* pointer suffix: 'T*' ('*' repeated) */
-    while (accept(p, TK_STAR)) base = type_ptr(p->arena, base);
+    /* Apply leading const to the base type. */
+    if (leading_const) base = type_const(p->arena, base);
+
+    /* pointer suffix: 'T*' [const] ('*' [const] repeated)
+     * Each `*` creates a new pointer type; an optional trailing `const`
+     * applies to that pointer itself (e.g. `u8* const`). */
+    while (accept(p, TK_STAR)) {
+        base = type_ptr(p->arena, base);
+        if (accept(p, TK_CONST)) {
+            base = type_const(p->arena, base);
+        }
+    }
 
     return base;
 }
@@ -716,7 +725,7 @@ static bool looks_like_decl(P* p) {
     Tok t0 = lex_peek(p->lex);
     Tok t1 = lex_peek2(p->lex);
     if (is_type_start(t0.kind)) {
-        return t1.kind == TK_IDENT || t1.kind == TK_STAR;
+        return t1.kind == TK_IDENT || t1.kind == TK_STAR || is_type_start(t1.kind);
     }
     if (t0.kind == TK_IDENT) {
         if (t1.kind == TK_IDENT) return true;

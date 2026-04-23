@@ -646,7 +646,7 @@ static Type* tc_expr(TC* tc, Node* e) {
         case ND_FLOAT: return tc_ty(tc, TY_F64);
         case ND_BOOL:  return tc_ty(tc, TY_BOOL);
         case ND_CHAR:  return tc_ty(tc, TY_U8);
-        case ND_STR:   return ty_ptr(tc_ty(tc, TY_U8));
+        case ND_STR:   return ty_ptr(ty_const(ty_prim(TY_U8)));
         case ND_NULL:  return ty_ptr(tc_ty(tc, TY_VOID));
 
         case ND_IDENT: {
