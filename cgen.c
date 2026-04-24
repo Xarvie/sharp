@@ -1138,6 +1138,29 @@ static void emit_struct_fwd(G* g, Node* s) {
     sb_printf(&g->out, "typedef struct %s %s;\n", s->name, s->name);
 }
 
+static void emit_union_decl(G* g, Node* u) {
+    sb_printf(&g->out, "typedef union %s %s;\n", u->name, u->name);
+}
+
+static void emit_union_body(G* g, Node* u) {
+    sb_printf(&g->out, "typedef union %s {\n", u->name);
+    for (int i = 0; i < u->nfields; i++) {
+        Node* f = u->fields[i];
+        sb_puts(&g->out, "    ");
+        emit_type(g, f->declared_type);
+        sb_printf(&g->out, " %s;\n", f->name);
+    }
+    sb_printf(&g->out, "} %s;\n\n", u->name);
+}
+
+static void emit_struct_fwd_decl(G* g, Node* s) {
+    sb_printf(&g->out, "typedef struct %s %s;\n", s->name, s->name);
+}
+
+static void emit_union_fwd_decl(G* g, Node* u) {
+    sb_printf(&g->out, "typedef union %s %s;\n", u->name, u->name);
+}
+
 static void emit_struct_body(G* g, Node* s) {
     sb_printf(&g->out, "struct %s {\n", s->name);
     if (s->nfields == 0) {
@@ -1330,11 +1353,21 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
     if (st->nexterns > 0) sb_putc(&g->out, '\n');
 
     /* ------- Forward declarations ------- */
-    /* Non-generic structs. */
+    /* Non-generic structs and forward declarations. */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
         if (d->kind == ND_STRUCT_DECL && !is_generic_template(d))
             emit_struct_fwd(g, d);
+        if (d->kind == ND_STRUCT_FWD)
+            emit_struct_fwd_decl(g, d);
+    }
+    /* Union forward declarations and bodies. */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_UNION_DECL)
+            emit_union_decl(g, d);
+        if (d->kind == ND_UNION_FWD)
+            emit_union_fwd_decl(g, d);
     }
     /* Specialised structs: one per SymMono. */
     for (int i = 0; i < st->nmonos; i++) {
@@ -1374,6 +1407,12 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
         Node* d = prog->children[i];
         if (d->kind == ND_STRUCT_DECL && !is_generic_template(d))
             emit_struct_body(g, d);
+    }
+    /* Union bodies. */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_UNION_DECL)
+            emit_union_body(g, d);
     }
     /* Specialised struct bodies. */
     for (int i = 0; i < st->nmonos; i++) {

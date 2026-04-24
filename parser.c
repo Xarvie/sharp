@@ -209,7 +209,8 @@ static bool is_type_start(TokKind k) {
            k == TK_INT_TYPE || k == TK_FLOAT_TYPE || k == TK_DOUBLE_TYPE ||
            k == TK___INT64 || k == TK_WCHAR_T ||
            k == TK_CONST ||
-           k == TK___INLINE__ || k == TK___INLINE;
+           k == TK___INLINE__ || k == TK___INLINE ||
+           k == TK_STRUCT || k == TK_UNION;
 }
 
 static Type* parse_type(P* p) {
@@ -943,6 +944,15 @@ static Node* parse_struct(P* p) {
     /* Phase 4: optional `<T, U>` generic parameter list. */
     const char** tps = NULL;
     int ntps = parse_type_params(p, &tps);
+
+    /* Forward declaration: `struct Name;` — no body */
+    if (lex_peek(p->lex).kind == TK_SEMI) {
+        lex_next(p->lex); /* consume ';' */
+        Node* s = mk(p, ND_STRUCT_FWD, t.line);
+        s->name = arena_strndup(p->arena, id.start, id.len);
+        return s;
+    }
+
     expect(p, TK_LBRACE, "expected '{' in struct");
     NodeVec fields = {0};
     while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
@@ -956,6 +966,7 @@ static Node* parse_struct(P* p) {
         nv_push(&fields, f);
     }
     expect(p, TK_RBRACE, "expected '}' to close struct");
+    expect(p, TK_SEMI, "expected ';' after struct");
 
     Node* s = mk(p, ND_STRUCT_DECL, t.line);
     s->name = arena_strndup(p->arena, id.start, id.len);
@@ -963,6 +974,41 @@ static Node* parse_struct(P* p) {
     s->type_params  = tps;
     s->ntype_params = ntps;
     return s;
+}
+
+/* Parse a union declaration: `union Name { ... };` or `union Name;` (forward).
+ * Unlike structs, unions in Sharp are opaque C pass-through types. */
+static Node* parse_union(P* p) {
+    Tok t = lex_next(p->lex); /* 'union' */
+    Tok id = expect(p, TK_IDENT, "expected union name");
+
+    /* Forward declaration: `union Name;` */
+    if (lex_peek(p->lex).kind == TK_SEMI) {
+        lex_next(p->lex); /* consume ';' */
+        Node* u = mk(p, ND_UNION_FWD, t.line);
+        u->name = arena_strndup(p->arena, id.start, id.len);
+        return u;
+    }
+
+    expect(p, TK_LBRACE, "expected '{' in union");
+    NodeVec fields = {0};
+    while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
+        int line = lex_peek(p->lex).line;
+        Type* ty = parse_type(p);
+        Tok fid = expect(p, TK_IDENT, "expected field name");
+        expect(p, TK_SEMI, "expected ';' after field");
+        Node* f = mk(p, ND_FIELD, line);
+        f->declared_type = ty;
+        f->name = arena_strndup(p->arena, fid.start, fid.len);
+        nv_push(&fields, f);
+    }
+    expect(p, TK_RBRACE, "expected '}' to close union");
+    expect(p, TK_SEMI, "expected ';' after union");
+
+    Node* u = mk(p, ND_UNION_DECL, t.line);
+    u->name = arena_strndup(p->arena, id.start, id.len);
+    u->fields = nv_freeze(p, &fields, &u->nfields);
+    return u;
 }
 
 /* Map an operator-token kind to its canonical method name.
@@ -1183,6 +1229,8 @@ Node* parse_program(Lexer* lx, Arena** arena) {
         Tok t = lex_peek(p->lex);
         if (t.kind == TK_STRUCT) {
             nv_push(&decls, parse_struct(p));
+        } else if (t.kind == TK_UNION) {
+            nv_push(&decls, parse_union(p));
         } else if (t.kind == TK_IMPL) {
             nv_push(&decls, parse_impl(p));
         } else if (t.kind == TK_EXTERN) {
@@ -1273,14 +1321,75 @@ Node* parse_program(Lexer* lx, Arena** arena) {
             }
         } else if (t.kind == TK_TYPEDEF) {
             lex_next(p->lex); /* consume 'typedef' */
-            Type* base = parse_type(p);
-            Tok name_tok = expect(p, TK_IDENT, "expected typedef name");
-            const char* tname = arena_strndup(p->arena, name_tok.start, name_tok.len);
-            expect(p, TK_SEMI, "expected ';' after typedef");
-            Node* nd = mk(p, ND_TYPEDEF_DECL, t.line);
-            nd->declared_type = base;
-            nd->name = tname;
-            nv_push(&decls, nd);
+            int line = t.line;
+
+            /* C-style: `typedef struct { ... } Name;` or `typedef union { ... } Name;` */
+            if (lex_peek(p->lex).kind == TK_STRUCT || lex_peek(p->lex).kind == TK_UNION) {
+                bool is_union = (lex_peek(p->lex).kind == TK_UNION);
+                Tok t0 = lex_next(p->lex); /* consume 'struct'/'union' */
+
+                /* Anonymous: `typedef struct { ... } Name;` — generate a name */
+                if (lex_peek(p->lex).kind == TK_LBRACE) {
+                    /* Generate an internal name */
+                    static int anon_counter = 0;
+                    char anon_name[64];
+                    snprintf(anon_name, sizeof(anon_name), "__anon_%s_%d", is_union ? "union" : "struct", anon_counter++);
+
+                    expect(p, TK_LBRACE, is_union ? "expected '{' in union" : "expected '{' in struct");
+                    NodeVec fields = {0};
+                    while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
+                        int fline = lex_peek(p->lex).line;
+                        Type* ty = parse_type(p);
+                        Tok fid = expect(p, TK_IDENT, "expected field name");
+                        expect(p, TK_SEMI, "expected ';' after field");
+                        Node* f = mk(p, ND_FIELD, fline);
+                        f->declared_type = ty;
+                        f->name = arena_strndup(p->arena, fid.start, fid.len);
+                        nv_push(&fields, f);
+                    }
+                    expect(p, TK_RBRACE, is_union ? "expected '}' to close union" : "expected '}' to close struct");
+                    /* No ';' here — typedef alias follows */
+
+                    const char* aname = arena_strndup(p->arena, anon_name, strlen(anon_name));
+                    Node* su = mk(p, is_union ? ND_UNION_DECL : ND_STRUCT_DECL, t0.line);
+                    su->name = aname;
+                    su->fields = nv_freeze(p, &fields, &su->nfields);
+
+                    Tok alias = expect(p, TK_IDENT, "expected typedef name after struct/union");
+                    expect(p, TK_SEMI, "expected ';' after typedef");
+
+                    Node* nd = mk(p, ND_TYPEDEF_DECL, line);
+                    nd->declared_type = type_named(p->arena, aname);
+                    nd->name = arena_strndup(p->arena, alias.start, alias.len);
+                    nv_push(&decls, nd);
+                    nv_push(&decls, su);
+                } else {
+                    /* Named: `typedef struct Tag Name;` — restore lexer and parse normally */
+                    lex_restore(p->lex, (LexerState){ .cur = t0.start, .line = t0.line, .col = t0.col, .peek0 = t0, .peek1 = lex_peek(p->lex) });
+                    /* Actually, simpler: just call parse_struct/parse_union then read the alias */
+                    lex_next(p->lex); /* re-consume struct/union */
+                    Node* su = is_union ? parse_union(p) : parse_struct(p);
+                    /* If there's no extra typedef alias (just `typedef struct Tag;`), skip */
+                    if (lex_peek(p->lex).kind == TK_IDENT) {
+                        Tok alias = lex_next(p->lex);
+                        expect(p, TK_SEMI, "expected ';' after typedef");
+                        Node* nd = mk(p, ND_TYPEDEF_DECL, line);
+                        nd->declared_type = type_named(p->arena, su->name);
+                        nd->name = arena_strndup(p->arena, alias.start, alias.len);
+                        nv_push(&decls, nd);
+                    }
+                    nv_push(&decls, su);
+                }
+            } else {
+                Type* base = parse_type(p);
+                Tok name_tok = expect(p, TK_IDENT, "expected typedef name");
+                const char* tname = arena_strndup(p->arena, name_tok.start, name_tok.len);
+                expect(p, TK_SEMI, "expected ';' after typedef");
+                Node* nd = mk(p, ND_TYPEDEF_DECL, line);
+                nd->declared_type = base;
+                nd->name = tname;
+                nv_push(&decls, nd);
+            }
         } else if (is_type_start(t.kind)) {
             /* Peek ahead to distinguish between:
              * - `Type name(params);` — C function declaration (extern, no body)

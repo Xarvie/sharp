@@ -16,7 +16,9 @@ typedef intptr_t isize;
 typedef uintptr_t usize;
 
 typedef struct Node Node;
+typedef struct Node Node;
 typedef struct __anon_struct_0 __anon_struct_0;
+typedef union Value Value;
 
 i32 main(void);
 
@@ -29,6 +31,12 @@ struct __anon_struct_0 {
     i32 x;
     i32 y;
 };
+
+typedef union Value {
+    i32 i;
+    f64 d;
+    char* s;
+} Value;
 
 i32 main(void) {
     union Value v;

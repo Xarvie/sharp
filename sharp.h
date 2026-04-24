@@ -269,6 +269,7 @@ typedef struct Node Node;
 typedef enum {
     /* top-level */
     ND_PROGRAM, ND_STRUCT_DECL, ND_FUNC_DECL, ND_IMPL, ND_FIELD, ND_PARAM,
+    ND_UNION_DECL, ND_STRUCT_FWD, ND_UNION_FWD,
 
     /* statements */
     ND_BLOCK, ND_VARDECL, ND_IF, ND_WHILE, ND_FOR,
