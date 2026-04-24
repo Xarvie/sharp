@@ -188,6 +188,9 @@ typedef enum {
     TK___DECLSPEC,
     TK_STATIC_ASSERT,
 
+    /* Calling conventions (TDD-2.1~2.4) */
+    TK___CDECL, TK___STDCALL, TK___FASTCALL, TK___UNALIGNED,
+
     /* punctuation */
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE, TK_LBRACKET, TK_RBRACKET,
     TK_COMMA, TK_SEMI, TK_COLON, TK_DCOLON, TK_DOT, TK_ELLIPSIS, TK_ARROW,
@@ -366,6 +369,10 @@ struct Node {
      * declaration is not parametric. */
     const char** type_params;
     int          ntype_params;
+
+    /* Calling convention modifier (e.g. "__cdecl", "__stdcall").
+     * Only used on ND_FUNC_DECL / ND_EXTERN_DECL / ND_VARDECL. */
+    const char*  cc;
 
     /* Raw text for pass-through constructs (e.g. _Static_assert) */
     const char*  raw_text;

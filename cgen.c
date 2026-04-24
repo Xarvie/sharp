@@ -1141,11 +1141,19 @@ static void emit_vardecl_inline(G* g, Node* s) {
         /* Array declaration with explicit size: emit as C `T name[size]` */
         Type* base = (dt && ty_kind(dt) == TY_PTR) ? ty_base(dt) : dt;
         emit_type(g, base);
+        if (s->cc) {
+            sb_putc(&g->out, ' ');
+            sb_puts(&g->out, s->cc);
+        }
         sb_printf(&g->out, " %s[", name);
         emit_expr(g, s->lhs);
         sb_putc(&g->out, ']');
     } else {
         emit_type(g, dt);
+        if (s->cc) {
+            sb_putc(&g->out, ' ');
+            sb_puts(&g->out, s->cc);
+        }
         sb_printf(&g->out, " %s", name);
     }
     if (init) {
@@ -1203,6 +1211,10 @@ static void emit_func_signature(G* g, Node* f) {
     bool is_main = f->parent_type == NULL && strcmp(f->name, "main") == 0;
     if (!is_main) sb_puts(&g->out, "static ");
     emit_type(g, f->ret_type);
+    if (f->cc) {
+        sb_putc(&g->out, ' ');
+        sb_puts(&g->out, f->cc);
+    }
     sb_putc(&g->out, ' ');
     if (f->parent_type) {
         /* Destructor sentinel name "~" is mangled to the C-valid suffix
@@ -1339,6 +1351,10 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
         SymExtern* e = &st->externs[i];
         sb_puts(&g->out, "extern ");
         emit_type(g, e->ret_type);
+        if (e->decl->cc) {
+            sb_putc(&g->out, ' ');
+            sb_puts(&g->out, e->decl->cc);
+        }
         sb_printf(&g->out, " %s(", e->name);
         if (e->decl->nparams == 0) {
             sb_puts(&g->out, "void");

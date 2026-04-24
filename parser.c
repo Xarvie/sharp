@@ -165,6 +165,34 @@ static TypeKind parse_c_type(P* p) {
     return TY_VOID; /* fallback */
 }
 
+/* Parse a C-style type specification and return the raw C spelling.
+ * This preserves the original C type keywords for pass-through. */
+static const char* parse_c_type_raw(P* p) {
+    StrBuf sb; sb_init(&sb);
+    bool first = true;
+    for (int i = 0; i < 5; i++) {
+        Tok t = lex_peek(p->lex);
+        if (t.kind == TK_UNSIGNED || t.kind == TK_SIGNED || t.kind == TK_SHORT ||
+            t.kind == TK_LONG || t.kind == TK_CHAR || t.kind == TK_INT_TYPE ||
+            t.kind == TK_FLOAT_TYPE || t.kind == TK_DOUBLE_TYPE || t.kind == TK___INT64) {
+            if (!first) sb_putc(&sb, ' ');
+            first = false;
+            sb_putn(&sb, t.start, t.len);
+            lex_next(p->lex);
+            if (t.kind == TK_LONG && lex_peek(p->lex).kind == TK_LONG) {
+                sb_putc(&sb, ' ');
+                sb_putn(&sb, lex_peek(p->lex).start, lex_peek(p->lex).len);
+                lex_next(p->lex);
+            }
+        } else {
+            break;
+        }
+    }
+    const char* s = arena_strndup(p->arena, sb.data, (int)sb.len);
+    sb_free(&sb);
+    return s;
+}
+
 /* Helper: consume `__declspec(...)` prefix if present.
  * Returns true if consumed. */
 static bool skip_declspec(P* p) {
@@ -212,7 +240,22 @@ static bool is_type_start(TokKind k) {
            k == TK_CONST || k == TK_EXTERN ||
            k == TK___INLINE__ || k == TK___INLINE ||
            k == TK___DECLSPEC ||
+           k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL || k == TK___UNALIGNED ||
            k == TK_STRUCT || k == TK_UNION;
+}
+
+/* Parse an optional calling-convention keyword.
+ * Returns the canonical string ("__cdecl", "__stdcall", "__fastcall",
+ * "__unaligned") or NULL if the next token is not a calling convention. */
+static const char* parse_calling_conv(P* p) {
+    Tok t = lex_peek(p->lex);
+    switch (t.kind) {
+        case TK___CDECL:     lex_next(p->lex); return "__cdecl";
+        case TK___STDCALL:   lex_next(p->lex); return "__stdcall";
+        case TK___FASTCALL:  lex_next(p->lex); return "__fastcall";
+        case TK___UNALIGNED: lex_next(p->lex); return "__unaligned";
+        default: return NULL;
+    }
 }
 
 static Type* parse_type(P* p) {
@@ -220,13 +263,16 @@ static Type* parse_type(P* p) {
     bool leading_const = false;
     if (accept(p, TK_CONST)) leading_const = true;
 
-    /* Skip C storage-class / inline / __declspec modifiers that are not type keywords. */
+    /* Skip C storage-class / inline / __declspec / calling-conv modifiers
+     * that are not type keywords. */
     for (;;) {
         TokKind k = lex_peek(p->lex).kind;
         if (k == TK___INLINE__ || k == TK___INLINE || k == TK_EXTERN) {
             lex_next(p->lex);
         } else if (k == TK___DECLSPEC) {
             skip_declspec(p);
+        } else if (k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL || k == TK___UNALIGNED) {
+            lex_next(p->lex);
         } else {
             break;
         }
@@ -241,8 +287,10 @@ static Type* parse_type(P* p) {
         lex_next(p->lex);
         base = type_named(p->arena, "wchar_t");
     } else if (is_c_type_mod(t.kind)) {
-        /* C-style type with modifiers: unsigned int, long long, etc. */
-        base = type_prim(p->arena, parse_c_type(p));
+        /* C-style type with modifiers: unsigned int, long long, etc.
+         * Pass through raw spelling for TDD-1.4 compatibility. */
+        const char* raw = parse_c_type_raw(p);
+        base = type_named(p->arena, raw);
     } else if (is_prim_tk(t.kind)) {
         lex_next(p->lex);
         base = type_prim(p->arena, prim_from_tk(t.kind));
@@ -797,7 +845,22 @@ static bool looks_like_decl(P* p) {
     Tok t0 = lex_peek(p->lex);
     Tok t1 = lex_peek2(p->lex);
     if (is_type_start(t0.kind)) {
-        return t1.kind == TK_IDENT || t1.kind == TK_STAR || t1.kind == TK_LT || is_type_start(t1.kind);
+        if (t1.kind == TK_IDENT || t1.kind == TK_STAR || t1.kind == TK_LT) return true;
+        /* Compound C type: "unsigned long", "long long", etc.
+         * Speculatively parse the type and verify an identifier follows. */
+        if (is_type_start(t1.kind) && t1.kind != TK_IDENT) {
+            LexerState saved = lex_save(p->lex);
+            int saved_err    = g_error_count;
+            g_silent         = true;
+            Type* ty         = parse_type(p);
+            g_silent         = false;
+            bool ok = (g_error_count == saved_err && ty &&
+                       lex_peek(p->lex).kind == TK_IDENT);
+            lex_restore(p->lex, saved);
+            g_error_count    = saved_err;
+            return ok;
+        }
+        return false;
     }
     if (t0.kind == TK_IDENT) {
         if (t1.kind == TK_IDENT) return true;
@@ -824,6 +887,7 @@ static bool looks_like_decl(P* p) {
 
 static Node* parse_vardecl(P* p) {
     int line = lex_peek(p->lex).line;
+    const char* cc = parse_calling_conv(p);
     Type* base_ty = parse_type(p);
     /* Parse comma-separated variable declarations: `Type a = 1, b[5], c;` */
     NodeVec decls = {0};
@@ -847,6 +911,7 @@ static Node* parse_vardecl(P* p) {
         n->name = arena_strndup(p->arena, id.start, id.len);
         n->lhs  = dim;   /* array size expression, NULL for pointer-like arrays */
         n->rhs  = init;
+        n->cc   = cc;
         nv_push(&decls, n);
 
         if (!accept(p, TK_COMMA)) break;
@@ -1099,7 +1164,10 @@ static const char* parse_method_name(P* p, bool allow_operator) {
  */
 static Node* parse_func_common(P* p, const char* parent, bool is_static) {
     int line = lex_peek(p->lex).line;
+    const char* cc1 = parse_calling_conv(p);
     Type* ret = parse_type(p);
+    const char* cc2 = parse_calling_conv(p);
+    const char* cc = cc1 ? cc1 : cc2;
     const char* name = parse_method_name(p, parent != NULL);
     expect(p, TK_LPAREN, "expected '('");
 
@@ -1154,6 +1222,7 @@ static Node* parse_func_common(P* p, const char* parent, bool is_static) {
     f->body        = body;
     f->parent_type = parent;
     f->self_kind   = self_kind;
+    f->cc          = cc;
     return f;
 }
 
@@ -1372,7 +1441,10 @@ Node* parse_program(Lexer* lx, Arena** arena) {
             int saved_err = g_error_count;
             g_silent = true;
 
+            const char* cc = parse_calling_conv(p);
             Type* ret = parse_type(p);
+            const char* cc2 = parse_calling_conv(p);
+            if (!cc) cc = cc2;
             const char* fname = parse_method_name(p, false);
             bool has_paren = (lex_peek(p->lex).kind == TK_LPAREN);
 
@@ -1381,7 +1453,6 @@ Node* parse_program(Lexer* lx, Arena** arena) {
             if (has_paren && fname) {
                 /* Parse the parameter list */
                 lex_next(p->lex); /* consume '(' */
-                int param_line = lex_peek(p->lex).line;
                 NodeVec params = {0};
                 bool is_variadic = false;
                 if (lex_peek(p->lex).kind != TK_RPAREN) {
@@ -1420,6 +1491,7 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                         ext->name = fname;
                         ext->params = nv_freeze(p, &params, &ext->nparams);
                         ext->is_variadic = is_variadic;
+                        ext->cc = cc;
                         nv_push(&decls, ext);
                         g_error_count = saved_err;
                         continue;

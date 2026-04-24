@@ -2,24 +2,18 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
-typedef int8_t   i8;
-typedef int16_t  i16;
-typedef int32_t  i32;
-typedef int64_t  i64;
-typedef uint8_t  u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-typedef float    f32;
-typedef double   f64;
-typedef intptr_t isize;
-typedef uintptr_t usize;
 
 
-i32 main(void);
+int32_t main(void);
 
-i32 main(void) {
-    i32 x = 0;
-    return 0;
+int32_t main(void) {
+    int32_t sum = 0;
+    int32_t i = 0;
+    while ((i < 5))
+    {
+        (sum = (sum + i));
+        (i = (i + 1));
+    }
+    return sum;
 }
 

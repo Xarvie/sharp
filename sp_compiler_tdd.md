@@ -93,9 +93,9 @@
 | test_arith.sp | TDD-Expr-2 | 算术与比较运算 | ✅ |
 | test_bool.sp | TDD-Expr-4 | bool 字面量与逻辑运算 | ✅ |
 | test_array.sp | TDD-Expr-3 | 数组声明与索引 | ✅ |
-| test_generic.sp | TDD-Generic-1 | 泛型 struct + impl | ❌ |
+| test_generic.sp | TDD-Generic-1 | 泛型 struct + impl | ✅ |
 | test_types_all.sp | TDD-1.1~1.3 | SP 原生类型映射（i8~usize 等）| ✅ |
-| *(无测试文件)* | TDD-1.4 | 标准 C 类型原样透传 | ⬜ |
+| test_types_c_passthrough.sp | TDD-1.4 | 标准 C 类型原样透传 | ✅ |
 | *(无测试文件)* | TDD-2.1~2.4 | 调用约定关键字（__cdecl/__stdcall/__fastcall/__unaligned）| 📝 |
 | *(无测试文件)* | TDD-3.1~3.2 | __declspec 扩展（noreturn/dllimport）| 📝 |
 | *(无测试文件)* | §5 | MSVC 整数字面量后缀 `i8`/`i16`/`i32`/`i64` | ⬜ |
