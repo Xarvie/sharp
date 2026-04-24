@@ -182,6 +182,11 @@ typedef enum {
     TK_INT_TYPE, TK_FLOAT_TYPE, TK_DOUBLE_TYPE,
     TK___INT64, TK_WCHAR_T,
 
+    /* C declaration modifiers */
+    TK___INLINE__, TK___INLINE,
+    TK___ATTRIBUTE__,
+    TK___DECLSPEC,
+
     /* punctuation */
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE, TK_LBRACKET, TK_RBRACKET,
     TK_COMMA, TK_SEMI, TK_COLON, TK_DCOLON, TK_DOT, TK_ARROW,

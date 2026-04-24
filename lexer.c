@@ -37,6 +37,12 @@ static const Keyword kws[] = {
     /* C extensions */
     {"__int64",  7, TK___INT64},
     {"wchar_t",  7, TK_WCHAR_T},
+
+    /* C declaration modifiers */
+    {"__inline__",  10, TK___INLINE__},
+    {"__inline",    8, TK___INLINE},
+    {"__attribute__", 13, TK___ATTRIBUTE__},
+    {"__declspec",    10, TK___DECLSPEC},
 };
 static const int nkws = (int)(sizeof(kws) / sizeof(kws[0]));
 

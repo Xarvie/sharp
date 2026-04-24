@@ -164,18 +164,64 @@ static TypeKind parse_c_type(P* p) {
     return TY_VOID; /* fallback */
 }
 
+/* Helper: consume `__declspec(...)` prefix if present.
+ * Returns true if consumed. */
+static bool skip_declspec(P* p) {
+    if (!accept(p, TK___DECLSPEC)) return false;
+    expect(p, TK_LPAREN, "expected '(' after __declspec");
+    int depth = 1;
+    while (depth > 0) {
+        Tok t = lex_peek(p->lex);
+        if (t.kind == TK_EOF) break;
+        if (t.kind == TK_LPAREN) depth++;
+        else if (t.kind == TK_RPAREN) depth--;
+        lex_next(p->lex);
+    }
+    return true;
+}
+
+/* Helper: consume `__attribute__((...))` suffix if present.
+ * Handles nested parentheses correctly. Returns true if an attribute
+ * was consumed, false otherwise. */
+static bool skip_attribute(P* p) {
+    if (!accept(p, TK___ATTRIBUTE__)) return false;
+    /* Must be followed by `(( ... ))` */
+    expect(p, TK_LPAREN, "expected '(' after __attribute__");
+    expect(p, TK_LPAREN, "expected '((' after __attribute__");
+    /* Skip tokens until we find matching `))` */
+    int depth = 2;
+    while (depth > 0) {
+        Tok t = lex_peek(p->lex);
+        if (t.kind == TK_EOF) {
+            errtok(p, &t, "unterminated __attribute__");
+            return true;
+        }
+        if (t.kind == TK_LPAREN) depth++;
+        else if (t.kind == TK_RPAREN) depth--;
+        lex_next(p->lex);
+    }
+    return true;
+}
+
 static bool is_type_start(TokKind k) {
     return is_prim_tk(k) || k == TK_IDENT ||
            k == TK_SHORT || k == TK_LONG || k == TK_UNSIGNED || k == TK_SIGNED ||
            k == TK_INT_TYPE || k == TK_FLOAT_TYPE || k == TK_DOUBLE_TYPE ||
            k == TK___INT64 || k == TK_WCHAR_T ||
-           k == TK_CONST;
+           k == TK_CONST ||
+           k == TK___INLINE__ || k == TK___INLINE;
 }
 
 static Type* parse_type(P* p) {
     /* Leading `const` — applies to the innermost (base) type. */
     bool leading_const = false;
     if (accept(p, TK_CONST)) leading_const = true;
+
+    /* Skip C storage-class / inline modifiers that are not type keywords. */
+    while (lex_peek(p->lex).kind == TK___INLINE__ ||
+           lex_peek(p->lex).kind == TK___INLINE) {
+        lex_next(p->lex);
+    }
 
     Type* base;
     Tok t = lex_peek(p->lex);
@@ -1142,13 +1188,16 @@ Node* parse_program(Lexer* lx, Arena** arena) {
         } else if (t.kind == TK_EXTERN) {
             /* Phase 7: `extern RetType name(params);` — C-linkage function declaration.
              *            `extern Type name;` or `extern Type name[];` — C-linkage variable declaration.
-             * After 'extern' + type, check if next token is '(' (function) or identifier (variable). */
+             * After 'extern' + type, check if next token is '(' (function) or identifier (variable).
+             * Also handles `extern __declspec(...) Type name;` and `extern void f() __attribute__(...);` */
             lex_next(p->lex);  /* consume 'extern' */
+            /* Optional __declspec before the type */
+            skip_declspec(p);
             int line = lex_peek(p->lex).line;
             Type* ret = parse_type(p);
             const char* ename = parse_method_name(p, false);
             if (lex_peek(p->lex).kind == TK_LPAREN) {
-                /* Extern function declaration */
+                /* Extern function declaration or inline definition */
                 lex_next(p->lex); /* consume '(' */
                 NodeVec params = {0};
                 if (lex_peek(p->lex).kind != TK_RPAREN) {
@@ -1168,12 +1217,47 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                     }
                 }
                 expect(p, TK_RPAREN, "expected ')'");
-                expect(p, TK_SEMI, "expected ';' after extern declaration");
-                Node* ext = mk(p, ND_EXTERN_DECL, line);
-                ext->ret_type = ret;
-                ext->name     = ename;
-                ext->params   = nv_freeze(p, &params, &ext->nparams);
-                nv_push(&decls, ext);
+                /* Optional trailing __attribute__((...)) */
+                skip_attribute(p);
+
+                if (lex_peek(p->lex).kind == TK_LBRACE) {
+                    /* Inline function definition: `extern int f(...) { ... }` */
+                    Node* f = mk(p, ND_FUNC_DECL, line);
+                    f->ret_type = ret;
+                    f->name     = ename;
+                    f->params   = nv_freeze(p, &params, &f->nparams);
+                    f->body     = parse_block(p);
+                    f->parent_type = NULL;
+                    f->self_kind   = SELF_NONE;
+                    nv_push(&decls, f);
+                } else if (lex_peek(p->lex).kind == TK_EQ) {
+                    /* Sharp function definition: `extern int f(...) => expr;` */
+                    lex_next(p->lex); /* consume '=' */
+                    Node* expr = parse_expr(p);
+                    expect(p, TK_SEMI, "expected ';' after function definition");
+                    Node* f = mk(p, ND_FUNC_DECL, line);
+                    f->ret_type = ret;
+                    f->name     = ename;
+                    f->params   = nv_freeze(p, &params, &f->nparams);
+                    /* Synthesize a block with a return statement */
+                    Node* ret_stmt = mk(p, ND_RETURN, expr->line);
+                    ret_stmt->rhs = expr;
+                    NodeVec body_v = {0};
+                    nv_push(&body_v, ret_stmt);
+                    f->body = mk(p, ND_BLOCK, line);
+                    f->body->children = nv_freeze(p, &body_v, &f->body->nchildren);
+                    f->parent_type = NULL;
+                    f->self_kind   = SELF_NONE;
+                    nv_push(&decls, f);
+                } else {
+                    /* Declaration only: `extern int f(...);` */
+                    expect(p, TK_SEMI, "expected ';' after extern declaration");
+                    Node* ext = mk(p, ND_EXTERN_DECL, line);
+                    ext->ret_type = ret;
+                    ext->name     = ename;
+                    ext->params   = nv_freeze(p, &params, &ext->nparams);
+                    nv_push(&decls, ext);
+                }
             } else {
                 /* Extern variable declaration: `extern Type name;` or `extern Type name[];` */
                 bool is_array = false;
@@ -1239,6 +1323,8 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                 g_silent = false;
 
                 if (has_rparen) {
+                    /* Optional trailing __attribute__((...)) */
+                    skip_attribute(p);
                     if (lex_peek(p->lex).kind == TK_SEMI) {
                         /* C function declaration: `int foo(int x);` */
                         lex_next(p->lex); /* consume ';' */
