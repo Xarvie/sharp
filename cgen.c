@@ -1361,6 +1361,12 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
         if (d->kind == ND_STRUCT_FWD)
             emit_struct_fwd_decl(g, d);
     }
+    /* _Static_assert pass-through */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_STATIC_ASSERT && d->raw_text)
+            sb_printf(&g->out, "%s\n", d->raw_text);
+    }
     /* Union forward declarations and bodies. */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
@@ -1526,6 +1532,12 @@ void cgen_buf(Node* prog, SymTable* st, StrBuf* sb) {
         Node* d = prog->children[i];
         if (d->kind == ND_STRUCT_DECL && !is_generic_template(d))
             emit_struct_fwd(g, d);
+    }
+    /* _Static_assert pass-through */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_STATIC_ASSERT && d->raw_text)
+            sb_printf(&g->out, "%s\n", d->raw_text);
     }
     /* Specialised structs: one per SymMono. */
     for (int i = 0; i < st->nmonos; i++) {

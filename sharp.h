@@ -186,6 +186,7 @@ typedef enum {
     TK___INLINE__, TK___INLINE,
     TK___ATTRIBUTE__,
     TK___DECLSPEC,
+    TK_STATIC_ASSERT,
 
     /* punctuation */
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE, TK_LBRACKET, TK_RBRACKET,
@@ -270,6 +271,7 @@ typedef enum {
     /* top-level */
     ND_PROGRAM, ND_STRUCT_DECL, ND_FUNC_DECL, ND_IMPL, ND_FIELD, ND_PARAM,
     ND_UNION_DECL, ND_STRUCT_FWD, ND_UNION_FWD,
+    ND_STATIC_ASSERT,
 
     /* statements */
     ND_BLOCK, ND_VARDECL, ND_IF, ND_WHILE, ND_FOR,
@@ -363,6 +365,9 @@ struct Node {
      * declaration is not parametric. */
     const char** type_params;
     int          ntype_params;
+
+    /* Raw text for pass-through constructs (e.g. _Static_assert) */
+    const char*  raw_text;
 };
 
 /* self-receiver kinds */

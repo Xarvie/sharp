@@ -43,6 +43,7 @@ static const Keyword kws[] = {
     {"__inline",    8, TK___INLINE},
     {"__attribute__", 13, TK___ATTRIBUTE__},
     {"__declspec",    10, TK___DECLSPEC},
+    {"_Static_assert", 14, TK_STATIC_ASSERT},
 };
 static const int nkws = (int)(sizeof(kws) / sizeof(kws[0]));
 

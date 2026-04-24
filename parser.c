@@ -1390,6 +1390,31 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                 nd->name = tname;
                 nv_push(&decls, nd);
             }
+        } else if (t.kind == TK_STATIC_ASSERT) {
+            /* _Static_assert(constant_expr, "message"); — pass-through to C */
+            int line = t.line;
+            const char* start = t.start;
+            lex_next(p->lex); /* consume '_Static_assert' */
+            expect(p, TK_LPAREN, "expected '(' after _Static_assert");
+            /* Skip everything until matching `);` — expression may contain parentheses */
+            int depth = 1;
+            while (depth > 0) {
+                Tok tok = lex_peek(p->lex);
+                if (tok.kind == TK_EOF) {
+                    errtok(p, &tok, "unterminated _Static_assert");
+                    break;
+                }
+                if (tok.kind == TK_LPAREN) depth++;
+                else if (tok.kind == TK_RPAREN) depth--;
+                lex_next(p->lex);
+            }
+            expect(p, TK_SEMI, "expected ';' after _Static_assert");
+            Node* sa = mk(p, ND_STATIC_ASSERT, line);
+            /* Capture original text from start to current position */
+            const char* end = lex_peek(p->lex).start;
+            size_t len = (size_t)(end - start);
+            sa->raw_text = arena_strndup(p->arena, start, (int)len);
+            nv_push(&decls, sa);
         } else if (is_type_start(t.kind)) {
             /* Peek ahead to distinguish between:
              * - `Type name(params);` — C function declaration (extern, no body)

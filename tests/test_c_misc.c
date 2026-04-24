@@ -17,6 +17,10 @@ typedef uintptr_t usize;
 
 extern i32 clearerr_s(void* stream);
 
+_Static_assert(sizeof(int) >= 4, "int must be at least 4 bytes");
+
+
+
 
 i32 main(void);
 
