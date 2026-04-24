@@ -15,13 +15,11 @@ typedef double   f64;
 typedef intptr_t isize;
 typedef uintptr_t usize;
 
-extern i32 clearerr_s(void* stream);
-
 
 i32 main(void);
 
 i32 main(void) {
-    i32 err = 0;
+    i64 x = 0;
     return 0;
 }
 

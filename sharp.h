@@ -178,9 +178,9 @@ typedef enum {
     TK_F32, TK_F64, TK_ISIZE, TK_USIZE,
 
     /* C-style type modifiers */
-    TK_SHORT, TK_LONG, TK_UNSIGNED, TK_SIGNED,
+    TK_SHORT, TK_LONG, TK_UNSIGNED, TK_SIGNED, TK_CHAR,
     TK_INT_TYPE, TK_FLOAT_TYPE, TK_DOUBLE_TYPE,
-    TK___INT64, TK_WCHAR_T,
+    TK___INT64,
 
     /* C declaration modifiers */
     TK___INLINE__, TK___INLINE,
@@ -190,7 +190,7 @@ typedef enum {
 
     /* punctuation */
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE, TK_LBRACKET, TK_RBRACKET,
-    TK_COMMA, TK_SEMI, TK_COLON, TK_DCOLON, TK_DOT, TK_ARROW,
+    TK_COMMA, TK_SEMI, TK_COLON, TK_DCOLON, TK_DOT, TK_ELLIPSIS, TK_ARROW,
 
     /* arithmetic */
     TK_PLUS, TK_MINUS, TK_STAR, TK_SLASH, TK_PERCENT,
@@ -230,7 +230,6 @@ typedef enum {
     TY_I8,  TY_I16, TY_I32, TY_I64,
     TY_U8,  TY_U16, TY_U32, TY_U64,
     TY_F32, TY_F64, TY_ISIZE, TY_USIZE,
-    TY_WCHAR_T,  /* C wchar_t (platform-dependent: 16-bit Windows, 32-bit Linux) */
     TY_PTR,      /* base pointer */
     TY_NAMED     /* user-declared struct, resolved by name */
 } TypeKind;
@@ -290,6 +289,7 @@ typedef enum {
     ND_EXTERN_DECL,    /* extern return_type name(params); — C linkage decl */
     ND_TYPEDEF_DECL,   /* typedef Type name; — type alias */
     ND_EXTERN_VAR,     /* extern Type name; — external variable decl */
+    ND_CONST_DECL,     /* const Type name = expr; — global const */
     /* Explicit RAII. The lowering pass injects one ND_DROP per destructible
      * local at every scope exit (natural `}`, return, break, continue).
      * CGen just emits `T___drop(&name);` — it does not walk any scope stack
@@ -354,6 +354,7 @@ struct Node {
     int          nfields;
     Node**       params;     /* ND_PARAM[] */
     int          nparams;
+    bool         is_variadic;   /* true for extern functions with ... */
     Type*        ret_type;
 
     /* method metadata (on ND_FUNC_DECL nodes emitted from impl blocks) */
@@ -390,6 +391,7 @@ void   lex_init  (Lexer* lx, const char* src, const char* filename);
 Tok    lex_peek  (Lexer* lx);
 Tok    lex_peek2 (Lexer* lx);
 Tok    lex_peek_n(Lexer* lx, int n);
+bool   lex_ident_is(Tok t, const char* name);
 Tok    lex_next  (Lexer* lx);
 const char* tok_name(TokKind k);
 
@@ -473,6 +475,21 @@ typedef struct {
     Node*         decl;     /* ND_TYPEDEF_DECL node */
 } SymTypedef;
 
+/* Global constant declaration: `const Type name = expr;` */
+typedef struct {
+    const char*   name;
+    Type*         type;
+    Node*         value;    /* RHS expression */
+    Node*         decl;     /* ND_CONST_DECL node */
+} SymConst;
+
+/* External variable declaration: `extern Type name;` */
+typedef struct {
+    const char*   name;
+    Type*         type;
+    Node*         decl;     /* ND_EXTERN_VAR node */
+} SymValue;
+
 typedef struct {
     SymStruct*    structs;
     int           nstructs;
@@ -486,6 +503,10 @@ typedef struct {
     int           nfuncs;
     SymTypedef*   typedefs;       /* type aliases from typedef declarations */
     int           ntypedefs;
+    SymConst*     consts;         /* global const declarations */
+    int           nconsts;
+    SymValue*     values;         /* extern variable declarations */
+    int           nvalues;
 } SymTable;
 
 SymTable*   sema_build       (Node* program, Arena** arena);

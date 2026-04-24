@@ -30,13 +30,14 @@ static const Keyword kws[] = {
     {"int",      3, TK_INT_TYPE},
     {"unsigned", 8, TK_UNSIGNED},
     {"signed",   6, TK_SIGNED},
+    {"char",     4, TK_CHAR},
     {"float",    5, TK_FLOAT_TYPE},
     {"double",   6, TK_DOUBLE_TYPE},
     {"typedef",  7, TK_TYPEDEF},
 
-    /* C extensions */
+    /* C extensions — wchar_t is a typedef name, NOT a keyword.
+     * It is handled in parse_type by name matching, not lexing. */
     {"__int64",  7, TK___INT64},
-    {"wchar_t",  7, TK_WCHAR_T},
 
     /* C declaration modifiers */
     {"__inline__",  10, TK___INLINE__},
@@ -61,6 +62,14 @@ void lex_init(Lexer* lx, const char* src, const char* filename) {
 
 Tok lex_peek(Lexer* lx)  { return lx->peek0; }
 Tok lex_peek2(Lexer* lx) { return lx->peek1; }
+
+/* Compare an identifier token's text with a C string. */
+bool lex_ident_is(Tok t, const char* name) {
+    if (t.kind != TK_IDENT) return false;
+    size_t nlen = strlen(name);
+    if (t.len != (int)nlen) return false;
+    return memcmp(t.start, name, nlen) == 0;
+}
 
 /* Peek n tokens ahead (0 = current, 1 = next, etc.).
  * Uses save/restore for lookahead beyond 2 tokens. */
@@ -239,7 +248,10 @@ static Tok read_punct(Lexer* lx) {
         case ',': k = TK_COMMA;    break;
         case ';': k = TK_SEMI;     break;
         case '~': k = TK_TILDE;    break;
-        case '.': k = TK_DOT;      break;
+        case '.':
+            if (c2 == '.' && pc(lx, 1) == '.') { adv(lx); adv(lx); k = TK_ELLIPSIS; }
+            else k = TK_DOT;
+            break;
         case '^': k = TK_CARET;    break;
         case ':': if (c2 == ':') { adv(lx); k = TK_DCOLON; } else k = TK_COLON; break;
         case '+':

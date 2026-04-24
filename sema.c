@@ -296,6 +296,31 @@ SymTable* sema_build(Node* program, Arena** arena) {
         vec_push(&ev, &rec);
     }
 
+    /* Pass 4a: global const declarations. */
+    Vec cv = { NULL, 0, 0, sizeof(SymConst) };
+    for (int i = 0; i < program->nchildren; i++) {
+        Node* d = program->children[i];
+        if (d->kind != ND_CONST_DECL) continue;
+        SymConst rec;
+        rec.name  = d->name;
+        rec.type  = d->declared_type;
+        rec.value = d->rhs;
+        rec.decl  = d;
+        vec_push(&cv, &rec);
+    }
+
+    /* Pass 4b: extern variable declarations. */
+    Vec xv = { NULL, 0, 0, sizeof(SymValue) };
+    for (int i = 0; i < program->nchildren; i++) {
+        Node* d = program->children[i];
+        if (d->kind != ND_EXTERN_VAR) continue;
+        SymValue rec;
+        rec.name = d->name;
+        rec.type = d->declared_type;
+        rec.decl = d;
+        vec_push(&xv, &rec);
+    }
+
     /* Pass 4b: phase-9 typedef declarations. */
     Vec tv = { NULL, 0, 0, sizeof(SymTypedef) };
     for (int i = 0; i < program->nchildren; i++) {
@@ -358,6 +383,8 @@ SymTable* sema_build(Node* program, Arena** arena) {
     st->externs  = (SymExtern*)vec_freeze(arena, &ev,   &st->nexterns);
     st->funcs    = (SymFunc*)  vec_freeze(arena, &fv,   &st->nfuncs);
     st->typedefs = (SymTypedef*)vec_freeze(arena, &tv,  &st->ntypedefs);
+    st->consts   = (SymConst*) vec_freeze(arena, &cv,   &st->nconsts);
+    st->values   = (SymValue*) vec_freeze(arena, &xv,   &st->nvalues);
 
     /* Pass 6: phase-8 — type-check every function body. Only runs if
      * the preceding passes didn't already error out; the AST may be
@@ -522,6 +549,16 @@ static Type* tc_scope_lookup(TC* tc, const char* name) {
     for (TCScope* s = tc->scope; s; s = s->parent)
         for (int i = s->len - 1; i >= 0; i--)
             if (strcmp(s->names[i], name) == 0) return s->types[i];
+    /* Check global const declarations */
+    for (int i = 0; i < tc->st->nconsts; i++) {
+        if (strcmp(tc->st->consts[i].name, name) == 0)
+            return tc->st->consts[i].type;
+    }
+    /* Check extern variable declarations */
+    for (int i = 0; i < tc->st->nvalues; i++) {
+        if (strcmp(tc->st->values[i].name, name) == 0)
+            return tc->st->values[i].type;
+    }
     return NULL;
 }
 
@@ -622,16 +659,25 @@ static Type* tc_builtin_static_call(TC* tc, const char* type_name,
 static void tc_check_args(TC* tc, const char* what, int line,
                           Node** params, int nparams,
                           Node** args, int nargs,
-                          const char** sn, Type** st, int sc) {
-    if (nargs != nparams) {
+                          const char** sn, Type** st, int sc,
+                          bool is_variadic) {
+    /* Variadic functions accept >= nparams args */
+    if (!is_variadic && nargs != nparams) {
         diag_emit(DIAG_ERROR, E_ARG_COUNT, line, 0, 0,
                   "%s expects %d argument%s, got %d",
                   what, nparams, nparams == 1 ? "" : "s", nargs);
         return;
     }
-    for (int i = 0; i < nargs; i++) {
+    if (is_variadic && nargs < nparams) {
+        diag_emit(DIAG_ERROR, E_ARG_COUNT, line, 0, 0,
+                  "%s expects at least %d argument%s, got %d",
+                  what, nparams, nparams == 1 ? "" : "s", nargs);
+        return;
+    }
+    int checked = is_variadic ? nparams : nargs;
+    for (int i = 0; i < checked; i++) {
         Type* at = tc_expr(tc, args[i]);
-        Type* pt = params[i] ? params[i]->declared_type : NULL;
+        Type* pt = i < nparams ? (params[i] ? params[i]->declared_type : NULL) : NULL;
         if (pt && sc > 0) pt = tc_subst_type(tc, pt, sn, st, sc);
         if (at && pt && !tc_assignable(tc, pt, at)) {
             diag_emit(DIAG_ERROR, E_ARG_TYPE, args[i]->line, 0, 0,
@@ -978,10 +1024,7 @@ static Type* tc_expr(TC* tc, Node* e) {
                     if (m && m->self_kind == SELF_NONE) {
                         const char** sn = NULL; Type** sty = NULL; int sc = 0;
                         tc_mk_subst(tc, rty, &sn, &sty, &sc);
-                        tc_check_args(tc, mname, e->line,
-                                      func_params(m->decl), func_nparams(m->decl),
-                                      args, nargs,
-                                      sn, sty, sc);
+                        tc_check_args(tc, mname, e->line, func_params(m->decl), func_nparams(m->decl), args, nargs, sn, sty, sc, false);
                         return ty_subst(func_ret_type(m->decl), sn, sty, sc);
                     }
                     diag_emit(DIAG_ERROR, E_UNKNOWN_METHOD, e->line, 0, 0,
@@ -993,9 +1036,7 @@ static Type* tc_expr(TC* tc, Node* e) {
                     const char* tn = ident_name(recv);
                     SymMethod* m = sema_find_method(tc->st, tn, mname);
                     if (m && m->self_kind == SELF_NONE) {
-                        tc_check_args(tc, mname, e->line,
-                                      func_params(m->decl), func_nparams(m->decl),
-                                      args, nargs, NULL, NULL, 0);
+                        tc_check_args(tc, mname, e->line, func_params(m->decl), func_nparams(m->decl), args, nargs, NULL, NULL, 0, false);
                         return func_ret_type(m->decl);
                     }
                     diag_emit(DIAG_ERROR, E_UNKNOWN_METHOD, e->line, 0, 0,
@@ -1026,9 +1067,7 @@ static Type* tc_expr(TC* tc, Node* e) {
                 if (ty_is_pointer_like(recv_t)) recv_t = ty_base(recv_t);
                 tc_mk_subst(tc, recv_t, &sn, &sty, &sc);
                 /* Skip the implicit self param (params[0]). */
-                tc_check_args(tc, mname, e->line,
-                              func_params(m->decl) + 1, func_nparams(m->decl) - 1,
-                              args, nargs, sn, sty, sc);
+                tc_check_args(tc, mname, e->line, func_params(m->decl) + 1, func_nparams(m->decl) - 1, args, nargs, sn, sty, sc, false);
                 return ty_subst(func_ret_type(m->decl), sn, sty, sc);
             }
             /* Ident call: implicit-self method, free function, or extern. */
@@ -1041,16 +1080,13 @@ static Type* tc_expr(TC* tc, Node* e) {
                         Node** params = func_params (m->decl);
                         int    np     = func_nparams(m->decl);
                         if (m->self_kind != SELF_NONE) { params++; np--; }
-                        tc_check_args(tc, cname, e->line, params, np,
-                                      args, nargs, NULL, NULL, 0);
+                        tc_check_args(tc, cname, e->line, params, np, args, nargs, NULL, NULL, 0, false);
                         return func_ret_type(m->decl);
                     }
                 }
                 SymFunc* f = sema_find_func(tc->st, cname);
                 if (f) {
-                    tc_check_args(tc, f->name, e->line,
-                                  func_params(f->decl), func_nparams(f->decl),
-                                  args, nargs, NULL, NULL, 0);
+                    tc_check_args(tc, f->name, e->line, func_params(f->decl), func_nparams(f->decl), args, nargs, NULL, NULL, 0, false);
                     return f->ret_type;
                 }
                 SymExtern* ex = sema_find_extern(tc->st, cname);
@@ -1061,7 +1097,8 @@ static Type* tc_expr(TC* tc, Node* e) {
                     Node** params = (np > 0) ? &ex->decl->params[0] : NULL;
                     tc_check_args(tc, ex->name, e->line,
                                   params, np,
-                                  args, nargs, NULL, NULL, 0);
+                                  args, nargs, NULL, NULL, 0,
+                                  ex->decl->is_variadic);
                     return ex->ret_type;
                 }
                 /* Function not declared — this is a hard error. */
@@ -1267,3 +1304,4 @@ Type* sema_resolve_type(SymTable* st, Type* t) {
     }
     return t;
 }
+
