@@ -228,7 +228,11 @@ void ty_shutdown(void) {
 
 Type* ty_prim(TypeKind k) {
     if (!s_arena) ty_init();
-    if ((int)k < 0 || (int)k > TY_USIZE) return NULL;
+    if ((int)k < 0 || (int)k > TY_WCHAR_T) return NULL;
+    if (k == TY_WCHAR_T) {
+        /* wchar_t is a non-primitive (no single C type); return NULL so caller uses named type. */
+        return NULL;
+    }
     if (s_prim[k]) return s_prim[k];
     Type* t = (Type*)arena_alloc(&s_arena, sizeof(Type));
     memset(t, 0, sizeof(*t));
@@ -309,6 +313,7 @@ bool ty_is_integer(const Type* t) {
         case TY_I8: case TY_I16: case TY_I32: case TY_I64:
         case TY_U8: case TY_U16: case TY_U32: case TY_U64:
         case TY_ISIZE: case TY_USIZE:
+        case TY_WCHAR_T:
             return true;
         default:
             return false;
@@ -502,6 +507,10 @@ static void render_into(StrBuf* sb, const Type* t) {
             if (t->is_const) sb_puts(sb, "const usize");
             else             sb_puts(sb, "usize");
             return;
+        case TY_WCHAR_T:
+            if (t->is_const) sb_puts(sb, "const wchar_t");
+            else             sb_puts(sb, "wchar_t");
+            return;
         case TY_PTR:
             render_into(sb, t->base);
             sb_putc(sb, '*');
@@ -540,6 +549,7 @@ static void mangle_into(StrBuf* sb, const Type* t) {
         case TY_F64:   sb_puts(sb, cp); sb_puts(sb, "f64");    return;
         case TY_ISIZE: sb_puts(sb, cp); sb_puts(sb, "isize");  return;
         case TY_USIZE: sb_puts(sb, cp); sb_puts(sb, "usize");  return;
+        case TY_WCHAR_T: sb_puts(sb, cp); sb_puts(sb, "wchar_t"); return;
         case TY_PTR:
             if (t->is_const) { sb_puts(sb, "cp_"); mangle_into(sb, t->base); }
             else               { sb_puts(sb, "p_");  mangle_into(sb, t->base); }

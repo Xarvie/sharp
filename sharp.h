@@ -180,6 +180,7 @@ typedef enum {
     /* C-style type modifiers */
     TK_SHORT, TK_LONG, TK_UNSIGNED, TK_SIGNED,
     TK_INT_TYPE, TK_FLOAT_TYPE, TK_DOUBLE_TYPE,
+    TK___INT64, TK_WCHAR_T,
 
     /* punctuation */
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE, TK_LBRACKET, TK_RBRACKET,
@@ -223,6 +224,7 @@ typedef enum {
     TY_I8,  TY_I16, TY_I32, TY_I64,
     TY_U8,  TY_U16, TY_U32, TY_U64,
     TY_F32, TY_F64, TY_ISIZE, TY_USIZE,
+    TY_WCHAR_T,  /* C wchar_t (platform-dependent: 16-bit Windows, 32-bit Linux) */
     TY_PTR,      /* base pointer */
     TY_NAMED     /* user-declared struct, resolved by name */
 } TypeKind;

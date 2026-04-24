@@ -32,7 +32,11 @@ static const Keyword kws[] = {
     {"signed",   6, TK_SIGNED},
     {"float",    5, TK_FLOAT_TYPE},
     {"double",   6, TK_DOUBLE_TYPE},
-    {"typedef",  7, TK_TYPEDEF}
+    {"typedef",  7, TK_TYPEDEF},
+
+    /* C extensions */
+    {"__int64",  7, TK___INT64},
+    {"wchar_t",  7, TK_WCHAR_T},
 };
 static const int nkws = (int)(sizeof(kws) / sizeof(kws[0]));
 

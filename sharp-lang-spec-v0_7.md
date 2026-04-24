@@ -733,41 +733,6 @@ Sharp 的 `#` **不是** Zig 的 `comptime`:
 
 需要编译期复杂逻辑时,用宏(预处理器)或外部代码生成工具。
 
-### 平台常量头文件
-
-Sharp 编译器内置 `sharp/platform.h` 头文件,包含跨平台 C 标准库宏常量定义。该文件**仅供标准库内部封装 libc 时使用**,不暴露给用户层。
-
-```c
-/* sharp/platform.h — 内部文件 */
-#if defined(_WIN32) || defined(_WIN64)
-  #define _SH_EOF           (-1)
-  #define _SH_SEEK_SET      0
-  #define _SH_SEEK_CUR      1
-  #define _SH_SEEK_END      2
-  #define _SH_BUFSIZ        512
-  #define _SH_FILENAME_MAX  260
-  #define _SH_FOPEN_MAX     20
-#elif defined(__linux__)
-  #define _SH_EOF           (-1)
-  #define _SH_SEEK_SET      0
-  #define _SH_SEEK_CUR      1
-  #define _SH_SEEK_END      2
-  #define _SH_BUFSIZ        8192
-  #define _SH_FILENAME_MAX  4096
-  #define _SH_FOPEN_MAX     16
-#elif defined(__APPLE__)
-  #define _SH_EOF           (-1)
-  #define _SH_SEEK_SET      0
-  #define _SH_SEEK_CUR      1
-  #define _SH_SEEK_END      2
-  #define _SH_BUFSIZ        1024
-  #define _SH_FILENAME_MAX  1024
-  #define _SH_FOPEN_MAX     20
-#endif
-```
-
-宏命名约定为 `_SH_` 前缀,避免与用户代码及 C 标准库冲突。标准库文件(如 `stdio.sp`)通过 `#include <sharp/platform.h>` 引入,用户使用标准库时无需感知该文件的存在。
-
 ---
 
 ## 预处理器 (Preprocessor)

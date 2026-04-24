@@ -318,6 +318,16 @@ SymTable* sema_build(Node* program, Arena** arena) {
         vec_push(&tv, &rec);
     }
 
+    /* Pass 4c: register builtin C types that are not primitives.
+     * `wchar_t` is a platform-dependent integer type; map it to `int`. */
+    {
+        SymTypedef rec;
+        rec.name     = "wchar_t";
+        rec.base     = type_prim(arena, TY_I32);
+        rec.decl     = NULL;
+        vec_push(&tv, &rec);
+    }
+
     /* Pass 5: phase-8 — collect user free functions (non-method,
      * non-extern). Methods are in mv; externs are in ev. Walking
      * top-level ND_FUNC_DECL catches exactly the free functions. */

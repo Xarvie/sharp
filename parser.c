@@ -85,7 +85,9 @@ static TypeKind prim_from_tk(TokKind k) {
 }
 
 static bool is_c_type_mod(TokKind k) {
-    return k == TK_SHORT || k == TK_LONG || k == TK_UNSIGNED || k == TK_SIGNED;
+    return k == TK_SHORT || k == TK_LONG || k == TK_UNSIGNED || k == TK_SIGNED ||
+           k == TK_INT_TYPE || k == TK_FLOAT_TYPE || k == TK_DOUBLE_TYPE ||
+           k == TK___INT64;
 }
 
 /* Parse a C-style type specification.
@@ -121,17 +123,25 @@ static TypeKind parse_c_type(P* p) {
             case TK_SIGNED:   has_signed   = true; break;
             case TK_SHORT:    has_short    = true; break;
             case TK_LONG: {
-                if (i+1 < 4 && lex_peek_n(p->lex, i+1).kind == TK_LONG) {
+                Tok next = lex_peek_n(p->lex, i+1);
+                if (next.kind == TK_LONG) {
                     has_long_long = true;
-                    i++; /* skip the second 'long' in lookahead */
+                    n = i + 2; /* consume both longs */
+                    consumed = false; /* prevent post-switch overwrite of n */
+                    i = 3; /* for-loop i++ makes it 4, terminating the loop */
                 } else {
                     has_long = true;
                 }
                 break;
             }
-            case TK_INT_TYPE:  has_int   = true; break;
-            case TK_FLOAT_TYPE:has_float = true; break;
+            case TK_INT_TYPE:   has_int   = true; break;
+            case TK_FLOAT_TYPE: has_float = true; break;
             case TK_DOUBLE_TYPE:has_double = true; break;
+            case TK___INT64:    /* standalone __int64 → 64-bit signed */
+                                return TY_I64;
+            case TK_WCHAR_T:    /* wchar_t → named type (platform-dependent size) */
+                                lex_next(p->lex);
+                                return TY_NAMED;  /* will be handled by caller */
             default: consumed = false; break;
         }
         if (consumed) n = i + 1; /* count consumed tokens */
@@ -158,6 +168,7 @@ static bool is_type_start(TokKind k) {
     return is_prim_tk(k) || k == TK_IDENT ||
            k == TK_SHORT || k == TK_LONG || k == TK_UNSIGNED || k == TK_SIGNED ||
            k == TK_INT_TYPE || k == TK_FLOAT_TYPE || k == TK_DOUBLE_TYPE ||
+           k == TK___INT64 || k == TK_WCHAR_T ||
            k == TK_CONST;
 }
 
@@ -168,7 +179,13 @@ static Type* parse_type(P* p) {
 
     Type* base;
     Tok t = lex_peek(p->lex);
-    if (is_c_type_mod(t.kind)) {
+    if (t.kind == TK___INT64) {
+        lex_next(p->lex);
+        base = type_prim(p->arena, TY_I64);
+    } else if (t.kind == TK_WCHAR_T) {
+        lex_next(p->lex);
+        base = type_named(p->arena, "wchar_t");
+    } else if (is_c_type_mod(t.kind)) {
         /* C-style type with modifiers: unsigned int, long long, etc. */
         base = type_prim(p->arena, parse_c_type(p));
     } else if (is_prim_tk(t.kind)) {
