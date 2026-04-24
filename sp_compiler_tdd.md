@@ -62,6 +62,8 @@
 
 ## 总 TDD 测试映射表
 
+> **图例：** ✅ 已完成　📝 有正文用例（无独立测试文件）　❌ 测试文件编译失败　⬜ 待实现
+
 | 测试文件 | TDD 编号 | 覆盖特性 | 状态 |
 |---|---|---|---|
 | test_const_basic.sp | TDD-Const-1 | const 局部变量声明 | ✅ |
@@ -90,6 +92,35 @@
 | test_break_continue.sp | TDD-Stmt-5 | break / continue | ✅ |
 | test_arith.sp | TDD-Expr-2 | 算术与比较运算 | ✅ |
 | test_bool.sp | TDD-Expr-4 | bool 字面量与逻辑运算 | ✅ |
+| test_array.sp | TDD-Expr-3 | 数组声明与索引 | ✅ |
+| test_generic.sp | TDD-Generic-1 | 泛型 struct + impl | ❌ |
+| test_types_all.sp | TDD-1.1~1.3 | SP 原生类型映射（i8~usize 等）| ✅ |
+| *(无测试文件)* | TDD-1.4 | 标准 C 类型原样透传 | ⬜ |
+| *(无测试文件)* | TDD-2.1~2.4 | 调用约定关键字（__cdecl/__stdcall/__fastcall/__unaligned）| 📝 |
+| *(无测试文件)* | TDD-3.1~3.2 | __declspec 扩展（noreturn/dllimport）| 📝 |
+| *(无测试文件)* | §5 | MSVC 整数字面量后缀 `i8`/`i16`/`i32`/`i64` | ⬜ |
+| *(无测试文件)* | §8 | GCC 内联汇编 `__asm__` | ⬜ |
+| *(无测试文件)* | §9 | `#pragma push_macro` / `pop_macro` | ⬜ |
+| *(无测试文件)* | §10 | `#pragma pack` | ⬜ |
+| *(无测试文件)* | §11 | `_Bool` 类型 | ⬜ |
+| *(无测试文件)* | §12 | `__restrict__` 关键字 | ⬜ |
+| *(无测试文件)* | §13 | 编译器内建宏类型 `__SIZE_TYPE__` 等 | ⬜ |
+| *(无测试文件)* | §14 | `extern "C++"` 块 | ⬜ |
+| *(无测试文件)* | §15 | SEH 异常处理宏 | ⬜ |
+| *(无测试文件)* | §17 | `sizeof` 类型派发宏（`fpclassify`/`signbit`）| ⬜ |
+| *(无测试文件)* | §18 | `NAN`/`INFINITY` 浮点常量定义 | ⬜ |
+| *(无测试文件)* | §19 | 强转指针哨兵值 | ⬜ |
+| *(无测试文件)* | §20 | `#pragma GCC system_header` | ⬜ |
+| *(无测试文件)* | §21 | 编译期静态断言老式写法 | ⬜ |
+| *(无测试文件)* | §22 | `alloca` / `__builtin_alloca` | ⬜ |
+| *(无测试文件)* | §23 | `__need_wint_t` 条件 typedef 模式 | ⬜ |
+| *(无测试文件)* | §24 | 柔性数组成员变种 `[1]` | ⬜ |
+| *(无测试文件)* | §25 | `L##` 宽字符串 token 拼接 | ⬜ |
+| *(无测试文件)* | §26 | `__attribute__((mode(DI)))` | ⬜ |
+| *(无测试文件)* | §27 | `__builtin_frame_address` / `__alignof__` | ⬜ |
+| *(无测试文件)* | §28 | `__STRICT_ANSI__` 条件编译 | ⬜ |
+| *(无测试文件)* | §29 | `_malloca` / `_freea` 智能栈堆分配 | ⬜ |
+| *(无测试文件)* | §30 | 双层宏展开 token-pasting | ⬜ |
 
 ---
 

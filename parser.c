@@ -797,7 +797,7 @@ static bool looks_like_decl(P* p) {
     Tok t0 = lex_peek(p->lex);
     Tok t1 = lex_peek2(p->lex);
     if (is_type_start(t0.kind)) {
-        return t1.kind == TK_IDENT || t1.kind == TK_STAR || is_type_start(t1.kind);
+        return t1.kind == TK_IDENT || t1.kind == TK_STAR || t1.kind == TK_LT || is_type_start(t1.kind);
     }
     if (t0.kind == TK_IDENT) {
         if (t1.kind == TK_IDENT) return true;

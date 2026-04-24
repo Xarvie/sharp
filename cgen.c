@@ -191,10 +191,25 @@ static void emit_type(G* g, Type* t) {
             else                sb_puts(&g->out, rt->name);
             return;
         default:
-            /* Primitive: the render form ("i32", "bool", etc.) IS the
-             * C-level name thanks to our stdint typedef prelude. */
-            sb_puts(&g->out, ty_render(rt));
-            return;
+            /* Primitive: emit the canonical C type directly. */
+            if (rt->is_const) sb_puts(&g->out, "const ");
+            switch (rt->kind) {
+                case TY_VOID:   sb_puts(&g->out, "void");      return;
+                case TY_BOOL:   sb_puts(&g->out, "_Bool");     return;
+                case TY_I8:     sb_puts(&g->out, "int8_t");    return;
+                case TY_I16:    sb_puts(&g->out, "int16_t");   return;
+                case TY_I32:    sb_puts(&g->out, "int32_t");   return;
+                case TY_I64:    sb_puts(&g->out, "int64_t");   return;
+                case TY_U8:     sb_puts(&g->out, "uint8_t");   return;
+                case TY_U16:    sb_puts(&g->out, "uint16_t");  return;
+                case TY_U32:    sb_puts(&g->out, "uint32_t");  return;
+                case TY_U64:    sb_puts(&g->out, "uint64_t");  return;
+                case TY_F32:    sb_puts(&g->out, "float");     return;
+                case TY_F64:    sb_puts(&g->out, "double");    return;
+                case TY_ISIZE:  sb_puts(&g->out, "ptrdiff_t"); return;
+                case TY_USIZE:  sb_puts(&g->out, "size_t");    return;
+                default:        sb_puts(&g->out, ty_render(rt)); return;
+            }
     }
 }
 
@@ -1317,18 +1332,6 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
         "#include <stdint.h>\n"
         "#include <stdbool.h>\n"
         "#include <stddef.h>\n"
-        "typedef int8_t   i8;\n"
-        "typedef int16_t  i16;\n"
-        "typedef int32_t  i32;\n"
-        "typedef int64_t  i64;\n"
-        "typedef uint8_t  u8;\n"
-        "typedef uint16_t u16;\n"
-        "typedef uint32_t u32;\n"
-        "typedef uint64_t u64;\n"
-        "typedef float    f32;\n"
-        "typedef double   f64;\n"
-        "typedef intptr_t isize;\n"
-        "typedef uintptr_t usize;\n"
         "\n");
 
     /* Phase 7: emit extern function declarations. */
@@ -1492,18 +1495,6 @@ void cgen_buf(Node* prog, SymTable* st, StrBuf* sb) {
         "#include <stdint.h>\n"
         "#include <stdbool.h>\n"
         "#include <stddef.h>\n"
-        "typedef int8_t   i8;\n"
-        "typedef int16_t  i16;\n"
-        "typedef int32_t  i32;\n"
-        "typedef int64_t  i64;\n"
-        "typedef uint8_t  u8;\n"
-        "typedef uint16_t u16;\n"
-        "typedef uint32_t u32;\n"
-        "typedef uint64_t u64;\n"
-        "typedef float    f32;\n"
-        "typedef double   f64;\n"
-        "typedef intptr_t isize;\n"
-        "typedef uintptr_t usize;\n"
         "\n");
 
     for (int i = 0; i < st->nexterns; i++) {
