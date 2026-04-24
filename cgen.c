@@ -1122,8 +1122,17 @@ static void emit_vardecl_inline(G* g, Node* s) {
     const char* name = vardecl_name(s);
     Node*       init = vardecl_init(s);
 
-    emit_type(g, dt);
-    sb_printf(&g->out, " %s", name);
+    if (s->lhs) {
+        /* Array declaration with explicit size: emit as C `T name[size]` */
+        Type* base = (dt && ty_kind(dt) == TY_PTR) ? ty_base(dt) : dt;
+        emit_type(g, base);
+        sb_printf(&g->out, " %s[", name);
+        emit_expr(g, s->lhs);
+        sb_putc(&g->out, ']');
+    } else {
+        emit_type(g, dt);
+        sb_printf(&g->out, " %s", name);
+    }
     if (init) {
         sb_puts(&g->out, " = ");
         emit_expr(g, init);

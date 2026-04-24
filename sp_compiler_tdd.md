@@ -81,6 +81,15 @@
 | test_inline_var.sp | TDD-Inline-6 | __inline__ 局部变量（跳过修饰符） | ✅ |
 | test_int_var.sp | TDD-CType-4 | int 基本类型变量 | ✅ |
 | test_longlong.sp | TDD-CType-5 | typedef long long | ✅ |
+| test_print.sp | TDD-Stmt-1 | print / println built-in | ✅ |
+| test_while.sp | TDD-Stmt-2 | while 循环 | ✅ |
+| test_if.sp | TDD-Stmt-3 | if / else | ✅ |
+| test_for.sp | TDD-Stmt-4 | for 循环 | ✅ |
+| test_struct_impl.sp | TDD-Struct-4 | struct + impl + 方法调用 | ✅ |
+| test_ptr.sp | TDD-Expr-1 | 指针、取地址、解引用 | ✅ |
+| test_break_continue.sp | TDD-Stmt-5 | break / continue | ✅ |
+| test_arith.sp | TDD-Expr-2 | 算术与比较运算 | ✅ |
+| test_bool.sp | TDD-Expr-4 | bool 字面量与逻辑运算 | ✅ |
 
 ---
 
@@ -917,6 +926,425 @@ gcc -std=c11 -c output.c
 ## 11. `va_list` 支持
 
 ### TDD-VA-1：`va_list` typedef + `extern __inline__`
+
+```sp
+// SP 输入
+typedef void* va_list;
+
+extern int vprintf(const char* format, va_list args);
+
+extern __inline__ int add(int a, int b) {
+    return a + b;
+}
+
+i32 main() {
+    va_list args;
+    i32 x = add(1, 2);
+    return 0;
+}
+```
+
+**期望 C 输出：**
+```c
+typedef void* va_list;
+
+extern int vprintf(const char* format, va_list args);
+
+extern __inline__ int add(int a, int b) {
+    return a + b;
+}
+
+int32_t main() {
+    va_list args;
+    int32_t x = add(1, 2);
+    return 0;
+}
+```
+
+**验证：**
+```bash
+gcc -std=c11 -c output.c
+```
+
+---
+
+## 12. print / println built-in
+
+### TDD-Stmt-1：print / println
+
+```sp
+// SP 输入
+i32 main() {
+    print(42);
+    println("hello");
+    return 0;
+}
+```
+
+**期望 C 输出（简化，实际依赖 stdio.h）：**
+```c
+int32_t main() {
+    printf("%d", 42);
+    printf("%s\n", "hello");
+    return 0;
+}
+```
+
+**验证：**
+```bash
+sharpc test_print.sp -o test_print.exe
+# 编译成功即视为通过
+```
+
+---
+
+## 13. while 循环
+
+### TDD-Stmt-2：while loop
+
+```sp
+// SP 输入
+i32 main() {
+    i32 sum = 0;
+    i32 i = 0;
+    while (i < 5) {
+        sum = sum + i;
+        i = i + 1;
+    }
+    return sum; /* 0+1+2+3+4 = 10 */
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    int32_t sum = 0;
+    int32_t i = 0;
+    while (i < 5) {
+        sum = sum + i;
+        i = i + 1;
+    }
+    return sum;
+}
+```
+
+**验证：**
+```bash
+sharpc test_while.sp -o test_while.exe
+test_while.exe && echo exit=10
+```
+
+---
+
+## 14. if / else
+
+### TDD-Stmt-3：if / else
+
+```sp
+// SP 输入
+i32 main() {
+    i32 x = 5;
+    if (x > 3) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    int32_t x = 5;
+    if (x > 3) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+```
+
+**验证：**
+```bash
+sharpc test_if.sp -o test_if.exe
+test_if.exe && echo exit=1
+```
+
+---
+
+## 15. for 循环
+
+### TDD-Stmt-4：for loop
+
+```sp
+// SP 输入
+i32 main() {
+    i32 sum = 0;
+    for (i32 i = 0; i < 5; i = i + 1) {
+        sum = sum + i;
+    }
+    return sum; /* 0+1+2+3+4 = 10 */
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    int32_t sum = 0;
+    for (int32_t i = 0; i < 5; i = i + 1) {
+        sum = sum + i;
+    }
+    return sum;
+}
+```
+
+**验证：**
+```bash
+sharpc test_for.sp -o test_for.exe
+test_for.exe && echo exit=10
+```
+
+---
+
+## 16. struct + impl + 方法调用
+
+### TDD-Struct-4：struct + impl + method call
+
+```sp
+// SP 输入
+struct Vec2 {
+    i32 x;
+    i32 y;
+};
+
+impl Vec2 {
+    i32 sum() {
+        return self.x + self.y;
+    }
+}
+
+i32 main() {
+    Vec2 v;
+    v.x = 3;
+    v.y = 4;
+    return v.sum(); /* 7 */
+}
+```
+
+**期望 C 输出（大致，方法名会 mangle）：**
+```c
+typedef struct Vec2 {
+    int32_t x;
+    int32_t y;
+} Vec2;
+
+int32_t Vec2_sum(Vec2* self) {
+    return self->x + self->y;
+}
+
+int32_t main() {
+    Vec2 v;
+    v.x = 3;
+    v.y = 4;
+    return Vec2_sum(&v);
+}
+```
+
+**验证：**
+```bash
+sharpc test_struct_impl.sp -o test_struct_impl.exe
+test_struct_impl.exe && echo exit=7
+```
+
+---
+
+## 17. 指针、取地址、解引用
+
+### TDD-Expr-1：pointer, address-of, dereference
+
+```sp
+// SP 输入
+i32 main() {
+    i32 x = 42;
+    i32* p = &x;
+    return *p; /* 42 */
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    int32_t x = 42;
+    int32_t* p = &x;
+    return *p;
+}
+```
+
+**验证：**
+```bash
+sharpc test_ptr.sp -o test_ptr.exe
+test_ptr.exe && echo exit=42
+```
+
+---
+
+## 18. break / continue
+
+### TDD-Stmt-5：break / continue
+
+```sp
+// SP 输入
+i32 main() {
+    i32 sum = 0;
+    i32 i = 0;
+    while (i < 10) {
+        i = i + 1;
+        if (i == 3) continue;
+        if (i == 6) break;
+        sum = sum + i;
+    }
+    return sum; /* 1+2+4+5 = 12 */
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    int32_t sum = 0;
+    int32_t i = 0;
+    while (i < 10) {
+        i = i + 1;
+        if (i == 3) continue;
+        if (i == 6) break;
+        sum = sum + i;
+    }
+    return sum;
+}
+```
+
+**验证：**
+```bash
+sharpc test_break_continue.sp -o test_break_continue.exe
+test_break_continue.exe && echo exit=12
+```
+
+---
+
+## 19. 算术与比较运算
+
+### TDD-Expr-2：arithmetic and comparison
+
+```sp
+// SP 输入
+i32 main() {
+    i32 a = 7;
+    i32 b = 3;
+    i32 c = a + b;   /* 10 */
+    i32 d = a - b;   /* 4 */
+    i32 e = a * b;   /* 21 */
+    i32 f = a / b;   /* 2 */
+    i32 g = a % b;   /* 1 */
+    if (c == 10 && d == 4 && e == 21 && f == 2 && g == 1) {
+        return 1;
+    }
+    return 0;
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    int32_t a = 7;
+    int32_t b = 3;
+    int32_t c = a + b;
+    int32_t d = a - b;
+    int32_t e = a * b;
+    int32_t f = a / b;
+    int32_t g = a % b;
+    if (c == 10 && d == 4 && e == 21 && f == 2 && g == 1) {
+        return 1;
+    }
+    return 0;
+}
+```
+
+**验证：**
+```bash
+sharpc test_arith.sp -o test_arith.exe
+test_arith.exe && echo exit=1
+```
+
+---
+
+## 20. bool 字面量与逻辑运算
+
+### TDD-Expr-4：bool literals and logic operators
+
+```sp
+// SP 输入
+i32 main() {
+    bool t = true;
+    bool f = false;
+    if (t && !f) {
+        return 1;
+    }
+    return 0;
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    _Bool t = 1;
+    _Bool f = 0;
+    if (t && !f) {
+        return 1;
+    }
+    return 0;
+}
+```
+
+**验证：**
+```bash
+sharpc test_bool.sp -o test_bool.exe
+test_bool.exe && echo exit=1
+```
+
+---
+
+## 21. Array declaration and indexing
+
+### TDD-Expr-3：array declaration and indexing
+
+```sp
+// SP 输入
+i32 main() {
+    i32 arr[4];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    return arr[0] + arr[3]; /* 5 */
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    int32_t arr[4];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    return arr[0] + arr[3];
+}
+```
+
+**验证：**
+```bash
+sharpc test_array.sp -o test_array.exe
+test_array.exe && echo exit=5
+```
 
 ```sp
 // SP 输入

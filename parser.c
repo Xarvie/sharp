@@ -832,9 +832,10 @@ static Node* parse_vardecl(P* p) {
         Type* ty = base_ty;
         Node* init = NULL;
         /* Array dimensions: `name[N]` */
+        Node* dim = NULL;
         if (accept(p, TK_LBRACKET)) {
             if (!accept(p, TK_RBRACKET)) {
-                parse_expr(p);
+                dim = parse_expr(p);
                 expect(p, TK_RBRACKET, "expected ']'");
             }
             ty = type_ptr(p->arena, ty);
@@ -844,6 +845,7 @@ static Node* parse_vardecl(P* p) {
         Node* n = mk(p, ND_VARDECL, line);
         n->declared_type = ty;
         n->name = arena_strndup(p->arena, id.start, id.len);
+        n->lhs  = dim;   /* array size expression, NULL for pointer-like arrays */
         n->rhs  = init;
         nv_push(&decls, n);
 
@@ -1445,11 +1447,16 @@ Node* parse_program(Lexer* lx, Arena** arena) {
 
                 if (accept(p, TK_LBRACKET)) {
                     /* Global array: `Type name[N];` */
-                    expect(p, TK_RBRACKET, "expected ']'");
+                    Node* dim = NULL;
+                    if (!accept(p, TK_RBRACKET)) {
+                        dim = parse_expr(p);
+                        expect(p, TK_RBRACKET, "expected ']'");
+                    }
                     expect(p, TK_SEMI, "expected ';' after array declaration");
                     Node* nd = mk(p, ND_VARDECL, line);
-                    nd->declared_type = type_ptr(p->arena, vty);
+                    nd->declared_type = vty;
                     nd->name = vname;
+                    nd->lhs = dim;
                     nv_push(&decls, nd);
                 } else if (accept(p, TK_ASSIGN)) {
                     /* Global variable with init: `Type name = expr;` */
