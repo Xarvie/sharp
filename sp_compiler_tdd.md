@@ -62,7 +62,7 @@
 
 ## 总 TDD 测试映射表
 
-> **图例：** ✅ 已完成　📝 有正文用例（无独立测试文件）　❌ 测试文件编译失败　⬜ 待实现
+> **图例：** ✅ 已完成 📝 有正文用例（无独立测试文件） ❌ 测试文件编译失败 ⬜ 待实现
 
 | 测试文件 | TDD 编号 | 覆盖特性 | 状态 |
 |---|---|---|---|
@@ -97,28 +97,29 @@
 | test_types_all.sp | TDD-1.1~1.3 | SP 原生类型映射（i8~usize 等）| ✅ |
 | test_types_c_passthrough.sp | TDD-1.4 | 标准 C 类型原样透传 | ✅ |
 | test_calling_conv.sp | TDD-2.1~2.4 | 调用约定关键字（__cdecl/__stdcall/__fastcall/__unaligned）| ✅ |
-| *(无测试文件)* | TDD-3.1~3.2 | __declspec 扩展（noreturn/dllimport）| 📝 |
-| *(无测试文件)* | §5 | MSVC 整数字面量后缀 `i8`/`i16`/`i32`/`i64` | ⬜ |
+| `test_declspec_noreturn.sp` | TDD-3.1 | `__declspec(noreturn)` 函数声明 | ✅ |
+| `test_declspec_dllimport.sp` | TDD-3.2 | `__declspec(dllimport)` 外部变量声明 | ✅ |
+| `test_msvc_int_suffix.sp` | §5 | MSVC 整数字面量后缀 `i8`/`i16`/`i32`/`i64` | ✅ |
 | *(无测试文件)* | §8 | GCC 内联汇编 `__asm__` | ⬜ |
 | *(无测试文件)* | §9 | `#pragma push_macro` / `pop_macro` | ⬜ |
 | *(无测试文件)* | §10 | `#pragma pack` | ⬜ |
-| *(无测试文件)* | §11 | `_Bool` 类型 | ⬜ |
+| `test_bool_c.sp` | §11 | `_Bool` 类型 | ✅ |
 | *(无测试文件)* | §12 | `__restrict__` 关键字 | ⬜ |
 | *(无测试文件)* | §13 | 编译器内建宏类型 `__SIZE_TYPE__` 等 | ⬜ |
 | *(无测试文件)* | §14 | `extern "C++"` 块 | ⬜ |
 | *(无测试文件)* | §15 | SEH 异常处理宏 | ⬜ |
 | *(无测试文件)* | §17 | `sizeof` 类型派发宏（`fpclassify`/`signbit`）| ⬜ |
-| *(无测试文件)* | §18 | `NAN`/`INFINITY` 浮点常量定义 | ⬜ |
-| *(无测试文件)* | §19 | 强转指针哨兵值 | ⬜ |
-| *(无测试文件)* | §20 | `#pragma GCC system_header` | ⬜ |
-| *(无测试文件)* | §21 | 编译期静态断言老式写法 | ⬜ |
+| `test_nan_infinity.sp` | §18 | `NAN`/`INFINITY` 浮点常量定义 | ✅ |
+| `test_cast_sentinel.sp` | §19 | 强转指针哨兵值 | ✅ |
+| `test_pragma_system_header.sp` | §20 | `#pragma GCC system_header` | ✅ |
+| `test_static_assert_old.sp` | §21 | 编译期静态断言老式写法 | ✅ |
 | *(无测试文件)* | §22 | `alloca` / `__builtin_alloca` | ⬜ |
 | *(无测试文件)* | §23 | `__need_wint_t` 条件 typedef 模式 | ⬜ |
 | *(无测试文件)* | §24 | 柔性数组成员变种 `[1]` | ⬜ |
 | *(无测试文件)* | §25 | `L##` 宽字符串 token 拼接 | ⬜ |
 | *(无测试文件)* | §26 | `__attribute__((mode(DI)))` | ⬜ |
 | *(无测试文件)* | §27 | `__builtin_frame_address` / `__alignof__` | ⬜ |
-| *(无测试文件)* | §28 | `__STRICT_ANSI__` 条件编译 | ⬜ |
+| `test_strict_ansi.sp` | §28 | `__STRICT_ANSI__` 条件编译 | ✅ |
 | *(无测试文件)* | §29 | `_malloca` / `_freea` 智能栈堆分配 | ⬜ |
 | *(无测试文件)* | §30 | 双层宏展开 token-pasting | ⬜ |
 
@@ -999,6 +1000,86 @@ gcc -std=c11 -c output.c
 
 ---
 
+## 19. 强转指针哨兵值
+
+### §19.1：`(void*)(-1)` 哨兵值
+
+```sp
+// SP 输入 — C 风格的类型强转，常用于指针哨兵值
+i32 main() {
+    void* p = (void*)(-1);
+    return 0;
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    void* p = (void*)(-1);
+    return 0;
+}
+```
+
+**验证：**
+```bash
+gcc -std=c11 -Wall -c output.c
+```
+
+---
+
+### §19.2：`(i32*)(0xFFFFFFFF)` 无符号常量强转
+
+```sp
+// SP 输入 — 强转整数常量到指针类型
+i32 main() {
+    i32* ip = (i32*)(0xFFFFFFFF);
+    return 0;
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    int32_t* ip = (int32_t*)4294967295;
+    return 0;
+}
+```
+
+**验证：**
+```bash
+gcc -std=c11 -Wall -c output.c
+```
+
+---
+
+### §19.3：完整测试用例
+
+```sp
+/* §19 强转指针哨兵值 */
+i32 main() {
+    void* p = (void*)(-1);
+    i32* ip = (i32*)(0xFFFFFFFF);
+    return 0;
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    void* p = (void*)(-1);
+    int32_t* ip = (int32_t*)4294967295;
+    return 0;
+}
+```
+
+**验证：**
+```bash
+sharpc test_cast_sentinel.sp -o test_cast_sentinel.exe
+test_cast_sentinel.exe && echo exit=0
+```
+
+---
+
 ## 12. print / println built-in
 
 ### TDD-Stmt-1：print / println
@@ -1376,6 +1457,257 @@ int32_t main() {
 sharpc test_array.sp -o test_array.exe
 test_array.exe && echo exit=5
 ```
+
+---
+
+## 22. generic struct + impl
+
+### TDD-Generic-1：generic struct with method
+
+```sp
+// SP 输入
+struct Option<T> {
+    value: T;
+    is_some: bool;
+};
+
+impl Option<i32> {
+    fn unwrap(self) -> i32 {
+        return self.value;
+    }
+}
+
+i32 main() {
+    Option<i32> opt;
+    opt.value = 42;
+    opt.is_some = true;
+    return opt.unwrap();
+}
+```
+
+**期望 C 输出（大致，泛型会被 monomorphize）：**
+```c
+typedef struct Option_i32 {
+    int32_t value;
+    _Bool is_some;
+} Option_i32;
+
+int32_t Option_i32_unwrap(Option_i32 self) {
+    return self.value;
+}
+
+int32_t main() {
+    Option_i32 opt;
+    opt.value = 42;
+    opt.is_some = 1;
+    return Option_i32_unwrap(opt);
+}
+```
+
+**验证：**
+```bash
+sharpc test_generic.sp -o test_generic.exe
+test_generic.exe && echo exit=42
+```
+
+---
+
+## 23. MSVC 整数字面量后缀
+
+### TDD-MSVC-Suffix-1：`i8`/`i16`/`i32`/`i64` 后缀
+
+```sp
+// SP 输入
+i32 main() {
+    i64 a = 100i64;
+    i32 b = 50i32;
+    i16 c = 25i16;
+    i8  d = 10i8;
+    return 0;
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    int64_t a = 100LL;
+    int32_t b = 50;
+    int16_t c = 25;
+    int8_t  d = 10;
+    return 0;
+}
+```
+
+**验证：**
+```bash
+gcc -std=c11 -c output.c
+```
+
+---
+
+## 24. `_Bool` 类型
+
+### §11：`_Bool` 类型映射
+
+```sp
+// SP 输入
+i32 main() {
+    bool b = true;
+    if (b) {
+        return 1;
+    }
+    return 0;
+}
+```
+
+**期望 C 输出：**
+```c
+int32_t main() {
+    _Bool b = 1;
+    if (b) {
+        return 1;
+    }
+    return 0;
+}
+```
+
+**验证：**
+```bash
+sharpc test_bool_c.sp -o test_bool_c.exe
+test_bool_c.exe && echo exit=1
+```
+
+---
+
+## 25. `NAN`/`INFINITY` 浮点常量定义
+
+### §18：浮点常量
+
+```sp
+// SP 输入
+extern double NAN;
+extern double INFINITY;
+
+i32 main() {
+    double x = NAN;
+    double y = INFINITY;
+    return 0;
+}
+```
+
+**期望 C 输出：**
+```c
+extern double NAN;
+extern double INFINITY;
+
+int32_t main() {
+    double x = NAN;
+    double y = INFINITY;
+    return 0;
+}
+```
+
+**验证：**
+```bash
+sharpc test_nan_infinity.sp -o test_nan_infinity.exe
+```
+
+---
+
+## 26. `#pragma GCC system_header`
+
+### §20：系统头标记
+
+```sp
+// SP 输入
+#pragma GCC system_header
+
+i32 main() {
+    return 0;
+}
+```
+
+**期望 C 输出（透传 #pragma）：**
+```c
+#pragma GCC system_header
+
+int32_t main() {
+    return 0;
+}
+```
+
+**验证：**
+```bash
+sharpc test_pragma_system_header.sp -o test_pragma_system_header.exe
+```
+
+---
+
+## 27. 编译期静态断言老式写法
+
+### §21：`_Static_assert`
+
+```sp
+// SP 输入
+_Static_assert(sizeof(int) == 4, "int must be 4 bytes");
+
+i32 main() {
+    return 0;
+}
+```
+
+**期望 C 输出（透传）：**
+```c
+_Static_assert(sizeof(int) == 4, "int must be 4 bytes");
+
+int32_t main() {
+    return 0;
+}
+```
+
+**验证：**
+```bash
+sharpc test_static_assert_old.sp -o test_static_assert_old.exe
+```
+
+---
+
+## 28. `__STRICT_ANSI__` 条件编译
+
+### §28：条件编译
+
+```sp
+// SP 输入
+#ifndef __STRICT_ANSI__
+extern int _setmode(int fd, int mode);
+#endif
+
+i32 main() {
+    return 0;
+}
+```
+
+**期望 C 输出（透传预处理器指令）：**
+```c
+#ifndef __STRICT_ANSI__
+extern int _setmode(int fd, int mode);
+#endif
+
+int32_t main() {
+    return 0;
+}
+```
+
+**验证：**
+```bash
+sharpc test_strict_ansi.sp -o test_strict_ansi.exe
+```
+
+---
+
+## 29. `va_list` 多架构实现（高级）
+
+### §16：`va_list` 在不同架构下的实现
 
 ```sp
 // SP 输入

@@ -54,6 +54,9 @@ static const Keyword kws[] = {
     {"__unaligned", 11, TK___UNALIGNED},
     {"__restrict", 10, TK___RESTRICT},
     {"__restrict__", 12, TK___RESTRICT__},
+    {"__asm__", 7, TK_ASM},
+    {"__asm", 5, TK_ASM},
+    {"asm", 3, TK_ASM},
 };
 static const int nkws = (int)(sizeof(kws) / sizeof(kws[0]));
 
@@ -198,6 +201,25 @@ static Tok read_number(Lexer* lx) {
     }
     /* allow 1.0f etc. -> just consume */
     if (pc(lx, 0) == 'f' || pc(lx, 0) == 'F') { is_float = true; adv(lx); }
+
+    /* MSVC-style integer suffixes: i8 i16 i32 i64 u8 u16 u32 u64 (and unsigned variants ui8..ui64) */
+    if (!is_float) {
+        static const struct { const char* s; int len; } int_suffixes[] = {
+            {"ui64",4},{"ui32",4},{"ui16",4},{"ui8",3},
+            {"i64",3},{"i32",3},{"i16",3},{"i8",2},
+            {"u64",3},{"u32",3},{"u16",3},{"u8",2},
+        };
+        for (int i = 0; i < 12; i++) {
+            int sl = int_suffixes[i].len;
+            if (strncmp(lx->cur, int_suffixes[i].s, (size_t)sl) == 0) {
+                char after = pc(lx, sl);
+                if (!is_id(after)) {
+                    for (int j = 0; j < sl; j++) adv(lx);
+                    break;
+                }
+            }
+        }
+    }
 
     t.len = (int)(lx->cur - t.start);
     char buf[64]; int n = t.len < 63 ? t.len : 63;

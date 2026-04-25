@@ -194,19 +194,34 @@ static const char* parse_c_type_raw(P* p) {
 }
 
 /* Helper: consume `__declspec(...)` prefix if present.
- * Returns true if consumed. */
-static bool skip_declspec(P* p) {
-    if (!accept(p, TK___DECLSPEC)) return false;
+ * Returns the inner content string (e.g. "noreturn", "dllimport"), or NULL.
+ * The returned pointer points into the lexer's source buffer. */
+static const char* parse_declspec(P* p) {
+    if (!accept(p, TK___DECLSPEC)) return NULL;
     expect(p, TK_LPAREN, "expected '(' after __declspec");
+    const char* start = lex_peek(p->lex).start;
     int depth = 1;
     while (depth > 0) {
         Tok t = lex_peek(p->lex);
         if (t.kind == TK_EOF) break;
         if (t.kind == TK_LPAREN) depth++;
         else if (t.kind == TK_RPAREN) depth--;
+        if (depth == 0) {
+            /* The inner content is from `start` to `t.start` (exclusive of ')'). */
+            size_t len = (size_t)(t.start - start);
+            lex_next(p->lex); /* consume the ')' */
+            return len > 0 ? arena_strndup(p->arena, start, (int)len) : "";
+        }
         lex_next(p->lex);
     }
-    return true;
+    lex_next(p->lex); /* consume the ')' if we fell through */
+    return "";
+}
+
+/* Helper: consume `__declspec(...)` if present, discard content.
+ * Legacy wrapper for use in type-prefix positions where we don't care. */
+static bool skip_declspec(P* p) {
+    return parse_declspec(p) != NULL;
 }
 
 /* Helper: consume `__attribute__((...))` suffix if present.
@@ -379,13 +394,17 @@ static Type* parse_type(P* p) {
     /* Apply leading const to the base type. */
     if (leading_const) base = type_const(p->arena, base);
 
-    /* pointer suffix: 'T*' [const] ('*' [const] repeated)
+    /* pointer suffix: 'T*' [const] [__restrict__] ('*' ... repeated)
      * Each `*` creates a new pointer type; an optional trailing `const`
-     * applies to that pointer itself (e.g. `u8* const`). */
+     * or `__restrict__` applies to that pointer itself (e.g. `u8* const`). */
     while (accept(p, TK_STAR)) {
         base = type_ptr(p->arena, base);
         if (accept(p, TK_CONST)) {
             base = type_const(p->arena, base);
+        }
+        if (accept(p, TK___RESTRICT) || accept(p, TK___RESTRICT__)) {
+            /* __restrict__ qualifier on pointer — consumed and dropped
+             * for now since Sharp's type system doesn't model restrict. */
         }
     }
 
@@ -799,10 +818,38 @@ static Node* parse_primary(P* p) {
             return n;
         }
         case TK_LPAREN: {
-            lex_next(p->lex);
-            Node* e = parse_expr(p);
-            expect(p, TK_RPAREN, "expected ')'");
-            return e;
+            /* Type-cast lookahead: `(Type)expr` or `(Type)(expr)`
+             * Try parsing a type after `(`; if successful and next token is `)`,
+             * it's a cast. Otherwise fall back to grouped expression. */
+            LexerState saved = lex_save(p->lex);
+            lex_next(p->lex); /* consume '(' */
+            int saved_err    = g_error_count;
+            g_silent         = true;
+            Type* cast_ty    = parse_type(p);
+            g_silent         = false;
+            bool is_cast     = (cast_ty && g_error_count == saved_err &&
+                                lex_peek(p->lex).kind == TK_RPAREN);
+            if (!is_cast) {
+                /* Not a cast — restore lexer to before '(' and parse as grouped expression */
+                lex_restore(p->lex, saved);
+                g_error_count = saved_err;
+                lex_next(p->lex); /* re-consume '(' */
+                Node* e = parse_expr(p);
+                expect(p, TK_RPAREN, "expected ')'");
+                return e;
+            }
+            /* It's a cast: consume the type + `)`, then parse operand */
+            lex_restore(p->lex, saved);
+            g_error_count = saved_err;
+            lex_next(p->lex); /* consume '(' */
+            Type* ty = parse_type(p);
+            expect(p, TK_RPAREN, "expected ')' after cast type");
+            /* Parse the cast operand — can be another parenthesized expr */
+            Node* operand = parse_unary(p);
+            Node* n = mk(p, ND_CAST, t.line);
+            n->declared_type = ty;
+            n->rhs = operand;
+            return n;
         }
         case TK_PRINT:
         case TK_PRINTLN: {
@@ -1020,6 +1067,36 @@ static Node* parse_stmt(P* p) {
         case TK_SEMI: {   /* empty stmt */
             lex_next(p->lex);
             return mk(p, ND_BLOCK, t.line);
+        }
+        case TK_ASM: {
+            /* __asm__ ... ;  pass-through */
+            int line = t.line;
+            const char* start = t.start;
+            lex_next(p->lex); /* consume '__asm__' */
+            if (lex_peek(p->lex).kind == TK_IDENT && lex_ident_is(lex_peek(p->lex), "volatile")) {
+                lex_next(p->lex);
+            }
+            /* Skip everything until matching ');' or ';' */
+            if (lex_peek(p->lex).kind == TK_LPAREN) {
+                int depth = 0;
+                while (lex_peek(p->lex).kind != TK_EOF) {
+                    Tok tok = lex_peek(p->lex);
+                    if (tok.kind == TK_LPAREN) depth++;
+                    else if (tok.kind == TK_RPAREN) {
+                        depth--;
+                        lex_next(p->lex);
+                        if (depth <= 0) break;
+                        continue;
+                    }
+                    lex_next(p->lex);
+                }
+            }
+            expect(p, TK_SEMI, "expected ';' after __asm__");
+            Node* n = mk(p, ND_ASM, line);
+            const char* end = lex_peek(p->lex).start;
+            size_t len = (size_t)(end - start);
+            n->raw_text = arena_strndup(p->arena, start, (int)len);
+            return n;
         }
         default:
             if (looks_like_decl(p)) return parse_vardecl(p);
@@ -1399,10 +1476,19 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                 Type* base = parse_type(p);
                 Tok name_tok = expect(p, TK_IDENT, "expected typedef name");
                 const char* tname = arena_strndup(p->arena, name_tok.start, name_tok.len);
+                /* Array dimensions: `typedef T Name[N];` */
+                Node* dim = NULL;
+                if (accept(p, TK_LBRACKET)) {
+                    if (!accept(p, TK_RBRACKET)) {
+                        dim = parse_expr(p);
+                        expect(p, TK_RBRACKET, "expected ']'");
+                    }
+                }
                 expect(p, TK_SEMI, "expected ';' after typedef");
                 Node* nd = mk(p, ND_TYPEDEF_DECL, line);
                 nd->declared_type = base;
                 nd->name = tname;
+                nd->lhs = dim;   /* array size expression, NULL for plain typedef */
                 nv_push(&decls, nd);
             }
         } else if (t.kind == TK_STATIC_ASSERT) {
@@ -1441,6 +1527,22 @@ Node* parse_program(Lexer* lx, Arena** arena) {
             LexerState saved = lex_save(p->lex);
             int saved_err = g_error_count;
             g_silent = true;
+
+            /* Skip leading modifiers that can appear before the actual type. */
+            const char* declspec = NULL;
+            /* Skip TK_EXTERN and TK___INLINE__ prefixes */
+            for (;;) {
+                TokKind k = lex_peek(p->lex).kind;
+                if (k == TK_EXTERN || k == TK___INLINE__ || k == TK___INLINE) {
+                    lex_next(p->lex);
+                } else if (k == TK___DECLSPEC) {
+                    declspec = parse_declspec(p);
+                } else if (k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL || k == TK___UNALIGNED) {
+                    lex_next(p->lex);
+                } else {
+                    break;
+                }
+            }
 
             const char* cc = parse_calling_conv(p);
             Type* ret = parse_type(p);
@@ -1493,6 +1595,7 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                         ext->params = nv_freeze(p, &params, &ext->nparams);
                         ext->is_variadic = is_variadic;
                         ext->cc = cc;
+                        ext->declspec = declspec;
                         nv_push(&decls, ext);
                         g_error_count = saved_err;
                         continue;
@@ -1506,17 +1609,12 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                     }
                 }
             } else if (fname) {
-                /* Not a function — could be global variable or array */
+                /* Not a function — could be global variable or array.
+                 * Use already-parsed type (ret) and name (fname) from lookahead. */
                 g_silent = false;
-                /* Restore to re-parse type+name cleanly */
-                lex_restore(p->lex, saved);
-                g_error_count = saved_err;
 
-                /* Parse type and name for variable */
-                Type* vty = parse_type(p);
-                Tok vname_tok = expect(p, TK_IDENT, "expected variable name");
-                const char* vname = arena_strndup(p->arena, vname_tok.start, vname_tok.len);
-                int line = vname_tok.line;
+                const char* vname = fname;
+                int line = t.line;
 
                 if (accept(p, TK_LBRACKET)) {
                     /* Global array: `Type name[N];` */
@@ -1527,25 +1625,29 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                     }
                     expect(p, TK_SEMI, "expected ';' after array declaration");
                     Node* nd = mk(p, ND_VARDECL, line);
-                    nd->declared_type = vty;
+                    nd->declared_type = ret;
                     nd->name = vname;
                     nd->lhs = dim;
+                    nd->declspec = declspec;
                     nv_push(&decls, nd);
                 } else if (accept(p, TK_ASSIGN)) {
                     /* Global variable with init: `Type name = expr;` */
                     Node* val = parse_expr(p);
                     expect(p, TK_SEMI, "expected ';' after variable declaration");
                     Node* nd = mk(p, ND_VARDECL, line);
-                    nd->declared_type = vty;
+                    nd->declared_type = ret;
                     nd->name = vname;
                     nd->rhs = val;
+                    nd->declspec = declspec;
                     nv_push(&decls, nd);
                 } else {
-                    /* Global variable without init: `Type name;` */
+                    /* Global variable without init: `Type name;`
+                     * If __declspec(dllimport), treat as extern var */
                     expect(p, TK_SEMI, "expected ';' after variable declaration");
-                    Node* nd = mk(p, ND_VARDECL, line);
-                    nd->declared_type = vty;
+                    Node* nd = mk(p, declspec ? ND_EXTERN_VAR : ND_VARDECL, line);
+                    nd->declared_type = ret;
                     nd->name = vname;
+                    nd->declspec = declspec;
                     nv_push(&decls, nd);
                 }
                 continue;

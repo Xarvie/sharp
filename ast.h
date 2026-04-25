@@ -226,6 +226,12 @@ static inline Node* print_value  (const Node* n) { AST_ASSERT_KIND(n, ND_PRINT);
 static inline Node* println_value(const Node* n) { AST_ASSERT_KIND(n, ND_PRINTLN); return n->rhs; }
 
 /* ===================================================================== *
+ *   ND_CAST — C-style type cast (Type)expr
+ * ===================================================================== */
+static inline Type*       cast_type (const Node* n) { AST_ASSERT_KIND(n, ND_CAST); return n->declared_type; }
+static inline Node*       cast_expr (const Node* n) { AST_ASSERT_KIND(n, ND_CAST); return n->rhs; }
+
+/* ===================================================================== *
  *   ND_FUNC_DECL — function or method
  * ===================================================================== */
 static inline const char* func_name       (const Node* n) { AST_ASSERT_KIND(n, ND_FUNC_DECL); return n->name;        }

@@ -463,6 +463,10 @@ static Type* expr_type(G* g, Node* e) {
             return NULL;
         }
 
+        case ND_CAST:
+            /* (Type)expr — the result type is the target cast type. */
+            return cast_type(e);
+
         case ND_CALL: {
             Node* callee = call_callee(e);
             if (callee && callee->kind == ND_MEMBER) {
@@ -844,6 +848,16 @@ static void emit_expr(G* g, Node* e) {
         case ND_MEMBER:     emit_member(g, e);      return;
         case ND_STRUCT_LIT: emit_struct_lit(g, e);  return;
 
+        case ND_CAST: {
+            /* C-style type cast: (Type)expr */
+            Type* ty = cast_type(e);
+            sb_putc(&g->out, '(');
+            emit_type(g, ty);
+            sb_putc(&g->out, ')');
+            emit_expr(g, cast_expr(e));
+            return;
+        }
+
         case ND_PRINT:
         case ND_PRINTLN: {
             /* print(expr) / println(expr). Best-effort type-aware dispatch
@@ -1119,6 +1133,13 @@ static bool emit_stmt_core(G* g, Node* s) {
             return false;
         }
 
+        case ND_ASM:
+            if (s->raw_text) {
+                pad(g);
+                sb_printf(&g->out, "%s;\n", s->raw_text);
+            }
+            return false;
+
         default:
             pad(g);
             sb_puts(&g->out, "/*??stmt*/;\n");
@@ -1175,14 +1196,14 @@ static void emit_union_decl(G* g, Node* u) {
 }
 
 static void emit_union_body(G* g, Node* u) {
-    sb_printf(&g->out, "typedef union %s {\n", u->name);
+    sb_printf(&g->out, "union %s {\n", u->name);
     for (int i = 0; i < u->nfields; i++) {
         Node* f = u->fields[i];
         sb_puts(&g->out, "    ");
         emit_type(g, f->declared_type);
         sb_printf(&g->out, " %s;\n", f->name);
     }
-    sb_printf(&g->out, "} %s;\n\n", u->name);
+    sb_printf(&g->out, "};\n\n");
 }
 
 static void emit_struct_fwd_decl(G* g, Node* s) {
@@ -1191,6 +1212,32 @@ static void emit_struct_fwd_decl(G* g, Node* s) {
 
 static void emit_union_fwd_decl(G* g, Node* u) {
     sb_printf(&g->out, "typedef union %s %s;\n", u->name, u->name);
+}
+
+static void emit_typedef_decl(G* g, Node* d) {
+    Type* dt = d->declared_type;
+    if (dt && dt->kind == TY_NAMED) {
+        SymStruct* ss = sema_find_struct(g->st, dt->name);
+        if (ss) {
+            sb_printf(&g->out, "typedef struct %s %s", dt->name, d->name);
+            if (d->lhs) {
+                sb_putc(&g->out, '[');
+                emit_expr(g, d->lhs);
+                sb_putc(&g->out, ']');
+            }
+            sb_puts(&g->out, ";\n");
+            return;
+        }
+    }
+    sb_puts(&g->out, "typedef ");
+    emit_type(g, dt);
+    sb_printf(&g->out, " %s", d->name);
+    if (d->lhs) {
+        sb_putc(&g->out, '[');
+        emit_expr(g, d->lhs);
+        sb_putc(&g->out, ']');
+    }
+    sb_puts(&g->out, ";\n");
 }
 
 static void emit_struct_body(G* g, Node* s) {
@@ -1349,6 +1396,10 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
     /* Phase 7: emit extern function declarations. */
     for (int i = 0; i < st->nexterns; i++) {
         SymExtern* e = &st->externs[i];
+        /* __declspec(noreturn) → __attribute__((noreturn)) */
+        if (e->decl->declspec && strcmp(e->decl->declspec, "noreturn") == 0) {
+            sb_puts(&g->out, "__attribute__((noreturn)) ");
+        }
         sb_puts(&g->out, "extern ");
         emit_type(g, e->ret_type);
         if (e->decl->cc) {
@@ -1373,6 +1424,10 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
         if (d->kind != ND_EXTERN_VAR) continue;
+        /* __declspec(dllimport) → pass-through as-is */
+        if (d->declspec) {
+            sb_printf(&g->out, "__declspec(%s) ", d->declspec);
+        }
         sb_puts(&g->out, "extern ");
         emit_type(g, d->declared_type);
         sb_printf(&g->out, " %s;\n", d->name);
@@ -1381,6 +1436,12 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
     if (st->nexterns > 0) sb_putc(&g->out, '\n');
 
     /* ------- Forward declarations ------- */
+    /* Typedef declarations (including array typedefs). */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_TYPEDEF_DECL)
+            emit_typedef_decl(g, d);
+    }
     /* Non-generic structs and forward declarations. */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
@@ -1543,17 +1604,33 @@ void cgen_buf(Node* prog, SymTable* st, StrBuf* sb) {
     if (st->nexterns > 0) sb_putc(&g->out, '\n');
 
     /* ------- Forward declarations ------- */
-    /* Non-generic structs. */
+    /* Typedef declarations (including array typedefs). */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_TYPEDEF_DECL)
+            emit_typedef_decl(g, d);
+    }
+    /* Non-generic structs and forward declarations. */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
         if (d->kind == ND_STRUCT_DECL && !is_generic_template(d))
             emit_struct_fwd(g, d);
+        if (d->kind == ND_STRUCT_FWD)
+            emit_struct_fwd_decl(g, d);
     }
     /* _Static_assert pass-through */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
         if (d->kind == ND_STATIC_ASSERT && d->raw_text)
             sb_printf(&g->out, "%s\n", d->raw_text);
+    }
+    /* Union forward declarations and bodies. */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_UNION_DECL)
+            emit_union_decl(g, d);
+        if (d->kind == ND_UNION_FWD)
+            emit_union_fwd_decl(g, d);
     }
     /* Specialised structs: one per SymMono. */
     for (int i = 0; i < st->nmonos; i++) {
@@ -1593,12 +1670,26 @@ void cgen_buf(Node* prog, SymTable* st, StrBuf* sb) {
         if (d->kind == ND_STRUCT_DECL && !is_generic_template(d))
             emit_struct_body(g, d);
     }
+    /* Union bodies. */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_UNION_DECL)
+            emit_union_body(g, d);
+    }
     for (int i = 0; i < st->nmonos; i++) {
         SymMono* m = &st->monos[i];
         Node* tmpl_s = find_generic_struct_decl(prog, m->generic_name);
         if (!tmpl_s) continue;
         enter_spec_ctx(g, tmpl_s, m);
-        emit_struct_body(g, prog);
+        sb_printf(&g->out, "struct %s {\n", m->mangled);
+        if (tmpl_s->nfields == 0) sb_puts(&g->out, "    char _sharp_unit_;\n");
+        for (int k = 0; k < tmpl_s->nfields; k++) {
+            Node* f = tmpl_s->fields[k];
+            sb_puts(&g->out, "    ");
+            emit_type(g, f->declared_type);
+            sb_printf(&g->out, " %s;\n", f->name);
+        }
+        sb_puts(&g->out, "};\n\n");
         exit_spec_ctx(g);
     }
 

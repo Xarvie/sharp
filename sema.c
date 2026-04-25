@@ -999,6 +999,16 @@ static Type* tc_expr(TC* tc, Node* e) {
             return NULL;
         }
 
+        case ND_CAST: {
+            /* (Type)expr — type-check operand, result type is the cast target */
+            Type* et = tc_expr(tc, cast_expr(e));
+            Type* ct = cast_type(e);
+            if (!ct) return et;
+            /* Attach the cast type to the node for downstream passes */
+            set_ast_type(e, ct);
+            return ct;
+        }
+
         case ND_CALL: {
             Node* callee = call_callee(e);
             int   nargs  = call_nargs (e);

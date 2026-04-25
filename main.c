@@ -319,6 +319,10 @@ int main(int argc, char** argv) {
     /* TCC-specific */
     cpp_define(cpp_ctx, "__TINYC__",         "1");
 
+    /* Floating-point constants used by system headers (math.h, etc.) */
+    cpp_define(cpp_ctx, "INFINITY",  "(1.0/0.0)");
+    cpp_define(cpp_ctx, "NAN",       "(0.0/0.0)");
+
 #ifdef _WIN32
     /* MSYS2/MinGW fallback */
     cpp_add_sys_include(cpp_ctx, "C:/msys64/mingw64/include");

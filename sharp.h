@@ -192,6 +192,9 @@ typedef enum {
     TK___CDECL, TK___STDCALL, TK___FASTCALL, TK___UNALIGNED,
     TK___RESTRICT, TK___RESTRICT__,
 
+    /* inline assembly */
+    TK_ASM,
+
     /* punctuation */
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE, TK_LBRACKET, TK_RBRACKET,
     TK_COMMA, TK_SEMI, TK_COLON, TK_DCOLON, TK_DOT, TK_ELLIPSIS, TK_ARROW,
@@ -290,6 +293,7 @@ typedef enum {
     /* I/O built-ins */
     ND_PRINT,          /* print(expr)   — writes to stdout, no newline */
     ND_PRINTLN,        /* println(expr) — writes to stdout + '\n' */
+    ND_CAST,           /* (Type)expr — C-style type cast */
     ND_EXTERN_DECL,    /* extern return_type name(params); — C linkage decl */
     ND_TYPEDEF_DECL,   /* typedef Type name; — type alias */
     ND_EXTERN_VAR,     /* extern Type name; — external variable decl */
@@ -298,9 +302,10 @@ typedef enum {
      * local at every scope exit (natural `}`, return, break, continue).
      * CGen just emits `T___drop(&name);` — it does not walk any scope stack
      * to figure out who needs dropping. */
-    ND_DROP            /* drop_var_name(n) is the local identifier to drop;
+    ND_DROP,           /* drop_var_name(n) is the local identifier to drop;
                         * drop_struct_name(n) is the mangled struct/type
                         * used for the  T___drop(&name)  call. */
+    ND_ASM             /* __asm__ stmt — raw_text holds the C asm string */
 } NodeKind;
 
 typedef enum {
@@ -374,6 +379,12 @@ struct Node {
     /* Calling convention modifier (e.g. "__cdecl", "__stdcall").
      * Only used on ND_FUNC_DECL / ND_EXTERN_DECL / ND_VARDECL. */
     const char*  cc;
+
+    /* __declspec attribute captured content (e.g. "noreturn", "dllimport").
+     * Used on ND_FUNC_DECL / ND_EXTERN_VAR / ND_EXTERN_DECL.
+     * For noreturn → C output: __attribute__((noreturn)) before return type.
+     * For dllimport → C output: __declspec(dllimport) as-is. */
+    const char*  declspec;
 
     /* Raw text for pass-through constructs (e.g. _Static_assert) */
     const char*  raw_text;
