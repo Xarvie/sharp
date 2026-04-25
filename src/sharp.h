@@ -191,6 +191,7 @@ typedef enum {
     /* Calling conventions (TDD-2.1~2.4) */
     TK___CDECL, TK___STDCALL, TK___FASTCALL, TK___UNALIGNED,
     TK___RESTRICT, TK___RESTRICT__,
+    TK_RESTRICT,
 
     /* inline assembly */
     TK_ASM,
@@ -238,12 +239,14 @@ typedef enum {
     TY_U8,  TY_U16, TY_U32, TY_U64,
     TY_F32, TY_F64, TY_ISIZE, TY_USIZE,
     TY_PTR,      /* base pointer */
-    TY_NAMED     /* user-declared struct, resolved by name */
+    TY_NAMED,    /* user-declared struct, resolved by name */
+    TY_FUNC,     /* function type: ret(params...) — for function pointers */
+    TY_BITFIELD  /* bitfield: base type with width */
 } TypeKind;
 
 struct Type {
     TypeKind      kind;
-    Type*         base;       /* pointee for TY_PTR / TY_REF */
+    Type*         base;       /* pointee for TY_PTR / TY_REF / TY_BITFIELD base */
     const char*   name;       /* for TY_NAMED (NUL-terminated) */
     /* Phase 4: type arguments for generic instantiations.
      * For `Stack<i32>`, kind==TY_NAMED, name=="Stack", targs=[i32], ntargs=1.
@@ -256,6 +259,12 @@ struct Type {
      * and its base (TY_U8) has is_const=true. For `u8* const`, the
      * TY_PTR itself has is_const=true. */
     bool          is_const;
+    /* Phase C: function type parameters (TY_FUNC) */
+    Type**        func_params;  /* parameter types for TY_FUNC */
+    int           nfunc_params;
+    bool          func_variadic;
+    /* Phase C: bitfield width (TY_BITFIELD) */
+    int           bit_width;
 };
 
 Type* type_prim  (Arena** a, TypeKind k);
@@ -263,6 +272,9 @@ Type* type_ptr   (Arena** a, Type* base);
 Type* type_named (Arena** a, const char* name);  /* name must be arena-owned and NUL-terminated */
 Type* type_named_generic(Arena** a, const char* name, Type** targs, int ntargs); /* phase 4 */
 Type* type_const (Arena** a, Type* base);        /* const-qualified type */
+/* Phase C: function type and bitfield constructors */
+Type* type_func  (Arena** a, Type* ret, Type** params, int nparams, bool variadic);
+Type* type_bitfield(Arena** a, Type* base, int width);
 
 bool  type_is_primitive (TypeKind k);
 bool  type_is_pointerlike(Type* t);   /* TY_PTR only */
@@ -305,7 +317,13 @@ typedef enum {
     ND_DROP,           /* drop_var_name(n) is the local identifier to drop;
                         * drop_struct_name(n) is the mangled struct/type
                         * used for the  T___drop(&name)  call. */
-    ND_ASM             /* __asm__ stmt — raw_text holds the C asm string */
+    ND_ASM,            /* __asm__ stmt — raw_text holds the C asm string */
+    /* Phase C: C language compatibility nodes */
+    ND_ANON_STRUCT,    /* anonymous struct field (no name) */
+    ND_ANON_UNION,     /* anonymous union field (no name) */
+    ND_COMPOUND_LIT,   /* (Type){ init_list } — C99 compound literal */
+    ND_INIT_LIST,      /* { expr, expr, ... } — initializer list */
+    ND_DESIG_INIT      /* .field = expr — designated initializer */
 } NodeKind;
 
 typedef enum {
@@ -388,6 +406,12 @@ struct Node {
 
     /* Raw text for pass-through constructs (e.g. _Static_assert) */
     const char*  raw_text;
+
+    /* Phase C: bitfield width (on ND_FIELD nodes) */
+    int          bit_width;
+
+    /* Phase C: __attribute__ content for pass-through */
+    const char*  attribute;
 };
 
 /* self-receiver kinds */

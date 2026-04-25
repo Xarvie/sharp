@@ -283,7 +283,7 @@ static Type* parse_type(P* p) {
     for (;;) {
         TokKind k = lex_peek(p->lex).kind;
         if (k == TK___INLINE__ || k == TK___INLINE || k == TK_EXTERN ||
-            k == TK___RESTRICT || k == TK___RESTRICT__) {
+            k == TK___RESTRICT || k == TK___RESTRICT__ || k == TK_RESTRICT) {
             lex_next(p->lex);
         } else if (k == TK___DECLSPEC) {
             skip_declspec(p);
@@ -394,21 +394,236 @@ static Type* parse_type(P* p) {
     /* Apply leading const to the base type. */
     if (leading_const) base = type_const(p->arena, base);
 
-    /* pointer suffix: 'T*' [const] [__restrict__] ('*' ... repeated)
+    /* pointer suffix: 'T*' [const] [restrict] ('*' ... repeated)
      * Each `*` creates a new pointer type; an optional trailing `const`
-     * or `__restrict__` applies to that pointer itself (e.g. `u8* const`). */
+     * or `restrict` applies to that pointer itself (e.g. `u8* const`). */
     while (accept(p, TK_STAR)) {
         base = type_ptr(p->arena, base);
         if (accept(p, TK_CONST)) {
             base = type_const(p->arena, base);
         }
-        if (accept(p, TK___RESTRICT) || accept(p, TK___RESTRICT__)) {
-            /* __restrict__ qualifier on pointer — consumed and dropped
+        if (accept(p, TK___RESTRICT) || accept(p, TK___RESTRICT__) || accept(p, TK_RESTRICT)) {
+            /* restrict qualifier on pointer — consumed and dropped
              * for now since Sharp's type system doesn't model restrict. */
         }
     }
 
     return base;
+}
+
+/* ===================================================================== *
+ *   Phase C: C-style declarator system
+ * ===================================================================== */
+
+/* Parse declaration specifiers: type + storage-class + qualifiers.
+ * Returns the base type. Consumes tokens like `const`, `extern`, `__thread`,
+ * `__extension__`, `__declspec(...)`, calling conventions, etc.
+ *
+ * This is the FIRST HALF of a C declaration. The SECOND HALF is the
+ * declarator (name + pointer/array/function suffixes). */
+static Type* parse_decl_specifiers(P* p) {
+    /* Storage-class and qualifier flags (not used for type construction,
+     * but consumed to allow C headers to parse). */
+    bool saw_extern = false;
+    bool saw_static = false;
+    bool saw_thread = false;
+    bool saw_extension = false;
+
+    /* Skip storage-class specifiers, __extension__, __declspec, calling conv */
+    for (;;) {
+        TokKind k = lex_peek(p->lex).kind;
+        if (k == TK_EXTERN) { saw_extern = true; lex_next(p->lex); }
+        else if (k == TK_STATIC) { saw_static = true; lex_next(p->lex); }
+        else if (k == TK___INLINE__ || k == TK___INLINE) { lex_next(p->lex); }
+        else if (k == TK___RESTRICT || k == TK___RESTRICT__ || k == TK_RESTRICT) { lex_next(p->lex); }
+        else if (k == TK___DECLSPEC) { skip_declspec(p); }
+        else if (k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL || k == TK___UNALIGNED) {
+            lex_next(p->lex);
+        }
+        /* __extension__ keyword (GCC) — suppress warnings */
+        else if (k == TK_IDENT && lex_ident_is(lex_peek(p->lex), "__extension__")) {
+            saw_extension = true; lex_next(p->lex);
+        }
+        /* __thread / __declspec(thread) — thread-local storage */
+        else if (k == TK_IDENT && lex_ident_is(lex_peek(p->lex), "__thread")) {
+            saw_thread = true; lex_next(p->lex);
+        }
+        else { break; }
+    }
+
+    /* Now parse the actual type — delegate to existing parse_type() logic */
+    return parse_type(p);
+}
+
+/* Forward declarations for recursive declarator parsing */
+static Node* parse_expr(P* p);
+static Type* parse_declarator_internal(P* p, Type* base, const char** out_name, bool abstract);
+
+/* Parse a declarator: the part of a declaration that includes the name
+ * and pointer/array/function suffixes.
+ *
+ *   declarator = pointer? direct_declarator
+ *   direct_declarator = IDENT
+ *                     | '(' declarator ')'
+ *                     | direct_declarator '[' expr? ']'
+ *                     | direct_declarator '(' param_list? ')'
+ *   pointer = '*' type_qualifier* pointer?
+ *
+ * Returns the fully-constructed type (e.g., `int (*)(int)` for a function
+ * pointer) and sets *out_name to the declared identifier (NULL for abstract).
+ *
+ * If `abstract` is true, the IDENT is optional (for casts, sizeof, etc.).
+ */
+static Type* parse_declarator_internal(P* p, Type* base, const char** out_name, bool abstract) {
+    *out_name = NULL;
+
+    /* ----- pointer prefix ----- */
+    while (accept(p, TK_STAR)) {
+        base = type_ptr(p->arena, base);
+        /* Optional const/volatile/restrict after each '*' */
+        for (;;) {
+            TokKind k = lex_peek(p->lex).kind;
+            if (k == TK_CONST) {
+                lex_next(p->lex);
+                base = type_const(p->arena, base);
+            } else if (k == TK___RESTRICT || k == TK___RESTRICT__ || k == TK_RESTRICT) {
+                lex_next(p->lex); /* discard for now */
+            } else if (k == TK_IDENT && lex_ident_is(lex_peek(p->lex), "__restrict")) {
+                lex_next(p->lex); /* discard */
+            } else { break; }
+        }
+    }
+
+    /* Skip __declspec that appears between type and declarator name.
+     * MSVC allows: `char* __declspec(nothrow) _base;` */
+    if (lex_peek(p->lex).kind == TK___DECLSPEC) {
+        skip_declspec(p);
+    }
+
+    /* ----- direct declarator ----- */
+    Tok t = lex_peek(p->lex);
+
+    if (t.kind == TK_LPAREN) {
+        /* Could be: ( declarator )  — parenthesized declarator
+         * Or:     ( abstract_declarator )  — for function pointer params */
+        LexerState saved = lex_save(p->lex);
+        lex_next(p->lex); /* consume '(' */
+
+        /* Try to parse an inner declarator. If it fails and we're abstract,
+         * it might be a parameter list. */
+        int saved_err = g_error_count;
+        g_silent = true;
+        const char* inner_name = NULL;
+        Type* inner_type = parse_declarator_internal(p, base, &inner_name, abstract);
+        g_silent = false;
+
+        if (g_error_count == saved_err && lex_peek(p->lex).kind == TK_RPAREN) {
+            /* Success: ( declarator ) */
+            lex_next(p->lex); /* consume ')' */
+            base = inner_type;
+            if (inner_name) *out_name = inner_name;
+        } else {
+            /* Not a parenthesized declarator — restore and treat as function params */
+            lex_restore(p->lex, saved);
+            g_error_count = saved_err;
+            /* Don't consume '(', let the suffix parser handle it */
+        }
+    } else if (t.kind == TK_IDENT && !abstract) {
+        /* Named declarator */
+        lex_next(p->lex);
+        *out_name = arena_strndup(p->arena, t.start, t.len);
+    } else if (t.kind == TK_IDENT && abstract) {
+        /* In abstract declarator, an identifier could be a type name */
+        /* Check if it looks like a type (already handled by base) */
+        /* For pure abstract, we don't consume identifiers here */
+    }
+
+    /* Skip __attribute__ that appears after the declarator name.
+     * C allows: `int x __attribute__((aligned(16)));` */
+    skip_attribute(p);
+
+    /* ----- suffixes: [array] and (function params) ----- */
+    for (;;) {
+        Tok s = lex_peek(p->lex);
+        if (s.kind == TK_LBRACKET) {
+            /* Array suffix: name[N] or name[] */
+            lex_next(p->lex); /* consume '[' */
+            if (accept(p, TK_RBRACKET)) {
+                /* Unsized array — becomes pointer */
+                base = type_ptr(p->arena, base);
+            } else {
+                /* Parse dimension expression, but for type construction
+                 * we just make it a pointer (C arrays decay anyway). */
+                Node* dim = parse_expr(p);
+                (void)dim;
+                expect(p, TK_RBRACKET, "expected ']' after array dimension");
+                base = type_ptr(p->arena, base);
+            }
+        } else if (s.kind == TK_LPAREN) {
+            /* Function parameter list */
+            lex_next(p->lex); /* consume '(' */
+            Type** params = NULL;
+            int nparams = 0;
+            int pcap = 0;
+            bool variadic = false;
+
+            if (lex_peek(p->lex).kind != TK_RPAREN) {
+                for (;;) {
+                    if (accept(p, TK_ELLIPSIS)) {
+                        variadic = true;
+                        if (!accept(p, TK_COMMA)) break;
+                        continue;
+                    }
+                    /* Parse parameter type (abstract declarator allowed) */
+                    Type* pty = parse_decl_specifiers(p);
+                    const char* pname;
+                    pty = parse_declarator_internal(p, pty, &pname, true);
+                    if (pcap == nparams) {
+                        pcap = pcap ? pcap * 2 : 4;
+                        Type** nd = (Type**)malloc((size_t)pcap * sizeof(Type*));
+                        if (nparams) memcpy(nd, params, (size_t)nparams * sizeof(Type*));
+                        free(params);
+                        params = nd;
+                    }
+                    params[nparams++] = pty;
+                    if (!accept(p, TK_COMMA)) break;
+                }
+            }
+            expect(p, TK_RPAREN, "expected ')' after parameter list");
+
+            /* Construct function type.
+             * If base is a pointer (from `*name` inside parentheses),
+             * this means we have a function pointer: `ret (*name)(params)`.
+             * The pointer's base is the return type, and we need to
+             * wrap the function type in a pointer.
+             * If base is not a pointer, it's the return type directly. */
+            if (base->kind == TY_PTR) {
+                Type* ret_type = base->base;
+                bool ptr_is_const = base->is_const;
+                base = type_func(p->arena, ret_type, params, nparams, variadic);
+                base = type_ptr(p->arena, base);
+                if (ptr_is_const) base = type_const(p->arena, base);
+            } else {
+                base = type_func(p->arena, base, params, nparams, variadic);
+            }
+            free(params);
+        } else {
+            break;
+        }
+    }
+
+    return base;
+}
+
+/* Parse a full declarator (with name). */
+static Type* parse_declarator(P* p, Type* base, const char** out_name) {
+    return parse_declarator_internal(p, base, out_name, false);
+}
+
+/* Parse an abstract declarator (type only, no name). */
+static Type* parse_abstract_declarator(P* p, Type* base) {
+    const char* name;
+    return parse_declarator_internal(p, base, &name, true);
 }
 
 /* Parse an optional `<T, U, ...>` type-parameter list after a struct/impl
@@ -458,6 +673,7 @@ static Node* parse_mul(P* p);
 static Node* parse_unary(P* p);
 static Node* parse_postfix(P* p);
 static Node* parse_primary(P* p);
+static Node* parse_init_list(P* p);
 
 /* ---------- expression parsing ---------- */
 static Node* parse_expr(P* p) { return parse_assign(p); }
@@ -818,17 +1034,46 @@ static Node* parse_primary(P* p) {
             return n;
         }
         case TK_LPAREN: {
-            /* Type-cast lookahead: `(Type)expr` or `(Type)(expr)`
-             * Try parsing a type after `(`; if successful and next token is `)`,
-             * it's a cast. Otherwise fall back to grouped expression. */
+            /* Three possibilities:
+             * 1. (Type){ init_list } — C99 compound literal
+             * 2. (Type)expr          — C-style type cast
+             * 3. (expr)              — grouped expression
+             * Try parsing a type after `(`; if successful and next token is
+             * `)`, it's a cast. If next token is `{`, it's a compound literal.
+             * Otherwise fall back to grouped expression. */
             LexerState saved = lex_save(p->lex);
             lex_next(p->lex); /* consume '(' */
             int saved_err    = g_error_count;
             g_silent         = true;
             Type* cast_ty    = parse_type(p);
             g_silent         = false;
-            bool is_cast     = (cast_ty && g_error_count == saved_err &&
-                                lex_peek(p->lex).kind == TK_RPAREN);
+            bool type_ok     = (cast_ty && g_error_count == saved_err);
+            TokKind next     = lex_peek(p->lex).kind;
+
+            /* Compound literal: (Type){ init_list }
+             * After parsing the type, we expect ')' then '{'.
+             * We need to peek two tokens ahead. */
+            bool is_compound = false;
+            if (type_ok && next == TK_RPAREN) {
+                Tok after_rparen = lex_peek2(p->lex);
+                is_compound = (after_rparen.kind == TK_LBRACE);
+            }
+
+            if (is_compound) {
+                /* Compound literal: (Type){ init_list } */
+                lex_restore(p->lex, saved);
+                g_error_count = saved_err;
+                lex_next(p->lex); /* consume '(' */
+                Type* ty = parse_type(p);
+                expect(p, TK_RPAREN, "expected ')' after compound literal type");
+                Node* init = parse_init_list(p);
+                Node* n = mk(p, ND_COMPOUND_LIT, t.line);
+                n->declared_type = ty;
+                n->rhs = init;
+                return n;
+            }
+
+            bool is_cast = (type_ok && next == TK_RPAREN);
             if (!is_cast) {
                 /* Not a cast — restore lexer to before '(' and parse as grouped expression */
                 lex_restore(p->lex, saved);
@@ -894,6 +1139,28 @@ static bool looks_like_decl(P* p) {
     Tok t1 = lex_peek2(p->lex);
     if (is_type_start(t0.kind)) {
         if (t1.kind == TK_IDENT || t1.kind == TK_STAR || t1.kind == TK_LT) return true;
+        /* Phase C: function pointer variable like `int (*fp)(int)`.
+         * Only valid when t0 is a primitive type keyword (int, i32, etc.).
+         * If t0 is TK_IDENT, it's almost certainly a function call. */
+        if (t1.kind == TK_LPAREN) {
+            if (t0.kind == TK_IDENT) return false;
+            LexerState saved = lex_save(p->lex);
+            int saved_err    = g_error_count;
+            g_silent         = true;
+            Type* base = parse_decl_specifiers(p);
+            const char* name = NULL;
+            Type* ty = parse_declarator(p, base, &name);
+            g_silent         = false;
+            bool ok = (g_error_count == saved_err && ty && name);
+            /* Additional check: after the declarator, we expect ';' or '=' or ',' */
+            if (ok) {
+                TokKind k = lex_peek(p->lex).kind;
+                ok = (k == TK_SEMI || k == TK_ASSIGN || k == TK_COMMA);
+            }
+            lex_restore(p->lex, saved);
+            g_error_count    = saved_err;
+            return ok;
+        }
         /* Compound C type: "unsigned long", "long long", etc.
          * Speculatively parse the type and verify an identifier follows. */
         if (is_type_start(t1.kind) && t1.kind != TK_IDENT) {
@@ -929,37 +1196,141 @@ static bool looks_like_decl(P* p) {
             g_error_count    = saved_err;
             return ok;
         }
+        /* Phase C: function pointer variable like `int (*fp)(int)` —
+         * NOT handled here. TK_IDENT followed by '(' is almost always a
+         * function call, not a declaration. Function pointer declarations
+         * with primitive type starts (e.g., `int (*fp)(int)`) are handled
+         * in the `is_type_start(t0.kind)` branch above. */
+        if (t1.kind == TK_LPAREN) {
+            return false;
+        }
     }
     return false;
+}
+
+/* Parse a C initializer list: { expr, .field = expr, [index] = expr, ... }
+ * Supports designated initializers (.field = expr) and nested init lists. */
+static Node* parse_init_list(P* p) {
+    int line = lex_peek(p->lex).line;
+    expect(p, TK_LBRACE, "expected '{' in initializer list");
+    Node* list = mk(p, ND_INIT_LIST, line);
+    NodeVec items = {0};
+    while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
+        int iline = lex_peek(p->lex).line;
+        /* Designated initializer: .field = expr */
+        if (lex_peek(p->lex).kind == TK_DOT) {
+            lex_next(p->lex); /* consume '.' */
+            Tok field = expect(p, TK_IDENT, "expected field name after '.'");
+            const char* fname = arena_strndup(p->arena, field.start, field.len);
+            expect(p, TK_ASSIGN, "expected '=' after designated field name");
+            Node* val = parse_expr(p);
+            Node* d = mk(p, ND_DESIG_INIT, iline);
+            d->name = fname;
+            d->rhs = val;
+            nv_push(&items, d);
+        }
+        /* Array designated initializer: [index] = expr */
+        else if (lex_peek(p->lex).kind == TK_LBRACKET) {
+            lex_next(p->lex); /* consume '[' */
+            Node* idx = parse_expr(p);
+            expect(p, TK_RBRACKET, "expected ']'");
+            expect(p, TK_ASSIGN, "expected '=' after array designator");
+            Node* val = parse_expr(p);
+            Node* d = mk(p, ND_DESIG_INIT, iline);
+            d->name = NULL; /* NULL name means array designator */
+            d->lhs = idx;
+            d->rhs = val;
+            nv_push(&items, d);
+        }
+        /* Nested initializer list */
+        else if (lex_peek(p->lex).kind == TK_LBRACE) {
+            Node* nested = parse_init_list(p);
+            nv_push(&items, nested);
+        }
+        /* Regular expression */
+        else {
+            Node* val = parse_expr(p);
+            nv_push(&items, val);
+        }
+        if (!accept(p, TK_COMMA)) break;
+        /* Allow trailing comma before '}' */
+        if (lex_peek(p->lex).kind == TK_RBRACE) break;
+    }
+    expect(p, TK_RBRACE, "expected '}' in initializer list");
+    list->children = nv_freeze(p, &items, &list->nchildren);
+    return list;
 }
 
 static Node* parse_vardecl(P* p) {
     int line = lex_peek(p->lex).line;
     const char* cc = parse_calling_conv(p);
-    Type* base_ty = parse_type(p);
-    /* Parse comma-separated variable declarations: `Type a = 1, b[5], c;` */
+
+    /* Use declarator system for all declarations.
+     * This handles function pointers, arrays, and simple types uniformly. */
+    Type* base = parse_decl_specifiers(p);
     NodeVec decls = {0};
     for (;;) {
-        Tok id = expect(p, TK_IDENT, "expected variable name");
-        Type* ty = base_ty;
-        Node* init = NULL;
-        /* Array dimensions: `name[N]` */
-        Node* dim = NULL;
-        if (accept(p, TK_LBRACKET)) {
-            if (!accept(p, TK_RBRACKET)) {
-                dim = parse_expr(p);
-                expect(p, TK_RBRACKET, "expected ']'");
-            }
-            ty = type_ptr(p->arena, ty);
+        const char* vname = NULL;
+        Type* ty = parse_declarator(p, base, &vname);
+        if (!vname) {
+            Tok err_t = lex_peek(p->lex);
+            errtok(p, &err_t, "expected variable name");
+            break;
         }
-        if (accept(p, TK_ASSIGN)) init = parse_expr(p);
+        Node* init = NULL;
+        if (accept(p, TK_ASSIGN)) {
+            if (lex_peek(p->lex).kind == TK_LBRACE)
+                init = parse_init_list(p);
+            else
+                init = parse_expr(p);
+        }
+        Node* n = mk(p, ND_VARDECL, line);
+        n->declared_type = ty;
+        n->name = vname;
+        n->rhs = init;
+        n->cc = cc;
+        nv_push(&decls, n);
+        if (!accept(p, TK_COMMA)) break;
+    }
+    expect(p, TK_SEMI, "expected ';' after variable declaration");
+    if (decls.len == 1) return decls.data[0];
+    Node* block = mk(p, ND_BLOCK, line);
+    block->children = nv_freeze(p, &decls, &block->nchildren);
+    return block;
+}
+
+/* Parse a local variable declaration with full C declarator support.
+ * Handles `__extension__`, `__thread`, function pointers, etc. */
+static Node* parse_vardecl_c(P* p) {
+    int line = lex_peek(p->lex).line;
+
+    /* Parse declaration specifiers (includes type + storage class) */
+    Type* base_ty = parse_decl_specifiers(p);
+
+    /* Parse comma-separated declarators */
+    NodeVec decls = {0};
+    for (;;) {
+        const char* vname = NULL;
+        Type* ty = parse_declarator(p, base_ty, &vname);
+
+        if (!vname) {
+            Tok t = lex_peek(p->lex);
+            errtok(p, &t, "expected variable name");
+            return mk(p, ND_BLOCK, line);
+        }
+
+        Node* init = NULL;
+        if (accept(p, TK_ASSIGN)) {
+            if (lex_peek(p->lex).kind == TK_LBRACE)
+                init = parse_init_list(p);
+            else
+                init = parse_expr(p);
+        }
 
         Node* n = mk(p, ND_VARDECL, line);
         n->declared_type = ty;
-        n->name = arena_strndup(p->arena, id.start, id.len);
-        n->lhs  = dim;   /* array size expression, NULL for pointer-like arrays */
+        n->name = vname;
         n->rhs  = init;
-        n->cc   = cc;
         nv_push(&decls, n);
 
         if (!accept(p, TK_COMMA)) break;
@@ -967,7 +1338,6 @@ static Node* parse_vardecl(P* p) {
     expect(p, TK_SEMI, "expected ';' after variable declaration");
 
     if (decls.len == 1) return decls.data[0];
-    /* Multi-decl: wrap in a block */
     Node* block = mk(p, ND_BLOCK, line);
     block->children = nv_freeze(p, &decls, &block->nchildren);
     return block;
@@ -1004,6 +1374,20 @@ static Node* parse_for(P* p) {
     Node* init = NULL;
     if (!accept(p, TK_SEMI)) {
         if (looks_like_decl(p)) init = parse_vardecl(p);
+        else if (lex_peek(p->lex).kind == TK_IDENT) {
+            Tok ft = lex_peek(p->lex);
+            size_t fl = (size_t)ft.len;
+            bool is_storage_kw = ((fl == 13 && strncmp(ft.start, "__extension__", 13) == 0) ||
+                                  (fl == 8 && strncmp(ft.start, "__thread", 8) == 0));
+            if (is_storage_kw) init = parse_vardecl_c(p);
+            else {
+                Node* e = parse_expr(p);
+                expect(p, TK_SEMI, "expected ';' after for-init");
+                Node* es = mk(p, ND_EXPR_STMT, e->line);
+                es->rhs = e;
+                init = es;
+            }
+        }
         else {
             Node* e = parse_expr(p);
             expect(p, TK_SEMI, "expected ';' after for-init");
@@ -1168,6 +1552,15 @@ static Node* parse_stmt(P* p) {
                 }
             }
             if (looks_like_decl(p)) return parse_vardecl(p);
+            /* Check for C-style declaration with storage-class keywords
+             * like __extension__, __thread that looks_like_decl doesn't catch */
+            if (t.kind == TK_IDENT) {
+                const char* id_str = t.start;
+                size_t id_len = (size_t)t.len;
+                bool is_storage_kw = ((id_len == 13 && strncmp(id_str, "__extension__", 13) == 0) ||
+                                      (id_len == 8 && strncmp(id_str, "__thread", 8) == 0));
+                if (is_storage_kw) return parse_vardecl_c(p);
+            }
             {
                 Node* e = parse_expr(p);
                 expect(p, TK_SEMI, "expected ';' after expression");
@@ -1179,6 +1572,16 @@ static Node* parse_stmt(P* p) {
 }
 
 /* ---------- top-level declarations ---------- */
+
+/* Helper: check if a type is a struct or union named type */
+static bool is_struct_or_union_type(Type* ty) {
+    if (!ty) return false;
+    if (ty->kind == TY_PTR) return is_struct_or_union_type(ty->base);
+    /* Check if it's a const-wrapped type */
+    if (ty->is_const && ty->base) return is_struct_or_union_type(ty->base);
+    if (ty->kind != TY_NAMED || !ty->name) return false;
+    return strncmp(ty->name, "struct ", 7) == 0 || strncmp(ty->name, "union ", 6) == 0;
+}
 
 static Node* parse_struct(P* p) {
     Tok t = lex_next(p->lex); /* 'struct' */
@@ -1199,21 +1602,173 @@ static Node* parse_struct(P* p) {
     NodeVec fields = {0};
     while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
         int line = lex_peek(p->lex).line;
-        Type* ty = parse_type(p);
-        Tok fid = expect(p, TK_IDENT, "expected field name");
-        /* Optional array dimension: `Type name[N];` or `Type name[];` */
-        Node* dim = NULL;
-        if (accept(p, TK_LBRACKET)) {
-            if (!accept(p, TK_RBRACKET)) {
-                dim = parse_expr(p);
-                expect(p, TK_RBRACKET, "expected ']'");
+
+        /* Skip __declspec on field */
+        const char* field_declspec = NULL;
+        if (lex_peek(p->lex).kind == TK___DECLSPEC) {
+            field_declspec = parse_declspec(p);
+        }
+
+        /* Check for nested struct/union definition:
+         *   struct Inner { ... } field_name;
+         *   union  { ... } field_name;   (anonymous)
+         *   struct { ... };              (anonymous, no name) */
+        if (lex_peek(p->lex).kind == TK_STRUCT || lex_peek(p->lex).kind == TK_UNION) {
+            bool is_union = (lex_peek(p->lex).kind == TK_UNION);
+            lex_next(p->lex); /* consume 'struct'/'union' */
+
+            /* Check if next token is '{' (anonymous) or IDENT followed by '{' (named nested) */
+            bool has_name = false;
+            const char* nested_name = NULL;
+            if (lex_peek(p->lex).kind == TK_IDENT) {
+                Tok maybe_name = lex_peek(p->lex);
+                Tok after = lex_peek2(p->lex);
+                if (after.kind == TK_LBRACE || after.kind == TK_IDENT || after.kind == TK_STAR) {
+                    has_name = true;
+                    lex_next(p->lex);
+                    nested_name = arena_strndup(p->arena, maybe_name.start, maybe_name.len);
+                }
+            }
+
+            if (lex_peek(p->lex).kind == TK_LBRACE) {
+                /* Parse the nested struct/union body */
+                lex_next(p->lex); /* consume '{' */
+                NodeVec nested_fields = {0};
+                while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
+                    /* Recursively parse fields (simplified: type + name + ;) */
+                    int fline = lex_peek(p->lex).line;
+                    const char* fd = NULL;
+                    if (lex_peek(p->lex).kind == TK___DECLSPEC) {
+                        fd = parse_declspec(p);
+                    }
+                    Type* fbase = parse_decl_specifiers(p);
+                    const char* fn = NULL;
+                    Type* fty = parse_declarator(p, fbase, &fn);
+                    int bw = 0;
+                    if (accept(p, TK_COLON)) {
+                        Tok w = expect(p, TK_INT, "expected bitfield width");
+                        bw = (int)w.ival;
+                        fty = type_bitfield(p->arena, fty, bw);
+                    }
+                    expect(p, TK_SEMI, "expected ';' after field");
+                    Node* nf = mk(p, ND_FIELD, fline);
+                    nf->declared_type = fty;
+                    nf->name = fn ? fn : "";
+                    nf->bit_width = bw;
+                    nf->declspec = fd;
+                    nv_push(&nested_fields, nf);
+                }
+                expect(p, TK_RBRACE, "expected '}' to close nested struct/union");
+
+                /* Build the nested struct/union type name */
+                char su_name[256];
+                if (has_name) {
+                    snprintf(su_name, sizeof(su_name), "%s %s", is_union ? "union" : "struct", nested_name);
+                } else {
+                    static int anon_counter = 0;
+                    snprintf(su_name, sizeof(su_name), "__anon_%s_%d", is_union ? "union" : "struct", anon_counter++);
+                }
+                Type* su_type = type_named(p->arena, arena_strndup(p->arena, su_name, (int)strlen(su_name)));
+
+                /* Check for field name after the closing brace */
+                const char* fname = NULL;
+                if (lex_peek(p->lex).kind == TK_IDENT) {
+                    Tok ft = lex_next(p->lex);
+                    fname = arena_strndup(p->arena, ft.start, ft.len);
+                }
+
+                expect(p, TK_SEMI, "expected ';' after field");
+
+                if (!fname) {
+                    /* Anonymous struct/union field */
+                    Node* f = mk(p, is_union ? ND_ANON_UNION : ND_ANON_STRUCT, line);
+                    f->declared_type = su_type;
+                    f->name = "";
+                    f->declspec = field_declspec;
+                    /* Store nested fields for code generation */
+                    f->fields = nv_freeze(p, &nested_fields, &f->nfields);
+                    nv_push(&fields, f);
+                } else {
+                    /* Named field of nested struct/union type */
+                    Node* f = mk(p, ND_FIELD, line);
+                    f->declared_type = su_type;
+                    f->name = fname;
+                    f->declspec = field_declspec;
+                    f->fields = nv_freeze(p, &nested_fields, &f->nfields);
+                    nv_push(&fields, f);
+                }
+                continue;
+            } else {
+                /* Not a nested definition — put back 'struct'/'union' and fall through */
+                /* We already consumed 'struct'/'union' and possibly the name.
+                 * Reconstruct the type using parse_type's logic. */
+                if (has_name) {
+                    /* We have 'struct Name' but no '{' — it's a type reference */
+                    char su_name[256];
+                    snprintf(su_name, sizeof(su_name), "%s %s", is_union ? "union" : "struct", nested_name);
+                    Type* su_type = type_named(p->arena, arena_strndup(p->arena, su_name, (int)strlen(su_name)));
+
+                    /* Parse pointer suffixes and declarator */
+                    while (accept(p, TK_STAR)) {
+                        su_type = type_ptr(p->arena, su_type);
+                        if (accept(p, TK_CONST)) su_type = type_const(p->arena, su_type);
+                    }
+
+                    const char* fname = NULL;
+                    Type* fty = parse_declarator(p, su_type, &fname);
+                    int bw = 0;
+                    if (accept(p, TK_COLON)) {
+                        Tok w = expect(p, TK_INT, "expected bitfield width");
+                        bw = (int)w.ival;
+                        fty = type_bitfield(p->arena, fty, bw);
+                    }
+                    expect(p, TK_SEMI, "expected ';' after field");
+                    Node* f = mk(p, ND_FIELD, line);
+                    f->declared_type = fty;
+                    f->name = fname ? fname : "";
+                    f->bit_width = bw;
+                    f->declspec = field_declspec;
+                    nv_push(&fields, f);
+                    continue;
+                }
+                /* No name and no brace — error recovery */
             }
         }
+
+        /* Parse field using declarator system */
+        Type* base = parse_decl_specifiers(p);
+        const char* fname = NULL;
+        Type* fty = parse_declarator(p, base, &fname);
+
+        /* Check for bitfield */
+        int bit_width = 0;
+        if (accept(p, TK_COLON)) {
+            Tok w = expect(p, TK_INT, "expected bitfield width");
+            bit_width = (int)w.ival;
+            fty = type_bitfield(p->arena, fty, bit_width);
+        }
+
         expect(p, TK_SEMI, "expected ';' after field");
-        Node* f = mk(p, ND_FIELD, line);
-        f->declared_type = ty;
-        f->name = arena_strndup(p->arena, fid.start, fid.len);
-        f->lhs = dim;  /* array dimension, if any */
+
+        /* Determine node kind */
+        Node* f;
+        if (!fname) {
+            /* Anonymous struct/union field */
+            if (is_struct_or_union_type(fty)) {
+                bool is_union = (fty->name && strncmp(fty->name, "union ", 6) == 0);
+                f = mk(p, is_union ? ND_ANON_UNION : ND_ANON_STRUCT, line);
+            } else {
+                /* Anonymous non-struct field — error, but create ND_FIELD for recovery */
+                f = mk(p, ND_FIELD, line);
+                f->name = "";
+            }
+        } else {
+            f = mk(p, ND_FIELD, line);
+            f->name = fname;
+        }
+        f->declared_type = fty;
+        f->bit_width = bit_width;
+        f->declspec = field_declspec;
         nv_push(&fields, f);
     }
     expect(p, TK_RBRACE, "expected '}' to close struct");
@@ -1245,12 +1800,33 @@ static Node* parse_union(P* p) {
     NodeVec fields = {0};
     while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
         int line = lex_peek(p->lex).line;
-        Type* ty = parse_type(p);
-        Tok fid = expect(p, TK_IDENT, "expected field name");
+
+        /* Skip __declspec on field */
+        const char* field_declspec = NULL;
+        if (lex_peek(p->lex).kind == TK___DECLSPEC) {
+            field_declspec = parse_declspec(p);
+        }
+
+        /* Parse field using declarator system */
+        Type* base = parse_decl_specifiers(p);
+        const char* fname = NULL;
+        Type* fty = parse_declarator(p, base, &fname);
+
+        /* Check for bitfield */
+        int bit_width = 0;
+        if (accept(p, TK_COLON)) {
+            Tok w = expect(p, TK_INT, "expected bitfield width");
+            bit_width = (int)w.ival;
+            fty = type_bitfield(p->arena, fty, bit_width);
+        }
+
         expect(p, TK_SEMI, "expected ';' after field");
+
         Node* f = mk(p, ND_FIELD, line);
-        f->declared_type = ty;
-        f->name = arena_strndup(p->arena, fid.start, fid.len);
+        f->declared_type = fty;
+        f->name = fname ? fname : "";
+        f->bit_width = bit_width;
+        f->declspec = field_declspec;
         nv_push(&fields, f);
     }
     expect(p, TK_RBRACE, "expected '}' to close union");
@@ -1330,11 +1906,24 @@ static Node* parse_func_common(P* p, const char* parent, bool is_static) {
     if (lex_peek(p->lex).kind != TK_RPAREN) {
         for (;;) {
             int pline = lex_peek(p->lex).line;
-            Type* pty = parse_type(p);
-            Tok pid = expect(p, TK_IDENT, "expected parameter name");
+
+            /* Skip __declspec on parameter */
+            if (lex_peek(p->lex).kind == TK___DECLSPEC) {
+                skip_declspec(p);
+            }
+
+            /* Use declarator system for parameter parsing */
+            Type* base = parse_decl_specifiers(p);
+            const char* pname = NULL;
+            Type* pty = parse_declarator(p, base, &pname);
+
+            /* If no name parsed (e.g., abstract declarator in function pointer),
+             * generate a default name. */
+            if (!pname) pname = "p";
+
             Node* pr = mk(p, ND_PARAM, pline);
             pr->declared_type = pty;
-            pr->name = arena_strndup(p->arena, pid.start, pid.len);
+            pr->name = pname;
             nv_push(&params, pr);
             if (!accept(p, TK_COMMA)) break;
         }
@@ -1550,25 +2139,41 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                     nv_push(&decls, su);
                 }
             } else {
-                Type* base = parse_type(p);
-                Tok name_tok = expect(p, TK_IDENT, "expected typedef name");
-                const char* tname = arena_strndup(p->arena, name_tok.start, name_tok.len);
-                /* Array dimensions: `typedef T Name[N];` */
-                Node* dim = NULL;
-                if (accept(p, TK_LBRACKET)) {
-                    if (!accept(p, TK_RBRACKET)) {
-                        dim = parse_expr(p);
-                        expect(p, TK_RBRACKET, "expected ']'");
+                /* Use declarator system for typedef parsing */
+                Type* base = parse_decl_specifiers(p);
+
+                /* Parse comma-separated declarators: `typedef T A, *B, **C;` */
+                for (;;) {
+                    const char* tname = NULL;
+                    Type* ty = parse_declarator(p, base, &tname);
+
+                    if (!tname) {
+                        Tok err_t = lex_peek(p->lex);
+                        errtok(p, &err_t, "expected typedef name");
+                        break;
                     }
+
+                    /* Array dimensions: `typedef T Name[N];` */
+                    Node* dim = NULL;
+                    if (accept(p, TK_LBRACKET)) {
+                        if (!accept(p, TK_RBRACKET)) {
+                            dim = parse_expr(p);
+                            expect(p, TK_RBRACKET, "expected ']'");
+                        }
+                    }
+
+                    Node* nd = mk(p, ND_TYPEDEF_DECL, line);
+                    nd->declared_type = ty;
+                    nd->name = tname;
+                    nd->lhs = dim;
+                    nv_push(&decls, nd);
+
+                    if (!accept(p, TK_COMMA)) break;
                 }
+
                 /* Optional trailing __attribute__((...)) */
                 skip_attribute(p);
                 expect(p, TK_SEMI, "expected ';' after typedef");
-                Node* nd = mk(p, ND_TYPEDEF_DECL, line);
-                nd->declared_type = base;
-                nd->name = tname;
-                nd->lhs = dim;   /* array size expression, NULL for plain typedef */
-                nv_push(&decls, nd);
             }
         } else if (t.kind == TK_STATIC_ASSERT) {
             /* _Static_assert(constant_expr, "message"); — pass-through to C */
@@ -1666,12 +2271,13 @@ type_start_path:
                             continue;
                         }
                         int pline = lex_peek(p->lex).line;
-                        Type* pty = parse_type(p);
-                        const char* pname = "p";
-                        if (lex_peek(p->lex).kind == TK_IDENT) {
-                            Tok pid = lex_next(p->lex);
-                            pname = arena_strndup(p->arena, pid.start, pid.len);
-                        }
+
+                        /* Use declarator system for parameter parsing */
+                        Type* pbase = parse_decl_specifiers(p);
+                        const char* pname = NULL;
+                        Type* pty = parse_declarator(p, pbase, &pname);
+                        if (!pname) pname = "p";
+
                         Node* pr = mk(p, ND_PARAM, pline);
                         pr->declared_type = pty;
                         pr->name = pname;
@@ -1730,8 +2336,12 @@ type_start_path:
                     nd->declspec = declspec;
                     nv_push(&decls, nd);
                 } else if (accept(p, TK_ASSIGN)) {
-                    /* Global variable with init: `Type name = expr;` */
-                    Node* val = parse_expr(p);
+                    /* Global variable with init: `Type name = expr;` or `Type name = { ... };` */
+                    Node* val = NULL;
+                    if (lex_peek(p->lex).kind == TK_LBRACE)
+                        val = parse_init_list(p);
+                    else
+                        val = parse_expr(p);
                     expect(p, TK_SEMI, "expected ';' after variable declaration");
                     Node* nd = mk(p, ND_VARDECL, line);
                     nd->declared_type = ret;
@@ -1742,6 +2352,8 @@ type_start_path:
                 } else {
                     /* Global variable without init: `Type name;`
                      * If __declspec(dllimport), treat as extern var */
+                    /* Skip trailing __attribute__ */
+                    skip_attribute(p);
                     expect(p, TK_SEMI, "expected ';' after variable declaration");
                     Node* nd = mk(p, declspec ? ND_EXTERN_VAR : ND_VARDECL, line);
                     nd->declared_type = ret;

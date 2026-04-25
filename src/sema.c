@@ -623,10 +623,18 @@ static Type* tc_ty(TC* tc, TypeKind k) { (void)tc; return ty_prim(k); }
  * what sema knows about). */
 static SymStruct* tc_struct_of(TC* tc, Type* t) {
     if (!t) return NULL;
-    if (t->kind == TY_NAMED) return sema_find_struct(tc->st, t->name);
+    if (t->kind == TY_NAMED) {
+        SymStruct* s = sema_find_struct(tc->st, t->name);
+        if (s) return s;
+        /* C-style "struct Tag" / "union Tag" — try without prefix */
+        const char* n = t->name;
+        if (strncmp(n, "struct ", 7) == 0) return sema_find_struct(tc->st, n + 7);
+        if (strncmp(n, "union ", 6) == 0)  return sema_find_struct(tc->st, n + 6);
+        return NULL;
+    }
     if (t->kind == TY_PTR &&
         t->base && t->base->kind == TY_NAMED)
-        return sema_find_struct(tc->st, t->base->name);
+        return tc_struct_of(tc, t->base);
     return NULL;
 }
 
@@ -1116,6 +1124,34 @@ static Type* tc_expr(TC* tc, Node* e) {
                           "call to undeclared function '%s'", cname);
                 return tc_ty(tc, TY_I32);
             }
+            /* Indirect call through function pointer: (*fp)(args) or fp(args) */
+            {
+                Type* callee_type = tc_expr(tc, callee);
+                if (callee_type) {
+                    /* If callee is a pointer to a function, dereference to get the function type */
+                    Type* func_type = callee_type;
+                    if (func_type->kind == TY_PTR && func_type->base && func_type->base->kind == TY_FUNC) {
+                        func_type = func_type->base;
+                    }
+                    if (func_type->kind == TY_FUNC) {
+                        /* Type-check arguments against function parameters */
+                        int np = func_type->nfunc_params;
+                        for (int i = 0; i < nargs && i < np; i++) {
+                            Type* param_type = func_type->func_params[i];
+                            Type* arg_type = tc_expr(tc, args[i]);
+                            if (param_type && arg_type && !ty_assignable(param_type, arg_type)) {
+                                diag_emit(DIAG_ERROR, E_ARG_TYPE, e->line, 0, 0,
+                                          "argument %d type mismatch in indirect call", i + 1);
+                            }
+                        }
+                        if (nargs > np && !func_type->func_variadic) {
+                            diag_emit(DIAG_ERROR, E_ARG_COUNT, e->line, 0, 0,
+                                      "too many arguments in indirect call (expected %d, got %d)", np, nargs);
+                        }
+                        return func_type->base; /* return type */
+                    }
+                }
+            }
             /* Generic indirect call — not yet supported. */
             diag_emit(DIAG_ERROR, E_NOT_CALLABLE, e->line, 0, 0,
                       "expression is not callable");
@@ -1130,6 +1166,21 @@ static Type* tc_expr(TC* tc, Node* e) {
         }
 
         default:
+            /* Handle initializer list and designated initializer nodes.
+             * These are type-checked as part of the enclosing ND_VARDECL. */
+            if (e->kind == ND_INIT_LIST) {
+                for (int i = 0; i < e->nchildren; i++)
+                    tc_expr(tc, e->children[i]);
+                return NULL;
+            }
+            if (e->kind == ND_DESIG_INIT) {
+                if (e->rhs) tc_expr(tc, e->rhs);
+                return NULL;
+            }
+            if (e->kind == ND_COMPOUND_LIT) {
+                if (e->rhs) tc_expr(tc, e->rhs);
+                return e->declared_type;
+            }
             return NULL;
     }
 }

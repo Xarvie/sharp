@@ -293,6 +293,10 @@ Type* type_named(Arena** a, const char* name)                { (void)a; return t
 Type* type_named_generic(Arena** a, const char* name,
                          Type** targs, int ntargs)           { (void)a; return ty_generic(name, targs, ntargs); }
 Type* type_const(Arena** a, Type* base)                      { (void)a; return ty_const(base); }
+Type* type_func(Arena** a, Type* ret, Type** params, int nparams, bool variadic) {
+    (void)a; return ty_func(ret, params, nparams, variadic);
+}
+Type* type_bitfield(Arena** a, Type* base, int width)        { (void)a; return ty_bitfield(base, width); }
 
 bool type_is_primitive(TypeKind k) {
     return (k >= TY_VOID && k <= TY_USIZE);

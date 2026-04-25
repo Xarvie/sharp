@@ -43,6 +43,10 @@ Type* ty_named  (const char* name);
 Type* ty_generic(const char* name, Type** targs, int ntargs);
 Type* ty_const  (Type* base);   /* const-qualified type */
 
+/* Phase C: function type and bitfield constructors */
+Type* ty_func   (Type* ret, Type** params, int nparams, bool variadic);
+Type* ty_bitfield(Type* base, int width);
+
 /* ===================================================================== *
  *   Queries
  * ===================================================================== */

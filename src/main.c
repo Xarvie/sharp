@@ -413,8 +413,8 @@ int main(int argc, char** argv) {
      * Code generation + optional libtcc linking (zero disk I/O)          *
      * ------------------------------------------------------------------ */
     bool out_alloced = false;
-    bool should_link = (strcmp(out_path, "-") != 0) && !no_link;
     if (!out_path) { out_path = default_out_path(in_path); out_alloced = true; }
+    bool should_link = (strcmp(out_path, "-") != 0) && !no_link;
 
     if (strcmp(out_path, "-") == 0) {
         cgen_c(prog, st, stdout);

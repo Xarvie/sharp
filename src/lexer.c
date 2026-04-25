@@ -54,6 +54,7 @@ static const Keyword kws[] = {
     {"__unaligned", 11, TK___UNALIGNED},
     {"__restrict", 10, TK___RESTRICT},
     {"__restrict__", 12, TK___RESTRICT__},
+    {"restrict", 8, TK_RESTRICT},
     {"__asm__", 7, TK_ASM},
     {"__asm", 5, TK_ASM},
     {"asm", 3, TK_ASM},

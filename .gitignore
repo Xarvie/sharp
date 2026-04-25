@@ -1,1 +1,13 @@
 /cmake-build-debug/
+/build/
+*.exe
+*.obj
+*.o
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+tests/*.c
+!tests/test_*.sp
+PLAN_C_SUPPORT.md

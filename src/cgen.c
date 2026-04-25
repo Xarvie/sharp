@@ -174,10 +174,16 @@ static void pad(G* g) {
     for (int i = 0; i < g->indent; i++) sb_puts(&g->out, "    ");
 }
 
+/* Forward declaration for recursive type emission */
+static void emit_type_core(G* g, Type* t);
+
 /* Emit a C representation of `t`. For primitives and user named types,
  * the rendered form *is* the C form (we chose our type names to match
  * C directly). For pointers we append `*`. For generic instantiations we
- * emit the mangled name. */
+ * emit the mangled name.
+ *
+ * Phase C: Function pointer types (TY_FUNC) are emitted as `ret (*)(params)`
+ * when used standalone. When a name is present, use emit_type_with_name(). */
 static void emit_type(G* g, Type* t) {
     if (!t) { sb_puts(&g->out, "/*null-type*/ void"); return; }
     Type* rt = resolve_type(g, t);
@@ -190,8 +196,49 @@ static void emit_type(G* g, Type* t) {
             if (rt->ntargs > 0) sb_puts(&g->out, ty_mangle(rt));
             else                sb_puts(&g->out, rt->name);
             return;
+        case TY_FUNC:
+            /* Standalone function type: emit as function pointer syntax */
+            emit_type_core(g, rt->base);
+            sb_puts(&g->out, "(*)(");
+            for (int i = 0; i < rt->nfunc_params; i++) {
+                if (i) sb_puts(&g->out, ", ");
+                emit_type(g, rt->func_params[i]);
+            }
+            if (rt->func_variadic) {
+                if (rt->nfunc_params > 0) sb_puts(&g->out, ", ");
+                sb_puts(&g->out, "...");
+            }
+            sb_puts(&g->out, ")");
+            return;
+        case TY_BITFIELD:
+            emit_type_core(g, rt->base);
+            sb_puts(&g->out, " : ");
+            {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", rt->bit_width);
+                sb_puts(&g->out, buf);
+            }
+            return;
         default:
-            /* Primitive: emit the canonical C type directly. */
+            emit_type_core(g, rt);
+            return;
+    }
+}
+
+/* Core type emission for primitives and simple types (no TY_FUNC/TY_BITFIELD) */
+static void emit_type_core(G* g, Type* t) {
+    if (!t) { sb_puts(&g->out, "void"); return; }
+    Type* rt = resolve_type(g, t);
+    switch (rt->kind) {
+        case TY_PTR:
+            emit_type_core(g, rt->base);
+            sb_putc(&g->out, '*');
+            return;
+        case TY_NAMED:
+            if (rt->ntargs > 0) sb_puts(&g->out, ty_mangle(rt));
+            else                sb_puts(&g->out, rt->name);
+            return;
+        default:
             if (rt->is_const) sb_puts(&g->out, "const ");
             switch (rt->kind) {
                 case TY_VOID:   sb_puts(&g->out, "void");      return;
@@ -211,6 +258,41 @@ static void emit_type(G* g, Type* t) {
                 default:        sb_puts(&g->out, ty_render(rt)); return;
             }
     }
+}
+
+/* Emit a type followed by a name, handling function pointer syntax correctly.
+ * For `int (*fp)(int)`, this emits: `int (*fp)(int)`
+ * For `int x`, this emits: `int x`
+ * For `int* p`, this emits: `int* p` */
+static void emit_type_with_name(G* g, Type* t, const char* name) {
+    if (!t) { sb_printf(&g->out, "/*null-type*/ void %s", name ? name : ""); return; }
+    Type* rt = resolve_type(g, t);
+
+    if (rt->kind == TY_FUNC) {
+        /* Function type: emit as `ret (*name)(params)` */
+        emit_type_core(g, rt->base);
+        sb_printf(&g->out, " (*%s)(", name ? name : "");
+        for (int i = 0; i < rt->nfunc_params; i++) {
+            if (i) sb_puts(&g->out, ", ");
+            emit_type(g, rt->func_params[i]);
+        }
+        if (rt->func_variadic) {
+            if (rt->nfunc_params > 0) sb_puts(&g->out, ", ");
+            sb_puts(&g->out, "...");
+        }
+        sb_puts(&g->out, ")");
+        return;
+    }
+
+    if (rt->kind == TY_BITFIELD) {
+        emit_type_core(g, rt->base);
+        sb_printf(&g->out, " %s : %d", name ? name : "", rt->bit_width);
+        return;
+    }
+
+    /* Simple type: emit type then name */
+    emit_type(g, t);
+    sb_printf(&g->out, " %s", name ? name : "");
 }
 
 static const char* bin_op_c(OpKind op) {
@@ -909,6 +991,42 @@ static void emit_expr(G* g, Node* e) {
         default:
             sb_puts(&g->out, "/*??expr*/");
             return;
+
+        case ND_INIT_LIST: {
+            sb_putc(&g->out, '{');
+            for (int i = 0; i < e->nchildren; i++) {
+                if (i) sb_puts(&g->out, ", ");
+                emit_expr(g, e->children[i]);
+            }
+            sb_putc(&g->out, '}');
+            return;
+        }
+
+        case ND_DESIG_INIT: {
+            if (e->name) {
+                sb_printf(&g->out, ".%s = ", e->name);
+            } else if (e->lhs) {
+                sb_putc(&g->out, '[');
+                emit_expr(g, e->lhs);
+                sb_puts(&g->out, "] = ");
+            }
+            emit_expr(g, e->rhs);
+            return;
+        }
+
+        case ND_COMPOUND_LIT: {
+            sb_putc(&g->out, '(');
+            emit_type(g, e->declared_type);
+            sb_putc(&g->out, ')');
+            if (e->rhs && e->rhs->kind == ND_INIT_LIST) {
+                emit_expr(g, e->rhs);
+            } else {
+                sb_putc(&g->out, '{');
+                if (e->rhs) emit_expr(g, e->rhs);
+                sb_putc(&g->out, '}');
+            }
+            return;
+        }
     }
 }
 
@@ -1177,12 +1295,11 @@ static void emit_vardecl_inline(G* g, Node* s) {
         emit_expr(g, s->lhs);
         sb_putc(&g->out, ']');
     } else {
-        emit_type(g, dt);
+        emit_type_with_name(g, dt, name);
         if (s->cc) {
             sb_putc(&g->out, ' ');
             sb_puts(&g->out, s->cc);
         }
-        sb_printf(&g->out, " %s", name);
     }
     if (init) {
         sb_puts(&g->out, " = ");
@@ -1207,8 +1324,7 @@ static void emit_union_body(G* g, Node* u) {
     for (int i = 0; i < u->nfields; i++) {
         Node* f = u->fields[i];
         sb_puts(&g->out, "    ");
-        emit_type(g, f->declared_type);
-        sb_printf(&g->out, " %s", f->name);
+        emit_type_with_name(g, f->declared_type, f->name);
         if (f->lhs) {
             sb_putc(&g->out, '[');
             emit_expr(g, f->lhs);
@@ -1243,8 +1359,7 @@ static void emit_typedef_decl(G* g, Node* d) {
         }
     }
     sb_puts(&g->out, "typedef ");
-    emit_type(g, dt);
-    sb_printf(&g->out, " %s", d->name);
+    emit_type_with_name(g, dt, d->name);
     if (d->lhs) {
         sb_putc(&g->out, '[');
         emit_expr(g, d->lhs);
@@ -1261,8 +1376,7 @@ static void emit_struct_body(G* g, Node* s) {
     for (int i = 0; i < s->nfields; i++) {
         Node* f = s->fields[i];
         sb_puts(&g->out, "    ");
-        emit_type(g, f->declared_type);
-        sb_printf(&g->out, " %s", f->name);
+        emit_type_with_name(g, f->declared_type, f->name);
         if (f->lhs) {
             sb_putc(&g->out, '[');
             emit_expr(g, f->lhs);
@@ -1304,8 +1418,7 @@ static void emit_func_signature(G* g, Node* f) {
         for (int i = 0; i < f->nparams; i++) {
             Node* pr = f->params[i];
             if (i) sb_puts(&g->out, ", ");
-            emit_type(g, pr->declared_type);
-            sb_printf(&g->out, " %s", pr->name);
+            emit_type_with_name(g, pr->declared_type, pr->name);
         }
     }
     sb_putc(&g->out, ')');
@@ -1432,8 +1545,7 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
             for (int j = 0; j < e->decl->nparams; j++) {
                 Node* pr = e->decl->params[j];
                 if (j) sb_puts(&g->out, ", ");
-                emit_type(g, pr->declared_type);
-                sb_printf(&g->out, " %s", pr->name);
+                emit_type_with_name(g, pr->declared_type, pr->name);
             }
         }
         sb_puts(&g->out, ");\n");
@@ -1604,8 +1716,7 @@ void cgen_buf(Node* prog, SymTable* st, StrBuf* sb) {
             for (int j = 0; j < e->decl->nparams; j++) {
                 Node* pr = e->decl->params[j];
                 if (j) sb_puts(&g->out, ", ");
-                emit_type(g, pr->declared_type);
-                sb_printf(&g->out, " %s", pr->name);
+                emit_type_with_name(g, pr->declared_type, pr->name);
             }
         }
         sb_puts(&g->out, ");\n");

@@ -146,6 +146,13 @@ static bool type_shape_eq(const Type* t, TypeKind k, Type* base,
     return true;
 }
 
+static void table_grow(void);  /* forward declaration */
+
+/* Ensure the hash table has room before inserting func/bitfield types */
+static void table_ensure(void) {
+    if (!s_table_cap || s_table_len * 2 >= s_table_cap) table_grow();
+}
+
 static void table_grow(void) {
     size_t new_cap = s_table_cap ? s_table_cap * 2 : 128;
     Bucket* new_tbl = (Bucket*)calloc(new_cap, sizeof(Bucket));
@@ -259,6 +266,73 @@ Type* ty_generic(const char* name, Type** targs, int ntargs) {
     return intern_lookup_or_insert(h, TY_NAMED, NULL, n, targs, ntargs, false);
 }
 
+Type* ty_func(Type* ret, Type** params, int nparams, bool variadic) {
+    if (!s_arena) ty_init();
+    table_ensure();
+    uint64_t h = fnv_init();
+    h = fnv_mix(h, (uint64_t)TY_FUNC);
+    h = fnv_mix(h, (uint64_t)(uintptr_t)ret);
+    h = fnv_mix(h, (uint64_t)nparams);
+    h = fnv_mix(h, (uint64_t)(variadic ? 1 : 0));
+    for (int i = 0; i < nparams; i++)
+        h = fnv_mix(h, (uint64_t)(uintptr_t)params[i]);
+    size_t mask = s_table_cap - 1;
+    size_t slot = (size_t)(h & mask);
+    while (s_table[slot].type) {
+        Type* t = s_table[slot].type;
+        if (t->kind == TY_FUNC && t->base == ret && t->nfunc_params == nparams &&
+            t->func_variadic == variadic) {
+            bool same = true;
+            for (int i = 0; i < nparams; i++)
+                if (t->func_params[i] != params[i]) { same = false; break; }
+            if (same) return t;
+        }
+        slot = (slot + 1) & mask;
+    }
+    /* Insert new func type */
+    Type* t = (Type*)arena_alloc(&s_arena, sizeof(Type));
+    memset(t, 0, sizeof(*t));
+    t->kind = TY_FUNC;
+    t->base = ret;
+    t->nfunc_params = nparams;
+    t->func_variadic = variadic;
+    if (nparams > 0) {
+        t->func_params = (Type**)arena_alloc(&s_arena, (size_t)nparams * sizeof(Type*));
+        memcpy(t->func_params, params, (size_t)nparams * sizeof(Type*));
+    }
+    s_table[slot].hash = h;
+    s_table[slot].type = t;
+    s_table_len++;
+    return t;
+}
+
+Type* ty_bitfield(Type* base, int width) {
+    if (!s_arena) ty_init();
+    table_ensure();
+    uint64_t h = fnv_init();
+    h = fnv_mix(h, (uint64_t)TY_BITFIELD);
+    h = fnv_mix(h, (uint64_t)(uintptr_t)base);
+    h = fnv_mix(h, (uint64_t)width);
+    size_t mask = s_table_cap - 1;
+    size_t slot = (size_t)(h & mask);
+    while (s_table[slot].type) {
+        Type* t = s_table[slot].type;
+        if (t->kind == TY_BITFIELD && t->base == base && t->bit_width == width)
+            return t;
+        slot = (slot + 1) & mask;
+    }
+    /* Insert new bitfield type */
+    Type* t = (Type*)arena_alloc(&s_arena, sizeof(Type));
+    memset(t, 0, sizeof(*t));
+    t->kind = TY_BITFIELD;
+    t->base = base;
+    t->bit_width = width;
+    s_table[slot].hash = h;
+    s_table[slot].type = t;
+    s_table_len++;
+    return t;
+}
+
 /* ===================================================================== *
  *   Const qualifier
  * ===================================================================== */
@@ -357,6 +431,30 @@ Type* ty_subst(Type* t, const char** names, Type** repls, int n) {
                 result = ty_const(result);
             return result;
         }
+        case TY_FUNC: {
+            Type* r = ty_subst(t->base, names, repls, n);
+            Type* stack_params[16];
+            Type** nps = (t->nfunc_params <= 16)
+                ? stack_params
+                : (Type**)malloc((size_t)t->nfunc_params * sizeof(Type*));
+            bool changed = (r != t->base);
+            for (int i = 0; i < t->nfunc_params; i++) {
+                nps[i] = ty_subst(t->func_params[i], names, repls, n);
+                if (nps[i] != t->func_params[i]) changed = true;
+            }
+            Type* out = changed ? ty_func(r, nps, t->nfunc_params, t->func_variadic) : t;
+            if (t->is_const && out != t)
+                out = ty_const(out);
+            if (nps != stack_params) free(nps);
+            return out;
+        }
+        case TY_BITFIELD: {
+            Type* b = ty_subst(t->base, names, repls, n);
+            Type* result = (b == t->base) ? t : ty_bitfield(b, t->bit_width);
+            if (t->is_const && result != t)
+                result = ty_const(result);
+            return result;
+        }
         case TY_NAMED: {
             /* A bare named type with no targs may itself be a type-parameter. */
             if (t->ntargs == 0 && t->name) {
@@ -399,7 +497,7 @@ bool ty_assignable(const Type* to, const Type* from) {
     if (!to || !from) return true;   /* unknown → don't double-diagnose */
     if (ty_eq(to, from)) return true;
 
-    /* NULL literal has type void* — assignable to any pointer. */
+    /* NULL literal has type void* — assignable to any pointer (including function pointers). */
     if (from->kind == TY_PTR && from->base && from->base->kind == TY_VOID) {
         if (to->kind == TY_PTR) return true;
     }
@@ -551,6 +649,31 @@ static void render_into(StrBuf* sb, const Type* t) {
                 sb_putc(sb, '>');
             }
             return;
+        case TY_FUNC:
+            if (t->base) render_into(sb, t->base);
+            else sb_puts(sb, "void");
+            sb_puts(sb, "(*)");
+            sb_putc(sb, '(');
+            for (int i = 0; i < t->nfunc_params; i++) {
+                if (i) sb_puts(sb, ", ");
+                render_into(sb, t->func_params[i]);
+            }
+            if (t->func_variadic) {
+                if (t->nfunc_params > 0) sb_puts(sb, ", ");
+                sb_puts(sb, "...");
+            }
+            sb_putc(sb, ')');
+            return;
+        case TY_BITFIELD:
+            if (t->base) render_into(sb, t->base);
+            else sb_puts(sb, "int");
+            sb_puts(sb, " : ");
+            {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", t->bit_width);
+                sb_puts(sb, buf);
+            }
+            return;
     }
 }
 
@@ -582,6 +705,28 @@ static void mangle_into(StrBuf* sb, const Type* t) {
             for (int i = 0; i < t->ntargs; i++) {
                 sb_putc(sb, '_');
                 mangle_into(sb, t->targs[i]);
+            }
+            return;
+        case TY_FUNC:
+            sb_puts(sb, "func_");
+            if (t->base) mangle_into(sb, t->base);
+            else sb_puts(sb, "void");
+            sb_putc(sb, '_');
+            for (int i = 0; i < t->nfunc_params; i++) {
+                if (i) sb_putc(sb, '_');
+                mangle_into(sb, t->func_params[i]);
+            }
+            if (t->func_variadic) sb_puts(sb, "_var");
+            return;
+        case TY_BITFIELD:
+            sb_puts(sb, "bf_");
+            if (t->base) mangle_into(sb, t->base);
+            else sb_puts(sb, "int");
+            sb_putc(sb, '_');
+            {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", t->bit_width);
+                sb_puts(sb, buf);
             }
             return;
     }
