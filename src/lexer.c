@@ -45,6 +45,8 @@ static const Keyword kws[] = {
     {"inline",      6, TK___INLINE},
     {"__inline__",  10, TK___INLINE__},
     {"__inline",    8, TK___INLINE},
+    {"__extension__", 13, TK___EXTENSION__},
+    {"__thread",     8, TK___THREAD},
     {"__attribute__", 13, TK___ATTRIBUTE__},
     {"__declspec",    10, TK___DECLSPEC},
     {"_Static_assert", 14, TK_STATIC_ASSERT},

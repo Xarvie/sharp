@@ -1,10 +1,10 @@
 /* compiler: msvc */
 /* C Feature: Thread-local storage */
-/* Expected: Parser should handle __declspec(thread) and __thread */
+/* NOTE: 使用 MSVC 支持的 __declspec(thread) 语法。__thread 是 GCC 扩展，MSVC 不支持。 */
 
 __declspec(thread) i32 tls_var1;
 
 i32 main() {
-    __thread i32 tls_var2 = 0;
+    __declspec(thread) i32 tls_var2 = 0;
     return tls_var1 + tls_var2;
 }

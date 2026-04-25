@@ -1145,6 +1145,20 @@ static Type* tc_expr(TC* tc, Node* e) {
                                   ex->decl->is_variadic);
                     return ex->ret_type;
                 }
+                /* Compiler built-in functions (GCC/Clang): __builtin_frame_address,
+                 * __builtin_alloca, __alignof__, etc. — accept without declaration. */
+                if (strncmp(cname, "__builtin_", 10) == 0) {
+                    /* __builtin_frame_address returns void* */
+                    if (strcmp(cname, "__builtin_frame_address") == 0) {
+                        return ty_ptr(tc_ty(tc, TY_VOID));
+                    }
+                    /* __builtin_alloca returns void* */
+                    if (strcmp(cname, "__builtin_alloca") == 0) {
+                        return ty_ptr(tc_ty(tc, TY_VOID));
+                    }
+                    /* Default: assume usize for other builtins */
+                    return tc_ty(tc, TY_ISIZE);
+                }
                 /* Function not declared — this is a hard error. */
                 diag_emit(DIAG_ERROR, E_UNKNOWN_IDENT, e->line, 0, 0,
                           "call to undeclared function '%s'", cname);
@@ -1230,6 +1244,28 @@ static void tc_stmt(TC* tc, Node* s) {
             Type*       dt   = vardecl_type(s);
             Node*       init = vardecl_init(s);
 
+            /* Shadowing within the *same* scope is an error. */
+            if (tc_scope_lookup_local(tc, name)) {
+                diag_emit(DIAG_ERROR, E_DUP_LOCAL, s->line, 0, 0,
+                          "redefinition of local '%s' in the same scope", name);
+            }
+            Type* rdt = tc_resolve(tc, dt);
+            if (init) {
+                Type* rt = tc_expr(tc, init);
+                if (rt && rdt && !tc_assignable(tc, rdt, rt)) {
+                    diag_emit(DIAG_ERROR, E_TYPE_MISMATCH, s->line, 0, 0,
+                              "cannot initialise '%s' (declared '%s') with '%s'",
+                              name, type_str(tc, dt), type_str(tc, rt));
+                }
+            }
+            tc_scope_add(tc, name, rdt);
+            return;
+        }
+
+        case ND_DECL_SPEC: {
+            const char* name = s->name;
+            Type*       dt   = s->declared_type;
+            Node*       init = s->rhs;
             /* Shadowing within the *same* scope is an error. */
             if (tc_scope_lookup_local(tc, name)) {
                 diag_emit(DIAG_ERROR, E_DUP_LOCAL, s->line, 0, 0,
