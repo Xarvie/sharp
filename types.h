@@ -105,6 +105,11 @@ Type* ty_subst(Type* t, const char** names, Type** repls, int n);
  * ===================================================================== */
 bool ty_assignable(const Type* to, const Type* from);
 
+/* Resolve a C primitive type name to its corresponding primitive Type*.
+ * If the name is not a known C primitive alias, returns NULL.
+ * Handles all common C spellings: "int", "long long", "unsigned int", etc. */
+Type* ty_resolve_c_named(const char* name);
+
 /* ===================================================================== *
  *   Rendering
  * ===================================================================== */

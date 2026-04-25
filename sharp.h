@@ -190,6 +190,7 @@ typedef enum {
 
     /* Calling conventions (TDD-2.1~2.4) */
     TK___CDECL, TK___STDCALL, TK___FASTCALL, TK___UNALIGNED,
+    TK___RESTRICT, TK___RESTRICT__,
 
     /* punctuation */
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE, TK_LBRACKET, TK_RBRACKET,

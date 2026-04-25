@@ -38,6 +38,7 @@ static const Keyword kws[] = {
     /* C extensions — wchar_t is a typedef name, NOT a keyword.
      * It is handled in parse_type by name matching, not lexing. */
     {"__int64",  7, TK___INT64},
+    {"_Bool",    5, TK_BOOL},
 
     /* C declaration modifiers */
     {"__inline__",  10, TK___INLINE__},
@@ -51,6 +52,8 @@ static const Keyword kws[] = {
     {"__stdcall",   9, TK___STDCALL},
     {"__fastcall", 10, TK___FASTCALL},
     {"__unaligned", 11, TK___UNALIGNED},
+    {"__restrict", 10, TK___RESTRICT},
+    {"__restrict__", 12, TK___RESTRICT__},
 };
 static const int nkws = (int)(sizeof(kws) / sizeof(kws[0]));
 
@@ -374,6 +377,12 @@ static Tok lex_read_raw(Lexer* lx) {
             break; // 不是linemarker，退出循环交给正常token处理逻辑
         }
         skip_ws(lx);
+    }
+    /* Skip remaining preprocessor directive lines (e.g. #pragma GCC system_header).
+     * These are emitted by the preprocessor but are not Sharp source tokens. */
+    if (pc(lx, 0) == '#') {
+        while (pc(lx, 0) && pc(lx, 0) != '\n') adv(lx);
+        return lex_read_raw(lx);
     }
     int c = pc(lx, 0);
     if (c == 0) {

@@ -711,7 +711,7 @@ static Type* tc_expr(TC* tc, Node* e) {
             if (ast_type(e)) return ast_type(e);
             const char* name = ident_name(e);
             Type* t = tc_scope_lookup(tc, name);
-            if (t) return t;
+            if (t) return tc_resolve(tc, t);
             /* Implicit self field. */
             if (tc->self_struct) {
                 SymField* f = sema_find_field(tc->self_struct, name);
@@ -1148,15 +1148,16 @@ static void tc_stmt(TC* tc, Node* s) {
                 diag_emit(DIAG_ERROR, E_DUP_LOCAL, s->line, 0, 0,
                           "redefinition of local '%s' in the same scope", name);
             }
+            Type* rdt = tc_resolve(tc, dt);
             if (init) {
                 Type* rt = tc_expr(tc, init);
-                if (rt && dt && !tc_assignable(tc, dt, rt)) {
+                if (rt && rdt && !tc_assignable(tc, rdt, rt)) {
                     diag_emit(DIAG_ERROR, E_TYPE_MISMATCH, s->line, 0, 0,
                               "cannot initialise '%s' (declared '%s') with '%s'",
                               name, type_str(tc, dt), type_str(tc, rt));
                 }
             }
-            tc_scope_add(tc, name, dt);
+            tc_scope_add(tc, name, rdt);
             return;
         }
 
@@ -1301,6 +1302,19 @@ Type* sema_resolve_type(SymTable* st, Type* t) {
         SymTypedef* td = sema_find_typedef(st, t->name);
         if (!td) break;
         t = td->base;
+    }
+    /* After typedef chain, if still a bare named type, try C primitive
+     * mapping so `int` resolves to TY_I32, `long long` to TY_I64, etc.
+     * This keeps parser/cgen unchanged (they emit the raw C spelling) while
+     * giving the type-checker a numeric primitive to work with. */
+    if (t && t->kind == TY_NAMED && t->name) {
+        Type* resolved = ty_resolve_c_named(t->name);
+        if (resolved) {
+            /* Preserve const qualifier if the original had it. */
+            if (t->is_const && !resolved->is_const)
+                resolved = ty_const(resolved);
+            return resolved;
+        }
     }
     return t;
 }

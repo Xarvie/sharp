@@ -267,7 +267,8 @@ static Type* parse_type(P* p) {
      * that are not type keywords. */
     for (;;) {
         TokKind k = lex_peek(p->lex).kind;
-        if (k == TK___INLINE__ || k == TK___INLINE || k == TK_EXTERN) {
+        if (k == TK___INLINE__ || k == TK___INLINE || k == TK_EXTERN ||
+            k == TK___RESTRICT || k == TK___RESTRICT__) {
             lex_next(p->lex);
         } else if (k == TK___DECLSPEC) {
             skip_declspec(p);

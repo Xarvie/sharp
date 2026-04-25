@@ -315,6 +315,7 @@ int main(int argc, char** argv) {
     cpp_define(cpp_ctx, "_WIN32",            "1");
     cpp_define(cpp_ctx, "__STDC__",          "1");
     cpp_define(cpp_ctx, "__STDC_VERSION__",  "201112L");
+    cpp_define(cpp_ctx, "__STRICT_ANSI__",   "1");
     /* TCC-specific */
     cpp_define(cpp_ctx, "__TINYC__",         "1");
 

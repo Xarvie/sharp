@@ -416,12 +416,44 @@ bool ty_assignable(const Type* to, const Type* from) {
         if (ty_eq(from->base, to->base)) return true;
     }
 
+
     /* Numeric ↔ numeric (C's usual arithmetic conversions). */
     if (ty_is_numeric(to) && ty_is_numeric(from)) return true;
     if (to->kind == TY_BOOL && ty_is_integer(from)) return true;
     if (ty_is_integer(to) && from->kind == TY_BOOL) return true;
 
     return false;
+}
+
+/* ===================================================================== *
+ *   C primitive name resolution
+ * ===================================================================== */
+
+Type* ty_resolve_c_named(const char* name) {
+    if (!name) return NULL;
+    /* Exact matches for the raw spellings produced by parse_c_type_raw. */
+    if (!strcmp(name, "int"))               return ty_prim(TY_I32);
+    if (!strcmp(name, "unsigned int"))      return ty_prim(TY_U32);
+    if (!strcmp(name, "long"))              return ty_prim(TY_I64);
+    if (!strcmp(name, "unsigned long"))     return ty_prim(TY_U64);
+    if (!strcmp(name, "long long"))         return ty_prim(TY_I64);
+    if (!strcmp(name, "unsigned long long"))return ty_prim(TY_U64);
+    if (!strcmp(name, "short"))             return ty_prim(TY_I16);
+    if (!strcmp(name, "unsigned short"))    return ty_prim(TY_U16);
+    if (!strcmp(name, "char"))              return ty_prim(TY_I8);
+    if (!strcmp(name, "unsigned char"))     return ty_prim(TY_U8);
+    if (!strcmp(name, "signed int"))        return ty_prim(TY_I32);
+    if (!strcmp(name, "signed long"))       return ty_prim(TY_I64);
+    if (!strcmp(name, "signed long long"))  return ty_prim(TY_I64);
+    if (!strcmp(name, "signed short"))      return ty_prim(TY_I16);
+    if (!strcmp(name, "signed char"))       return ty_prim(TY_I8);
+    if (!strcmp(name, "float"))             return ty_prim(TY_F32);
+    if (!strcmp(name, "double"))            return ty_prim(TY_F64);
+    if (!strcmp(name, "__int64"))           return ty_prim(TY_I64);
+    if (!strcmp(name, "unsigned __int64"))  return ty_prim(TY_U64);
+    if (!strcmp(name, "signed __int64"))    return ty_prim(TY_I64);
+    if (!strcmp(name, "_Bool"))             return ty_prim(TY_BOOL);
+    return NULL;
 }
 
 /* ===================================================================== *
