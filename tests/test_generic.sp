@@ -1,3 +1,4 @@
+/* compiler: any */
 /* TDD-Generic-1: struct + impl with generic parameter */
 
 struct Box<T> {

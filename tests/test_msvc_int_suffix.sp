@@ -1,3 +1,4 @@
+/* compiler: any */
 // TDD-§5: MSVC 整数字面量后缀 i8/i16/i32/i64
 
 i32 main() {

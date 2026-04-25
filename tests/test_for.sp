@@ -1,3 +1,4 @@
+/* compiler: any */
 /* TDD-Stmt-4: for loop */
 
 i32 main() {

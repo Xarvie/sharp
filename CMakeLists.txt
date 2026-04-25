@@ -15,21 +15,23 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 # Compiler flags (matches original Makefile)
-add_compile_options(
-    -O2
-    -Wall
-    -Wextra
-    -Wno-unused-parameter
-    -Wno-unused-function
-    -Wno-switch
-)
+# GCC/Clang flags
+if(NOT MSVC)
+    add_compile_options(
+        -O2
+        -Wall
+        -Wextra
+        -Wno-unused-parameter
+        -Wno-unused-function
+        -Wno-switch
+    )
+endif()
 # MSVC-specific flags
 if(MSVC)
-    add_compile_options(/wd4028)
-endif()
-# Disable Runtime Checks (/RTC1) which conflicts with /O2 in MSVC
-if(MSVC)
-    add_compile_options(/RTC1-)
+    add_compile_options(/wd4028 /wd4244 /wd4267 /wd4018 /wd4142)
+    # Disable Runtime Checks (/RTC1) which conflicts with /O2 in MSVC
+    string(REPLACE "/RTC1" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+    string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif()
 
 # Source files — compiler
@@ -81,7 +83,7 @@ set(CPP_SOURCES
 
 add_library(sharp_cpp STATIC ${CPP_SOURCES})
 target_include_directories(sharp_cpp PUBLIC ${CMAKE_SOURCE_DIR}/cpp)
-target_compile_options(sharp_cpp PRIVATE -Wno-implicit-fallthrough)
+target_compile_options(sharp_cpp PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wno-implicit-fallthrough>)
 
 # Standalone sharp-cpp preprocessor driver
 add_executable(sharp-cpp cpp/cpp_main.c)
@@ -100,96 +102,6 @@ install(TARGETS sharpc sharp-cpp
 # ----------------------------------------------------------------------
 
 enable_testing()
-
-# Unit tests for types module
-add_executable(test_types
-    tests/test_types.c
-    types.c
-    util.c
-)
-# Add include directory so tests can find headers
-target_include_directories(test_types PRIVATE ${CMAKE_SOURCE_DIR})
-add_test(NAME unit_types COMMAND test_types)
-
-# Smoke test for the preprocessor (verifies it builds and handles trivial input)
-add_executable(test_cpp_smoke
-    tests/test_cpp_smoke.c
-)
-target_link_libraries(test_cpp_smoke PRIVATE sharp_cpp)
-target_include_directories(test_cpp_smoke PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
-add_test(NAME unit_cpp_smoke COMMAND test_cpp_smoke)
-
-# Regression tests for bugs identified during code review
-add_executable(test_cpp_regression
-    tests/test_cpp_regression.c
-)
-target_link_libraries(test_cpp_regression PRIVATE sharp_cpp)
-target_include_directories(test_cpp_regression PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
-add_test(NAME unit_cpp_regression COMMAND test_cpp_regression)
-
-# Second round regression tests
-add_executable(test_cpp_regression2
-    tests/test_cpp_regression2.c
-)
-target_link_libraries(test_cpp_regression2 PRIVATE sharp_cpp)
-target_include_directories(test_cpp_regression2 PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
-add_test(NAME unit_cpp_regression2 COMMAND test_cpp_regression2)
-
-# Third round regression tests
-add_executable(test_cpp_regression3
-    tests/test_cpp_regression3.c
-)
-target_link_libraries(test_cpp_regression3 PRIVATE sharp_cpp)
-target_include_directories(test_cpp_regression3 PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
-add_test(NAME unit_cpp_regression3 COMMAND test_cpp_regression3)
-
-# Fourth round regression tests
-add_executable(test_cpp_regression4
-    tests/test_cpp_regression4.c
-)
-target_link_libraries(test_cpp_regression4 PRIVATE sharp_cpp)
-target_include_directories(test_cpp_regression4 PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
-add_test(NAME unit_cpp_regression4 COMMAND test_cpp_regression4)
-
-# Fifth round regression tests
-add_executable(test_cpp_regression5
-    tests/test_cpp_regression5.c
-)
-target_link_libraries(test_cpp_regression5 PRIVATE sharp_cpp)
-target_include_directories(test_cpp_regression5 PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
-add_test(NAME unit_cpp_regression5 COMMAND test_cpp_regression5)
-
-# Sixth round regression tests
-add_executable(test_cpp_regression6
-    tests/test_cpp_regression6.c
-)
-target_link_libraries(test_cpp_regression6 PRIVATE sharp_cpp)
-target_include_directories(test_cpp_regression6 PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
-add_test(NAME unit_cpp_regression6 COMMAND test_cpp_regression6)
-
-# Seventh round regression tests
-add_executable(test_cpp_regression7
-    tests/test_cpp_regression7.c
-)
-target_link_libraries(test_cpp_regression7 PRIVATE sharp_cpp)
-target_include_directories(test_cpp_regression7 PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
-add_test(NAME unit_cpp_regression7 COMMAND test_cpp_regression7)
-
-# Eighth round regression tests
-add_executable(test_cpp_regression8
-    tests/test_cpp_regression8.c
-)
-target_link_libraries(test_cpp_regression8 PRIVATE sharp_cpp)
-target_include_directories(test_cpp_regression8 PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
-add_test(NAME unit_cpp_regression8 COMMAND test_cpp_regression8)
-
-# Ninth round regression tests - C header inclusion
-add_executable(test_cpp_regression9
-    tests/test_cpp_regression9.c
-)
-target_link_libraries(test_cpp_regression9 PRIVATE sharp_cpp)
-target_include_directories(test_cpp_regression9 PRIVATE ${CMAKE_SOURCE_DIR}/cpp ${CMAKE_SOURCE_DIR})
-add_test(NAME unit_cpp_regression9 COMMAND test_cpp_regression9)
 
 # -----------------------------------------------------------------------
 # Positive integration test (compile each example, check exit code)

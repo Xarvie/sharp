@@ -1,3 +1,4 @@
+/* compiler: any */
 /* Phase 5: errno_t type test */
 
 /* errno_t type */

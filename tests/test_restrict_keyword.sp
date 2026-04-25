@@ -1,6 +1,5 @@
-/* compiler: gcc */
-/* §12 __restrict__ 关键字测试 */
-
+/* compiler: any */
+/* §12 __restrict__ 关键字 */
 extern i32 strlen(const i8* __restrict__ s);
 
 i32 main() {

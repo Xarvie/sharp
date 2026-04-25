@@ -21,6 +21,10 @@
 #include "pptok.h"
 
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>
+#define fileno _fileno
+#endif
 
 /* =========================================================================
  * Raw source buffer with position tracking

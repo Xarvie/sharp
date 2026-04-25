@@ -1,3 +1,4 @@
+/* compiler: any */
 /* TDD-Stmt-2: while loop */
 
 i32 main() {

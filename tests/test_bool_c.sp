@@ -1,3 +1,4 @@
+/* compiler: any */
 // TDD-§11: _Bool type support
 i32 main() {
     _Bool flag = 1;

@@ -100,28 +100,28 @@
 | `test_declspec_noreturn.sp` | TDD-3.1 | `__declspec(noreturn)` 函数声明 | ✅ |
 | `test_declspec_dllimport.sp` | TDD-3.2 | `__declspec(dllimport)` 外部变量声明 | ✅ |
 | `test_msvc_int_suffix.sp` | §5 | MSVC 整数字面量后缀 `i8`/`i16`/`i32`/`i64` | ✅ |
-| *(无测试文件)* | §8 | GCC 内联汇编 `__asm__` | ⬜ |
-| *(无测试文件)* | §9 | `#pragma push_macro` / `pop_macro` | ⬜ |
-| *(无测试文件)* | §10 | `#pragma pack` | ⬜ |
+| `test_asm_basic.sp` | §8 | GCC 内联汇编 `__asm__` | ✅ |
+| `test_pragma_push_pop.sp` | §9 | `#pragma push_macro` / `pop_macro` | ✅ |
+| `test_pragma_pack.sp` | §10 | `#pragma pack` | ✅ |
 | `test_bool_c.sp` | §11 | `_Bool` 类型 | ✅ |
-| *(无测试文件)* | §12 | `__restrict__` 关键字 | ⬜ |
-| *(无测试文件)* | §13 | 编译器内建宏类型 `__SIZE_TYPE__` 等 | ⬜ |
-| *(无测试文件)* | §14 | `extern "C++"` 块 | ⬜ |
-| *(无测试文件)* | §15 | SEH 异常处理宏 | ⬜ |
-| *(无测试文件)* | §17 | `sizeof` 类型派发宏（`fpclassify`/`signbit`）| ⬜ |
+| `test_restrict.sp` | §12 | `__restrict__` 关键字 | ✅ |
+| `test_builtin_macro_types.sp` | §13 | 编译器内建宏类型 `__SIZE_TYPE__` 等 | ✅ |
+| `test_extern_cpp.sp` | §14 | `extern "C++"` 块 | ✅ |
+| `test_seh.sp` | §15 | SEH 异常处理宏 | ✅ |
+| `test_sizeof_dispatch.sp` | §17 | `sizeof` 类型派发宏（`fpclassify`/`signbit`）| ✅ |
 | `test_nan_infinity.sp` | §18 | `NAN`/`INFINITY` 浮点常量定义 | ✅ |
 | `test_cast_sentinel.sp` | §19 | 强转指针哨兵值 | ✅ |
 | `test_pragma_system_header.sp` | §20 | `#pragma GCC system_header` | ✅ |
 | `test_static_assert_old.sp` | §21 | 编译期静态断言老式写法 | ✅ |
-| *(无测试文件)* | §22 | `alloca` / `__builtin_alloca` | ⬜ |
-| *(无测试文件)* | §23 | `__need_wint_t` 条件 typedef 模式 | ⬜ |
-| *(无测试文件)* | §24 | 柔性数组成员变种 `[1]` | ⬜ |
-| *(无测试文件)* | §25 | `L##` 宽字符串 token 拼接 | ⬜ |
-| *(无测试文件)* | §26 | `__attribute__((mode(DI)))` | ⬜ |
-| *(无测试文件)* | §27 | `__builtin_frame_address` / `__alignof__` | ⬜ |
+| `test_alloca.sp` | §22 | `alloca` / `__builtin_alloca` | ✅ |
+| `test_need_wint_t.sp` | §23 | `__need_wint_t` 条件 typedef 模式 | ✅ |
+| `test_flex_array.sp` | §24 | 柔性数组成员变种 `[1]` | ✅ |
+| `test_wide_string.sp` | §25 | `L##` 宽字符串 token 拼接 | ✅ |
+| `test_attribute_mode.sp` | §26 | `__attribute__((mode(DI)))` | ✅ |
+| `test_builtin_frame.sp` | §27 | `__builtin_frame_address` / `__alignof__` | ✅ |
 | `test_strict_ansi.sp` | §28 | `__STRICT_ANSI__` 条件编译 | ✅ |
-| *(无测试文件)* | §29 | `_malloca` / `_freea` 智能栈堆分配 | ⬜ |
-| *(无测试文件)* | §30 | 双层宏展开 token-pasting | ⬜ |
+| `test_malloca.sp` | §29 | `_malloca` / `_freea` 智能栈堆分配 | ✅ |
+| `test_token_pasting.sp` | §30 | 双层宏展开 token-pasting | ✅ |
 
 ---
 

@@ -1,3 +1,4 @@
+// compiler: gcc
 // TDD-§8: GCC 内联汇编 __asm__
 
 i32 main() {

@@ -1,3 +1,4 @@
+/* compiler: any */
 /* TDD-Stmt-5: break / continue */
 
 i32 main() {

@@ -1,3 +1,4 @@
+/* compiler: any */
 /* test_const_basic.sp - Test const parsing and codegen */
 
 extern i32 puts(const u8* s);

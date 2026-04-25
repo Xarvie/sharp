@@ -1,3 +1,4 @@
+/* compiler: any */
 /* TDD-Expr-1: pointer, address-of, dereference */
 
 i32 main() {

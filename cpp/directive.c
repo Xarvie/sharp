@@ -17,7 +17,16 @@
  *   #c_only     … #end_c_only      — block emitted only when compiling as C
  */
 
+#include <stdio.h>
+#ifdef _WIN32
+#include <io.h>
+#define access _access
+#ifndef R_OK
+#define R_OK 04
+#endif
+#else
 #include <unistd.h>
+#endif
 #include "cpp_internal.h"
 #include "directive.h"
 #include "macro.h"

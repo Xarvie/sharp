@@ -1,3 +1,4 @@
+/* compiler: any */
 /* TDD-Stmt-3: if / else */
 
 i32 main() {

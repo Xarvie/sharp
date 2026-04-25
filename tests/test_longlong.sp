@@ -1,3 +1,4 @@
+/* compiler: any */
 typedef long long my_ll;
 
 i32 main() {

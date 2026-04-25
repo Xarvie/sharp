@@ -1,3 +1,4 @@
+/* compiler: any */
 /* TDD-Expr-4: bool literals and logic operators */
 
 i32 main() {

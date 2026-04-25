@@ -1,3 +1,4 @@
+/* compiler: any */
 /* Phase 3: C struct/union tests */
 
 /* Union type */

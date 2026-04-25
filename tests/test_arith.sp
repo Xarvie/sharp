@@ -1,3 +1,4 @@
+/* compiler: any */
 /* TDD-Expr-2: arithmetic (+ - * / %) and comparison */
 
 i32 main() {

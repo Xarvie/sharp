@@ -1,3 +1,4 @@
+/* compiler: any */
 /* test_const_fn.sp - Test const in function parameters */
 
 extern i32 puts(const u8* s);

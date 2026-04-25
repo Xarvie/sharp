@@ -1,3 +1,4 @@
+/* compiler: msvc */
 /* Phase 2: C declaration modifier tests */
 
 /* __attribute__ on function declarations */

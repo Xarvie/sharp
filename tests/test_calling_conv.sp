@@ -1,3 +1,4 @@
+// compiler: msvc
 // TDD-2.1~2.4: calling convention keywords passthrough
 
 /* Function declaration with __cdecl */

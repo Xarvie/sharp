@@ -1,3 +1,4 @@
+/* compiler: any */
 /* TDD-Expr-3: array declaration and indexing */
 
 i32 main() {

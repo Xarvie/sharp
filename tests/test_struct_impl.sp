@@ -1,3 +1,4 @@
+/* compiler: any */
 /* TDD-Struct-4: struct + impl + method call */
 
 struct Vec2 {
