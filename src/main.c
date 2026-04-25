@@ -11,7 +11,7 @@
  */
 #include "sharp.h"
 #include "hir.h"
-#include "cpp/cpp.h"
+#include "cpp.h"
 
 #ifdef _WIN32
   #include <windows.h>

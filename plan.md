@@ -1,128 +1,428 @@
-# Sharp C 前端完整支持实施计划
+# sharpc C 语言超集支持 — 完整实现计划
 
-## 目标
+## 一、当前状态总结
 
-让 Sharp 解析器能完整处理 C11 标准头文件（stdio.h、stdlib.h、string.h、stddef.h），支持 Sharp 作为 C 超集的完整语法能力。
+### 已支持的 C 特性（50+ 项）
 
----
+| 类别 | 特性 | 测试文件 |
+|------|------|---------|
+| 类型系统 | SP 原生类型映射 (i8~usize, f32/f64) | test_types_all.sp |
+| 类型系统 | C 类型透传 (int, long, unsigned, wchar_t, __int64) | test_types_c_passthrough.sp |
+| 类型系统 | _Bool, long long, typedef 基础 | test_bool_c.sp, test_longlong.sp |
+| 调用约定 | __cdecl, __stdcall, __fastcall, __unaligned | test_calling_conv.sp |
+| 声明修饰 | __declspec(noreturn/dllimport) | test_declspec_*.sp |
+| 内联函数 | extern __inline__, __inline__ | test_*inline*.sp |
+| 变量 | const, extern, static, 全局变量 | test_const_*.sp, test_extern_simple.sp |
+| 控制流 | if/else, for, while, break, continue, return | test_if.sp, test_for.sp, test_while.sp |
+| 表达式 | 算术运算, 逻辑运算, 指针, 数组, 布尔 | test_arith.sp, test_ptr.sp, test_bool.sp |
+| 结构体 | struct/union 定义, typedef struct, 前向声明 | test_c_struct_union.sp |
+| 结构体 | struct + impl + 方法调用 | test_struct_impl.sp |
+| 结构体 | 柔性数组 [1] | test_flex_array.sp |
+| 泛型 | 泛型 struct + impl | test_generic.sp |
+| 预处理器 | #define, #ifdef, #include, 宏展开, 条件编译 | test_token_pasting.sp, test_strict_ansi.sp |
+| 预处理器 | #pragma pack, push_macro/pop_macro, GCC system_header | test_pragma_*.sp |
+| 内联汇编 | __asm__ 块透传 | test_asm_basic.sp |
+| SEH | __try/__except/__finally | test_seh.sp |
+| 属性 | __attribute__((mode(DI))), __attribute__((format...)) | test_attribute_mode.sp, test_c_modifiers.sp |
+| 内建函数 | __builtin_frame_address, __alignof__, alloca, _malloca | test_builtin_*.sp, test_alloca.sp |
+| 泛型 | 泛型 struct + impl | test_generic.sp |
+| 字面量 | NAN/INFINITY, MSVC 整数字面量后缀 | test_nan_infinity.sp, test_msvc_int_suffix.sp |
+| 类型转换 | C 风格强转 (type)(expr) | test_cast_sentinel.sp |
+| extern 块 | extern "C++" { } | test_extern_cpp.sp |
+| 变参函数 | extern i32 printf(const char*, ...) | test_variadic_extern.sp |
+| 调用约定+变参 | extern i32 __cdecl printf(...) | test_complex_extern.sp |
+| restrict | __restrict__ 指针修饰 | test_restrict.sp |
 
-## 统计分析
+### 不支持的 C 特性（13 项，按优先级排列）
 
-### 测试基准：TCC 预处理器输出
-
-对 `stdio.h` 执行 `tcc -E` 后得到约 428 行预处理后的代码。逐行分析不支持的语法：
-
-#### Phase 1: 类型扩展（~80 行代码）
-
-| 特性 | 出现次数 | 示例 | 优先级 |
-|------|---------|------|--------|
-| `__int64` 类型 | 2 | `typedef __int64 fpos_t;` | 🔥 必须 |
-| `__time32_t` / `__time64_t` | 2 | `typedef long __time32_t;` | 中 |
-| `wchar_t` 类型 | 数十次 | `wchar_t * fgetws(...)` | 🔥 必须 |
-| `_locale_t` 结构体指针 | ~50 | `_locale_t _Locale` | 中 |
-
-#### Phase 2: 声明修饰符（~120 行代码）
-
-| 特性 | 出现次数 | 示例 | 优先级 |
-|------|---------|------|--------|
-| `#pragma pack(push,N)` | 2 | `#pragma pack(push,8)` | 🔥 必须 |
-| `#pragma pack(pop)` | 1 | `#pragma pack(pop)` | 🔥 必须 |
-| `__attribute__` | ~10 | `__attribute__((format(gnu_printf,3,0)))` | 🔥 必须 |
-| `extern __inline__` | 2 | `extern __inline__ int vsnprintf(...)` | 中 |
-| 前向引用 struct | ~10 | `typedef struct threadlocaleinfostruct *pthreadlocinfo;` | 🔥 必须 |
-
-#### Phase 3: 完整 struct/union 支持（~30 行代码）
-
-| 特性 | 出现次数 | 示例 | 优先级 |
-|------|---------|------|--------|
-| `union` 类型 | 若干 | `union { int i; float f; }` | 中 |
-| struct 内嵌匿名 union | 少量 | `_iobuf` 中的字段 | 低 |
-| 位域字段 | 0 (stdio.h 无) | `int flag:1;` | 低 |
-
-#### Phase 4: 函数特性（~50 行代码）
-
-| 特性 | 出现次数 | 示例 | 优先级 |
-|------|---------|------|--------|
-| 可变参数 `va_list` | ~20 | `int printf(const char*, va_list);` | 🔥 必须 |
-| 函数内联定义 | 2 | `extern __inline__ int vsnprintf(...) { return ...; }` | 中 |
-| `_Static_assert` | 0 (stdio.h 无) | `_Static_assert(sizeof(int)==4, "...");` | 低 |
-
-#### Phase 5: 其他（~30 行代码）
-
-| 特性 | 出现次数 | 示例 | 优先级 |
-|------|---------|------|--------|
-| `errno_t` 类型 | ~10 | `errno_t clearerr_s(FILE*);` | 中 |
-| `_off_t` / `_off64_t` | ~8 | `_off64_t ftello64(FILE*)` | 中 |
-| 宽字符串字面量 `L"..."` | 若干 | `L"/"`, `L"\\"` | 中 |
-
-### 其他头文件需要补充支持
-
-| 头文件 | 额外特性 |
-|--------|---------|
-| `stdlib.h` | `__declspec`（MSVC）、`div_t`/`ldiv_t` struct、`atexit` 函数指针 |
-| `string.h` | `const` 正确性、`size_t` 返回值 |
-| `stdint.h` | `int8_t` 等 typedef 链、`INT64_C` 宏 |
-| `stddef.h` | `offsetof` 宏、`NULL` 定义 |
-| `_mingw.h` | `__CRTDECL`、`_CRTIMP`、`__MINGW_ATTRIB_NORETURN` |
+| 优先级 | 编号 | 特性 | 测试文件 | stdio.h 中的实际例子 |
+|--------|------|------|---------|---------------------|
+| **P0** | §33 | 匿名结构体/联合体 | test_anonymous_struct.sp | `struct { int a; int b; };` |
+| **P0** | §34 | __declspec 修饰结构体字段 | test_struct_field_declspec.sp | `char* __declspec(nothrow) _ptr;` |
+| **P0** | §35 | 复杂 typedef 链 | test_complex_typedef.sp | `typedef struct X {} X, *PX;` |
+| **P0** | §36 | 函数指针参数 | test_func_pointer_param.sp | `int (*compar)(const void*, const void*)` |
+| **P1** | §37 | 指定初始化器 | test_designated_init.sp | `{ .x = 1, .y = 2 }` |
+| **P1** | §38 | 复合字面量 | test_compound_literal.sp | `(struct Point){ .x = 1 }` |
+| **P1** | §39 | 位域 | test_bitfield.sp | `u32 flag : 1;` |
+| **P1** | §40 | 线程局部存储 | test_thread_local.sp | `__declspec(thread) int x;` |
+| **P2** | §41 | 复杂 __attribute__ | test_complex_attribute.sp | `__attribute__((aligned(16)))` |
+| **P2** | §42 | 嵌套结构体定义 | test_nested_struct.sp | `struct Outer { struct Inner {} inner; }` |
+| **P2** | §43 | restrict 修饰函数参数 | test_restrict_param.sp | `char* restrict dest` |
+| **P2** | §44 | 函数指针变量 | test_func_pointer.sp | `int (*fp)(int, int) = null;` |
+| **P2** | §45 | __extension__ 关键字 | test_extension.sp | `__extension__ long long x;` |
 
 ---
 
-## 实施计划
+## 二、核心设计原则
 
-### Phase 1: 类型扩展（~80 行）
-- [ ] 1.1 token.h: 新增 `TK___INT64`, `TK_WCHAR_T`, `TK___TIME32_T`, `TK___TIME64_T`
-- [ ] 1.2 lexer.c: 识别新关键字
-- [ ] 1.3 parser.c: `parse_c_type()` 支持新类型 → 映射为 `long long` / `unsigned short`
-- [ ] 1.4 types.c: 新增 `TY_WCHAR_T` 类型
-- [ ] 1.5 测试: wchar_t、__int64 typedef 解析
-
-### Phase 2: 声明修饰符（~150 行）
-- [ ] 2.1 预处理器: 支持 `#pragma pack(push,N)` / `#pragma pack(pop)` — 原样输出到 C
-- [ ] 2.2 token.h: 新增 `TK___ATTRIBUTE__`, `TK___INLINE__`, `TK___DECLSPEC`
-- [ ] 2.3 lexer.c: 识别 `__attribute__`、`__inline__`、`__declspec`
-- [ ] 2.4 parser.c: `__attribute__((...))` → 跳过，记录为修饰符列表
-- [ ] 2.5 parser.c: `extern __inline__` → 标记为 inline 函数
-- [ ] 2.6 cgen.c: 生成时保留 `__attribute__` 原样输出
-- [ ] 2.7 测试: __attribute__ 跳过，函数内联
-
-### Phase 3: struct/union 完善（~50 行）
-- [ ] 3.1 parser.c: `union` 声明解析（类似 struct）
-- [ ] 3.2 parser.c: 前向引用 `typedef struct Tag *PtrType;`
-- [ ] 3.3 测试: union typedef，前向引用
-
-### Phase 4: 函数特性（~100 行）
-- [ ] 4.1 token.h: `TK_VA_LIST`
-- [ ] 4.2 parser.c: `va_list` 类型识别
-- [ ] 4.3 parser.c: 函数体内联定义 `extern __inline__ int f() { return 0; }`
-- [ ] 4.4 测试: va_list 参数，内联函数
-
-### Phase 5: 其他（~50 行）
-- [ ] 5.1 token.h: `TK_ERRNO_T`, `TK_OFF_T` 等
-- [ ] 5.2 lexer.c: 宽字符串 `L"..."` 识别
-- [ ] 5.3 parser.c: `_Static_assert` 支持
-- [ ] 5.4 cgen.c: 宽字符串生成 `L"..."`
-- [ ] 5.5 测试: 宽字符串、_Static_assert
+1. **Parser 是 C 解析器，不是 SP 解析器** — Parser 应该能解析完整的 C99/C11 语法
+2. **SP 是 C 的超集** — 所有 C 代码都应该是合法的 SP 代码
+3. **不区分 C/SP 模式** — Parser 自动识别语法，不需要模式切换
+4. **生成的 C 代码必须完全等价** — cgen 输出的 C 代码应能通过任何 C 编译器
 
 ---
 
-## 风险与注意事项
+## 三、实现计划
 
-1. **`#pragma` 处理**：需要预处理器支持，不能只在 parser 层
-2. **`__attribute__` 参数解析**：需要跳过嵌套括号
-3. **MSVC `__declspec`**：当前测试用 TCC 头文件不含 `__declspec`，但 MSVC 版本需要
-4. **向后兼容**：现有 Sharp 代码不能受影响
-5. **测试覆盖**：每个 phase 至少 5 个测试用例
+### Phase 1: 结构体/联合体增强（P0 — 4 项）
+
+**目标：** 让 Parser 能解析 stdio.h 中的结构体定义
+
+#### 1.1 匿名结构体/联合体 (§33)
+
+**文件修改：** `parser.c` — `parse_struct_decl()`, `parse_union_decl()`
+
+**当前行为：** 解析器期望 `struct Name { ... };` 或 `struct Name;`
+
+**目标行为：**
+```c
+// 匿名结构体作为字段
+struct Outer {
+    i32 x;
+    struct {    // 匿名，无名称
+        i32 a;
+        i32 b;
+    };
+    union {     // 匿名，无名称
+        i32 c;
+        f64 d;
+    };
+}
+```
+
+**实现：**
+- 在 `parse_struct_decl()` 中，如果 `struct` 后面直接跟 `{`（没有名称），解析为匿名结构体
+- 在字段列表中，如果遇到 `struct {` 或 `union {`，递归解析并标记为匿名
+- AST 新增 `ND_ANONYMOUS_STRUCT` 和 `ND_ANONYMOUS_UNION` 节点
+- cgen 输出时不生成字段名，直接输出内部字段
+
+#### 1.2 __declspec 修饰结构体字段 (§34)
+
+**文件修改：** `parser.c` — `parse_field_decl()`
+
+**当前行为：** 字段声明格式为 `Type field_name;`
+
+**目标行为：**
+```c
+struct _iobuf {
+    char* _ptr;
+    i32 _cnt;
+    char* __declspec(nothrow) _base;  // __declspec 在类型之后、字段名之前
+    i32 _flag;
+}
+```
+
+**实现：**
+- 在 `parse_field_decl()` 中，解析完类型后，检查是否有 `__declspec` token
+- 如果有，调用 `parse_declspec()` 捕获内容，存储在 Node.declspec 字段
+- cgen 输出时：`type __declspec(content) name;`
+
+#### 1.3 复杂 typedef 链 (§35)
+
+**文件修改：** `parser.c` — `parse_typedef()`
+
+**当前行为：** `typedef struct Name { ... } Alias;`（单个别名）
+
+**目标行为：**
+```c
+// 多个别名
+typedef struct FILE { ... } FILE, *PFILE, **PPFILE;
+
+// 函数指针 typedef
+typedef void (*sighandler_t)(i32);
+typedef i32 (*cmp_fn)(const void*, const void*);
+```
+
+**实现：**
+- 在 `parse_typedef()` 中，解析完第一个别名后，检查是否有 `,`
+- 如果有，继续解析更多别名（可能是指针类型 `*PFILE`）
+- 支持函数指针语法的 typedef：`(*name)(params)`
+
+#### 1.4 函数指针参数 (§36)
+
+**文件修改：** `parser.c` — `parse_param_list()`
+
+**当前行为：** 参数格式为 `Type name`
+
+**目标行为：**
+```c
+extern void qsort(void* base, size_t nmemb, size_t size,
+                  i32 (*compar)(const void*, const void*));
+```
+
+**实现：**
+- 在 `parse_param()` 中，解析参数时检查是否为函数指针语法
+- 如果看到 `(*` 或 `(*name)`，解析为函数指针类型
+- AST 新增 `ND_FUNC_PTR_PARAM` 节点
+
+**预计工作量：** 3 天
 
 ---
 
-## 预估总代码量
+### Phase 2: 表达式增强（P1 — 4 项）
 
-| Phase | 改动文件 | 行数 |
-|-------|---------|------|
-| 1. 类型扩展 | token.h, lexer.c, parser.c, types.c | ~80 |
-| 2. 声明修饰符 | token.h, lexer.c, parser.c, cgen.c, cpp/ | ~150 |
-| 3. struct/union | parser.c | ~50 |
-| 4. 函数特性 | token.h, lexer.c, parser.c | ~100 |
-| 5. 其他 | token.h, lexer.c, parser.c, cgen.c | ~50 |
-| 测试 | tests/ | ~100 |
-| **总计** | | **~530 行** |
+#### 2.1 指定初始化器 (§37)
+
+**文件修改：** `parser.c` — `parse_init_expr()`, `parse_primary()`
+
+**目标行为：**
+```c
+struct Point p = { .x = 1, .y = 2 };
+int arr[3] = { [1] = 5, [2] = 10 };
+```
+
+**实现：**
+- 在 `parse_init_expr()` 中，解析 `{` 后的内容
+- 如果遇到 `.field =` 语法，解析为指定初始化器
+- 如果遇到 `[index] =` 语法，解析为数组指定初始化器
+- AST 新增 `ND_DESIGNATED_INIT` 节点
+
+#### 2.2 复合字面量 (§38)
+
+**文件修改：** `parser.c` — `parse_primary()`
+
+**目标行为：**
+```c
+struct Point* p = &(struct Point){ .x = 1, .y = 2 };
+```
+
+**实现：**
+- 在 `parse_primary()` 中，如果遇到 `(Type){`，解析为复合字面量
+- AST 新增 `ND_COMPOUND_LIT` 节点
+
+#### 2.3 位域 (§39)
+
+**文件修改：** `parser.c` — `parse_field_decl()`
+
+**目标行为：**
+```c
+struct Flags {
+    u32 a : 1;
+    u32 b : 2;
+    u32 c : 4;
+}
+```
+
+**实现：**
+- 在 `parse_field_decl()` 中，解析完 `name;` 后，检查是否有 `:`
+- 如果有，解析位宽表达式（通常是整数常量）
+- AST 新增 `ND_BITFIELD` 字段或给 ND_FIELD 添加 bit_width 属性
+
+#### 2.4 线程局部存储 (§40)
+
+**文件修改：** `parser.c` — `parse_top_level()`, `parse_decl()`
+
+**目标行为：**
+```c
+__declspec(thread) i32 tls_var1;
+__thread i32 tls_var2;
+```
+
+**实现：**
+- 在 `parse_top_level()` 中，检测到 `__declspec(thread)` 时，标记为 TLS 变量
+- 或者检测 `__thread` 关键字
+- AST 新增 `ND_TLS_DECL` 节点
+- cgen 输出时：`__declspec(thread) type name;` 或 `__thread type name;`
+
+**预计工作量：** 2 天
+
+---
+
+### Phase 3: 其他特性（P2 — 5 项）
+
+#### 3.1 复杂 __attribute__ (§41)
+
+**文件修改：** `parser.c` — `parse_attribute()`
+
+**目标行为：**
+```c
+i32 x __attribute__((aligned(16), unused));
+void* p __attribute__((malloc, aligned(16)));
+```
+
+**实现：**
+- 扩展现有的 `skip_attribute()` 为完整的 `parse_attribute()`
+- 解析属性列表中的多个属性，支持带参数的属性
+- AST 新增 `ND_ATTR_COMPLEX` 节点
+
+#### 3.2 嵌套结构体定义 (§42)
+
+**文件修改：** `parser.c` — `parse_struct_decl()`
+
+**目标行为：**
+```c
+struct Outer {
+    i32 x;
+    struct Inner {
+        i32 a;
+        i32 b;
+    } inner;
+}
+```
+
+**实现：**
+- 在 `parse_struct_decl()` 中，字段类型可能是另一个 struct 定义
+- 递归调用 `parse_struct_decl()` 解析嵌套定义
+- AST 中嵌套结构体作为字段的类型
+
+#### 3.3 restrict 修饰函数参数 (§43)
+
+**文件修改：** `parser.c` — `parse_param_list()`
+
+**目标行为：**
+```c
+extern char* strncpy(char* restrict dest, const char* restrict src, usize n);
+```
+
+**实现：**
+- 在 `parse_param()` 中，解析完类型和名称后，检查是否有 `restrict`
+- 如果有，标记参数为 restrict
+- AST 给 ND_PARAM 添加 `is_restrict` 标志
+
+#### 3.4 函数指针变量 (§44)
+
+**文件修改：** `parser.c` — `parse_local_decl()`, `parse_stmt()`
+
+**目标行为：**
+```c
+i32 main() {
+    i32 (*fp)(i32, i32) = null;
+    i32 result = (*fp)(1, 2);
+    return result;
+}
+```
+
+**实现：**
+- 在 `parse_local_decl()` 中，检测函数指针语法 `(*name)(params)`
+- 解析函数指针类型和初始化表达式
+- AST 新增 `ND_FUNC_PTR_DECL` 节点
+
+#### 3.5 __extension__ 关键字 (§45)
+
+**文件修改：** `parser.c` — `parse_top_level()`, `parse_stmt()`
+
+**目标行为：**
+```c
+__extension__ i64 x = 10000000000;
+__extension__ long long y;
+```
+
+**实现：**
+- 添加 `TK___EXTENSION__` token
+- 在 top-level 和 statement 解析中，检测到 `__extension__` 时跳过该关键字
+- 继续解析后续声明
+
+**预计工作量：** 2 天
+
+---
+
+## 四、AST 扩展清单
+
+需要在 `sharp.h` 中新增的 NodeKind：
+
+```c
+typedef enum {
+    // ... existing nodes ...
+    
+    /* C-specific constructs */
+    ND_ANONYMOUS_STRUCT,   /* anonymous struct inside struct/union */
+    ND_ANONYMOUS_UNION,    /* anonymous union inside struct */
+    ND_BITFIELD,           /* field : width — bit field */
+    ND_DESIGNATED_INIT,    /* .field = value or [index] = value */
+    ND_COMPOUND_LIT,       /* (Type){ ... } — compound literal */
+    ND_FUNC_PTR_DECL,      /* type (*name)(params) = init; */
+    ND_FUNC_PTR_PARAM,     /* type (*name)(params) as function parameter */
+    ND_TLS_DECL,           /* __declspec(thread) / __thread variable */
+    ND_ATTR_COMPLEX,       /* __attribute__((aligned(16), unused)) */
+} NodeKind;
+```
+
+需要在 `Node` 结构体中新增的字段：
+
+```c
+struct Node {
+    // ... existing fields ...
+    int bitfield_width;       /* for ND_BITFIELD */
+    bool is_restrict;         /* for ND_PARAM */
+    bool is_anonymous;        /* for ND_STRUCT/ND_UNION */
+    const char* init_designators; /* for ND_COMPOUND_LIT */
+    // ... etc
+};
+```
+
+---
+
+## 五、验证计划
+
+### 单元测试
+
+每个新特性对应一个测试文件：
+
+| 编号 | 测试文件 | 特性 | 验证标准 |
+|------|---------|------|---------|
+| §33 | test_anonymous_struct.sp | 匿名结构体/联合体 | C 代码生成正确，GCC 编译通过 |
+| §34 | test_struct_field_declspec.sp | __declspec 字段 | C 代码生成正确 |
+| §35 | test_complex_typedef.sp | 复杂 typedef 链 | C 代码生成正确 |
+| §36 | test_func_pointer_param.sp | 函数指针参数 | C 代码生成正确 |
+| §37 | test_designated_init.sp | 指定初始化器 | C 代码生成正确 |
+| §38 | test_compound_literal.sp | 复合字面量 | C 代码生成正确 |
+| §39 | test_bitfield.sp | 位域 | C 代码生成正确 |
+| §40 | test_thread_local.sp | 线程局部存储 | C 代码生成正确 |
+| §41 | test_complex_attribute.sp | 复杂 __attribute__ | C 代码生成正确 |
+| §42 | test_nested_struct.sp | 嵌套结构体 | C 代码生成正确 |
+| §43 | test_restrict_param.sp | restrict 参数 | C 代码生成正确 |
+| §44 | test_func_pointer.sp | 函数指针变量 | C 代码生成正确 |
+| §45 | test_extension.sp | __extension__ | C 代码生成正确 |
+
+### 集成测试
+
+| 测试文件 | 验证内容 |
+|---------|---------|
+| test_stdio_h.sp | `#include <stdio.h>` 完整解析 + 使用 printf |
+| test_stdlib_h.sp | `#include <stdlib.h>` 完整解析 + 使用 malloc |
+| test_math_h.sp | `#include <math.h>` 完整解析 + 使用 sin/cos |
+
+### 回归测试
+
+```powershell
+.\run_tests.ps1
+```
+
+- 所有现有 58 个测试必须通过
+- 新增 13 个测试必须通过
+- 新增 3 个集成测试必须通过
+
+---
+
+## 六、工作量估算
+
+| 阶段 | 特性数 | 工作量 | 优先级 |
+|------|--------|--------|--------|
+| Phase 1: 结构体/联合体增强 | 4 | 3 天 | P0 |
+| Phase 2: 表达式增强 | 4 | 2 天 | P1 |
+| Phase 3: 其他特性 | 5 | 2 天 | P2 |
+| 集成测试 | 3 | 1 天 | P0 |
+| **总计** | **16** | **8 天** | |
+
+---
+
+## 七、风险与缓解
+
+### 风险 1: Parser 复杂度增加
+**缓解：** 每个特性独立实现，有对应的测试文件验证
+
+### 风险 2: C 语法与 SP 语法冲突
+**缓解：** 统一语法解析，不需要模式切换。SP 语法是 C 的子集，所有 C 构造都可以直接解析
+
+### 风险 3: cgen 输出不正确
+**缓解：** cgen 对每个新 AST 节点都有对应的代码生成逻辑，确保输出与原输入语义等价
+
+---
+
+## 八、长期愿景
+
+完成此计划后，sharpc 将成为：
+1. **完整的 C 语言超集** — 能直接 `#include` 任何标准库头文件
+2. **一等编程语言** — 支持所有 C 构造，无"不支持"的例外
+3. **向后兼容** — 所有 C 代码都能直接在 SP 中编译
+4. **向前扩展** — 在 C 基础上添加 SP 特性（impl、泛型、RAII 等）

@@ -122,6 +122,131 @@
 | `test_strict_ansi.sp` | §28 | `__STRICT_ANSI__` 条件编译 | ✅ |
 | `test_malloca.sp` | §29 | `_malloca` / `_freea` 智能栈堆分配 | ✅ |
 | `test_token_pasting.sp` | §30 | 双层宏展开 token-pasting | ✅ |
+| `test_complex_extern.sp` | §31 | 复杂 extern（调用约定+变参） | ✅ |
+| `test_variadic_extern.sp` | §32 | 变参函数声明（`...`） | ✅ |
+| `test_anonymous_struct.sp` | §33 | 匿名结构体/联合体 | ❌ |
+| `test_struct_field_declspec.sp` | §34 | `__declspec` 修饰结构体字段 | ❌ |
+| `test_complex_typedef.sp` | §35 | 复杂 typedef 链（`typedef struct X {} X, *PX;`） | ❌ |
+| `test_func_pointer_param.sp` | §36 | 函数指针参数（`int (*compar)(const void*, const void*)`） | ❌ |
+| `test_designated_init.sp` | §37 | 指定初始化器（`.field = value`） | ❌ |
+| `test_compound_literal.sp` | §38 | 复合字面量（`(Type){ ... }`） | ❌ |
+| `test_bitfield.sp` | §39 | 位域（`unsigned int x : 3;`） | ❌ |
+| `test_thread_local.sp` | §40 | 线程局部存储（`__declspec(thread)`） | ❌ |
+| `test_complex_attribute.sp` | §41 | 复杂 `__attribute__`（`aligned(16)`, `packed` 等） | ❌ |
+| `test_nested_struct.sp` | §42 | 嵌套结构体定义（`struct Outer { struct Inner { ... } inner; }`） | ❌ |
+| `test_restrict_param.sp` | §43 | `restrict` 修饰函数参数 | ❌ |
+| `test_func_pointer.sp` | §44 | 函数指针变量声明（`int (*fp)(int, int);`） | ❌ |
+| `test_extension.sp` | §45 | `__extension__` 关键字 | ❌ |
+
+---
+
+## 已支持的 C 特性清单
+
+> 以下特性已通过测试验证，可以正常使用。
+
+| 编号 | 特性 | 测试文件 | 说明 |
+|------|------|---------|------|
+| §1~§7 | SP 原生类型映射 | test_types_all.sp | i8~usize, f32/f64, bool, char, void |
+| §1 | C 类型透传 | test_types_c_passthrough.sp | int, long, unsigned 等原样透传 |
+| §2.1~2.4 | 调用约定 | test_calling_conv.sp | __cdecl, __stdcall, __fastcall, __unaligned |
+| §3.1 | __declspec(noreturn) | test_declspec_noreturn.sp | 函数声明 |
+| §3.2 | __declspec(dllimport) | test_declspec_dllimport.sp | 外部变量声明 |
+| §5 | MSVC 整数字面量后缀 | test_msvc_int_suffix.sp | i8/i16/i32/i64 |
+| §8 | GCC 内联汇编 | test_asm_basic.sp | __asm__ 块透传 |
+| §9 | push_macro/pop_macro | test_pragma_push_pop.sp | #pragma push_macro("X") |
+| §10 | #pragma pack | test_pragma_pack.sp | #pragma pack(push, 1) |
+| §11 | _Bool 类型 | test_bool_c.sp | C99 _Bool |
+| §12 | __restrict__ 关键字 | test_restrict.sp | 指针修饰符 |
+| §13 | 编译器内建宏 | test_builtin_macro_types.sp | __SIZE_TYPE__ 等 |
+| §14 | extern "C++" 块 | test_extern_cpp.sp | extern "C++" { ... } |
+| §15 | SEH 异常处理 | test_seh.sp | __try/__except/__finally |
+| §17 | sizeof 类型派发 | test_sizeof_dispatch.sp | fpclassify/signbit 宏 |
+| §18 | NAN/INFINITY | test_nan_infinity.sp | 浮点常量 |
+| §19 | 强转指针哨兵值 | test_cast_sentinel.sp | (type*)(expr) |
+| §20 | #pragma GCC system_header | test_pragma_system_header.sp | 抑制警告 |
+| §21 | _Static_assert | test_static_assert_old.sp | 编译期断言 |
+| §22 | alloca | test_alloca.sp | 栈分配 |
+| §23 | __need_wint_t 模式 | test_need_wint_t.sp | 条件 typedef |
+| §24 | 柔性数组 [1] | test_flex_array.sp | struct { int data[1]; } |
+| §25 | L## 宽字符串 | test_wide_string.sp | 宽字符常量 |
+| §26 | __attribute__((mode(DI))) | test_attribute_mode.sp | GCC 模式属性 |
+| §27 | __builtin_frame_address | test_builtin_frame.sp | __alignof__ |
+| §28 | __STRICT_ANSI__ | test_strict_ansi.sp | 条件编译 |
+| §29 | _malloca/_freea | test_malloca.sp | Windows 栈分配 |
+| §30 | 双层宏展开 | test_token_pasting.sp | ## token pasting |
+| §31 | 复杂 extern（调用约定+变参） | test_complex_extern.sp | extern i32 __cdecl printf(...) |
+| §32 | 变参函数声明 | test_variadic_extern.sp | extern i32 printf(const char*, ...) |
+
+---
+
+## 不支持的 C 特性清单
+
+> 以下特性尚未实现，测试文件已创建但编译失败。优先级按 stdio.h 等标准库头文件中的实际需求排列。
+
+### P0 — 阻塞标准库头文件支持
+
+| 编号 | 特性 | 测试文件 | 错误信息 | stdio.h 中的例子 |
+|------|------|---------|---------|----------------|
+| §33 | 匿名结构体/联合体 | test_anonymous_struct.sp | `expected field name (got token 'i32')` | `struct { int a; int b; };` 作为字段 |
+| §34 | __declspec 修饰结构体字段 | test_struct_field_declspec.sp | `expected field name` | `char* __declspec(nothrow) _ptr;` |
+| §35 | 复杂 typedef 链 | test_complex_typedef.sp | 解析失败 | `typedef struct X {} X, *PX, **PPX;` |
+| §36 | 函数指针参数 | test_func_pointer_param.sp | 解析失败 | `int (*compar)(const void*, const void*)` |
+
+### P1 — 重要但非阻塞
+
+| 编号 | 特性 | 测试文件 | 错误信息 | 例子 |
+|------|------|---------|---------|------|
+| §37 | 指定初始化器 | test_designated_init.sp | 解析失败 | `{ .x = 1, .y = 2 }` |
+| §38 | 复合字面量 | test_compound_literal.sp | 解析失败 | `(struct Point){ .x = 1 }` |
+| §39 | 位域 | test_bitfield.sp | 解析失败 | `u32 flag : 1;` |
+| §40 | 线程局部存储 | test_thread_local.sp | 解析失败 | `__declspec(thread) int x;` |
+
+### P2 — 低优先级
+
+| 编号 | 特性 | 测试文件 | 错误信息 | 例子 |
+|------|------|---------|---------|------|
+| §41 | 复杂 __attribute__ | test_complex_attribute.sp | 解析失败 | `__attribute__((aligned(16)))` |
+| §42 | 嵌套结构体定义 | test_nested_struct.sp | 解析失败 | `struct Outer { struct Inner {} inner; }` |
+| §43 | restrict 修饰参数 | test_restrict_param.sp | 解析失败 | `char* restrict dest` |
+| §44 | 函数指针变量 | test_func_pointer.sp | 解析失败 | `int (*fp)(int, int) = null;` |
+| §45 | __extension__ 关键字 | test_extension.sp | 解析失败 | `__extension__ long long x;` |
+
+---
+
+## 实现路线图
+
+### Phase 1: 结构体/联合体增强（P0）
+- 实现 §33 匿名结构体/联合体
+- 实现 §34 __declspec 修饰结构体字段
+- 实现 §42 嵌套结构体定义
+- 预计工作量：2 天
+
+### Phase 2: 函数声明增强（P0）
+- 实现 §35 复杂 typedef 链
+- 实现 §36 函数指针参数
+- 实现 §44 函数指针变量
+- 预计工作量：2 天
+
+### Phase 3: 表达式增强（P1）
+- 实现 §37 指定初始化器
+- 实现 §38 复合字面量
+- 实现 §39 位域
+- 预计工作量：2 天
+
+### Phase 4: 其他特性（P1/P2）
+- 实现 §40 线程局部存储
+- 实现 §41 复杂 __attribute__
+- 实现 §43 restrict 修饰参数
+- 实现 §45 __extension__ 关键字
+- 预计工作量：2 天
+
+### Phase 5: 集成测试
+- 创建 `test_stdio_h.sp` 验证 `#include <stdio.h>` 完整解析
+- 创建 `test_stdlib_h.sp` 验证 `#include <stdlib.h>` 完整解析
+- 回归测试：确保所有现有测试仍通过
+- 预计工作量：1 天
+
+---
 
 ---
 

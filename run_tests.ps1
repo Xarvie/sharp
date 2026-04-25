@@ -35,11 +35,9 @@ Write-Host "  Clang: $CLANG"
 Write-Host "  MSVC:  $(if ($CL_EXE) { $CL_EXE } else { 'not found' })"
 Write-Host ""
 
-# Clean up
+# Clean up generated test files only
 Remove-Item "$TESTS_DIR\*.c" -ErrorAction SilentlyContinue
 Remove-Item "$TESTS_DIR\*.exe" -ErrorAction SilentlyContinue
-Remove-Item "*.c" -ErrorAction SilentlyContinue
-Remove-Item "*.exe" -ErrorAction SilentlyContinue
 
 Write-Host "=== Running tests ===" -ForegroundColor Cyan
 Write-Host ""
@@ -179,10 +177,8 @@ if ($FAIL -eq 0) {
     Write-Host "SOME TESTS FAILED" -ForegroundColor Red
 }
 
-# Clean up
+# Clean up generated test files only
 Remove-Item "$TESTS_DIR\*.c" -ErrorAction SilentlyContinue
 Remove-Item "$TESTS_DIR\*.exe" -ErrorAction SilentlyContinue
-Remove-Item "*.c" -ErrorAction SilentlyContinue
-Remove-Item "*.exe" -ErrorAction SilentlyContinue
 
 exit $FAIL

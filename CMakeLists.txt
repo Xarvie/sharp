@@ -34,31 +34,26 @@ if(MSVC)
     string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif()
 
-# Source files — compiler
-set(SOURCES
-    util.c
-    types.c
-    lexer.c
-    parser.c
-    sema.c
-    lower.c
-    hir.c
-    cgen.c
-    main.c
+# -----------------------------------------------------------------------
+# Preprocessor library (src/preproc/) — MUST be defined BEFORE sharpc
+# -----------------------------------------------------------------------
+
+set(CPP_SOURCES
+    src/preproc/pptok.c
+    src/preproc/macro.c
+    src/preproc/expr.c
+    src/preproc/directive.c
+    src/preproc/cpp.c
 )
 
-# Header files (for IDEs)
-set(HEADERS
-    sharp.h
-    types.h
-    ast.h
-    hir.h
-)
+add_library(sharp_preproc STATIC ${CPP_SOURCES})
+target_include_directories(sharp_preproc PUBLIC ${CMAKE_SOURCE_DIR}/src/preproc)
+target_compile_options(sharp_preproc PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wno-implicit-fallthrough>)
 
-# Main executable
-add_executable(sharpc ${SOURCES})
-target_link_libraries(sharpc PRIVATE sharp_cpp)
-target_include_directories(sharpc PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
+# Standalone sharp-cpp preprocessor driver
+add_executable(sharp-cpp src/preproc/cpp_main.c)
+target_link_libraries(sharp-cpp PRIVATE sharp_preproc)
+target_include_directories(sharp-cpp PRIVATE ${CMAKE_SOURCE_DIR}/src/preproc)
 
 # -----------------------------------------------------------------------
 # libtcc integration — embed TinyCC for self-hosted C→binary compilation
@@ -67,32 +62,38 @@ target_include_directories(sharpc PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
 set(TCC_DIR ${CMAKE_SOURCE_DIR}/third_party/tcc)
 
 # Dynamic loading of libtcc.dll at runtime — just need include path for libtcc.h
-target_include_directories(sharpc PRIVATE ${TCC_DIR}/libtcc)
-
-# -----------------------------------------------------------------------
-# Preprocessor library (cpp/)
 # -----------------------------------------------------------------------
 
-set(CPP_SOURCES
-    cpp/pptok.c
-    cpp/macro.c
-    cpp/expr.c
-    cpp/directive.c
-    cpp/cpp.c
+# Source files — compiler
+set(SOURCES
+    src/util.c
+    src/types.c
+    src/lexer.c
+    src/parser.c
+    src/sema.c
+    src/lower.c
+    src/hir.c
+    src/cgen.c
+    src/main.c
 )
 
-add_library(sharp_cpp STATIC ${CPP_SOURCES})
-target_include_directories(sharp_cpp PUBLIC ${CMAKE_SOURCE_DIR}/cpp)
-target_compile_options(sharp_cpp PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wno-implicit-fallthrough>)
+# Header files (for IDEs)
+set(HEADERS
+    src/sharp.h
+    src/types.h
+    src/ast.h
+    src/hir.h
+)
 
-# Standalone sharp-cpp preprocessor driver
-add_executable(sharp-cpp cpp/cpp_main.c)
-target_link_libraries(sharp-cpp PRIVATE sharp_cpp)
-target_include_directories(sharp-cpp PRIVATE ${CMAKE_SOURCE_DIR}/cpp)
+# Main executable
+add_executable(sharpc ${SOURCES})
+target_link_libraries(sharpc PRIVATE sharp_preproc)
+target_include_directories(sharpc PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/preproc
+    ${CMAKE_SOURCE_DIR}/src
+    ${TCC_DIR}/libtcc
+)
 
-install(TARGETS sharp-cpp RUNTIME DESTINATION bin)
-
-# Install target
 install(TARGETS sharpc sharp-cpp
     RUNTIME DESTINATION bin
 )
