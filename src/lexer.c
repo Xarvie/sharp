@@ -318,7 +318,9 @@ static Tok read_punct(Lexer* lx) {
             break;
         case '&': if (c2 == '&') { adv(lx); k = TK_AND_AND; } else k = TK_AMP;  break;
         case '|': if (c2 == '|') { adv(lx); k = TK_OR_OR;   } else k = TK_PIPE; break;
+        case '?': k = TK_QUESTION; break;
         default:
+            /* c was already consumed by adv(lx) at line 270, so no need to advance again */
             error_at(t.line, "unexpected character '%c' (0x%02x)", c, c);
             k = TK_EOF;
     }

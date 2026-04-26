@@ -94,6 +94,33 @@ target_include_directories(sharpc PRIVATE
     ${TCC_DIR}/libtcc
 )
 
+# Copy libtcc.dll and tcc.exe to build output directory so sharpc can find them at runtime
+if(WIN32)
+    add_custom_command(TARGET sharpc POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${TCC_DIR}/libtcc.dll"
+            $<TARGET_FILE_DIR:sharpc>
+        COMMENT "Copying libtcc.dll to output directory"
+    )
+    if(EXISTS "${TCC_DIR}/tcc.exe")
+        add_custom_command(TARGET sharpc POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${TCC_DIR}/tcc.exe"
+                $<TARGET_FILE_DIR:sharpc>
+            COMMENT "Copying tcc.exe to output directory"
+        )
+    endif()
+    # Also copy the entire tcc tree to build tree so libtcc can find headers
+    add_custom_command(TARGET sharpc POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/third_party/tcc"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${TCC_DIR}"
+            "${CMAKE_BINARY_DIR}/third_party/tcc"
+        COMMENT "Copying tcc runtime files to build tree"
+    )
+endif()
+
 install(TARGETS sharpc sharp-cpp
     RUNTIME DESTINATION bin
 )

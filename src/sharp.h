@@ -214,7 +214,8 @@ typedef enum {
     TK_AND_AND, TK_OR_OR, TK_NOT,
 
     /* bitwise */
-    TK_AMP, TK_PIPE, TK_CARET, TK_TILDE, TK_SHL, TK_SHR
+    TK_AMP, TK_PIPE, TK_CARET, TK_TILDE, TK_SHL, TK_SHR,
+    TK_QUESTION
 } TokKind;
 
 typedef struct {

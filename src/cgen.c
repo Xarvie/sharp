@@ -1507,7 +1507,21 @@ static void emit_typedef_decl(G* g, Node* d) {
     sb_puts(&g->out, ";\n");
 }
 
+static bool is_crt_sdk_struct(const char* name) {
+    static const char* skip[] = {
+        "_heapinfo", "_HEAPINFO",
+        "_div_t", "_ldiv_t", "_lldiv_t",
+        "_iobuf", "__acrt_iob_func",
+        "_localeinfo_struct",
+    };
+    for (size_t i = 0; i < sizeof(skip)/sizeof(skip[0]); i++) {
+        if (strcmp(skip[i], name) == 0) return true;
+    }
+    return false;
+}
+
 static void emit_struct_body(G* g, Node* s) {
+    if (is_crt_sdk_struct(s->name)) return;
     sb_printf(&g->out, "struct %s {\n", s->name);
     if (s->nfields == 0) {
         sb_puts(&g->out, "    char _sharp_unit_;\n");
@@ -1743,6 +1757,36 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
         sb_puts(&g->out, "#include <malloc.h>\n");
     }
 
+    /* ------- Forward declarations (must come before externs that use them) ------- */
+    /* Typedef declarations (including array typedefs). */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_TYPEDEF_DECL)
+            emit_typedef_decl(g, d);
+    }
+    /* Non-generic structs and forward declarations. */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_STRUCT_DECL && !is_generic_template(d))
+            emit_struct_fwd(g, d);
+        if (d->kind == ND_STRUCT_FWD)
+            emit_struct_fwd_decl(g, d);
+    }
+    /* Union forward declarations. */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_UNION_DECL)
+            emit_union_decl(g, d);
+        if (d->kind == ND_UNION_FWD)
+            emit_union_fwd_decl(g, d);
+    }
+    /* Specialised structs: one per SymMono. */
+    for (int i = 0; i < st->nmonos; i++) {
+        SymMono* m = &st->monos[i];
+        sb_printf(&g->out, "typedef struct %s %s;\n", m->mangled, m->mangled);
+    }
+    sb_putc(&g->out, '\n');
+
     for (int i = 0; i < st->nexterns; i++) {
         SymExtern* e = &st->externs[i];
     /* Skip alloca-like intrinsics — they are provided by <malloc.h> or compiler */
@@ -1759,22 +1803,53 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
             sb_puts(&g->out, "__declspec(noreturn) ");
         }
         sb_puts(&g->out, "extern ");
-        emit_type(g, e->ret_type);
-        if (e->decl->cc) {
-            sb_putc(&g->out, ' ');
-            sb_puts(&g->out, e->decl->cc);
+
+        /* Check if return type is a function pointer */
+        Type* ret = resolve_type(g, e->ret_type);
+        Type* func_type = NULL;
+        if (ret && ret->kind == TY_FUNC) {
+            func_type = ret;
+        } else if (ret && ret->kind == TY_PTR && ret->base && ret->base->kind == TY_FUNC) {
+            func_type = ret->base;
         }
-        sb_printf(&g->out, " %s(", e->name);
-        if (e->decl->nparams == 0) {
-            sb_puts(&g->out, "void");
-        } else {
+
+        if (func_type) {
+            /* ret (*name(func_params))(ret_params) */
+            emit_type_core(g, func_type->base);
+            sb_printf(&g->out, " (*%s(", e->name);
             for (int j = 0; j < e->decl->nparams; j++) {
                 Node* pr = e->decl->params[j];
                 if (j) sb_puts(&g->out, ", ");
                 emit_type_with_name(g, pr->declared_type, pr->name);
             }
+            sb_puts(&g->out, "))(");
+            for (int i = 0; i < func_type->nfunc_params; i++) {
+                if (i) sb_puts(&g->out, ", ");
+                emit_type(g, func_type->func_params[i]);
+            }
+            if (func_type->func_variadic) {
+                if (func_type->nfunc_params > 0) sb_puts(&g->out, ", ");
+                sb_puts(&g->out, "...");
+            }
+            sb_puts(&g->out, ");\n");
+        } else {
+            emit_type(g, e->ret_type);
+            if (e->decl->cc) {
+                sb_putc(&g->out, ' ');
+                sb_puts(&g->out, e->decl->cc);
+            }
+            sb_printf(&g->out, " %s(", e->name);
+            if (e->decl->nparams == 0) {
+                sb_puts(&g->out, "void");
+            } else {
+                for (int j = 0; j < e->decl->nparams; j++) {
+                    Node* pr = e->decl->params[j];
+                    if (j) sb_puts(&g->out, ", ");
+                    emit_type_with_name(g, pr->declared_type, pr->name);
+                }
+            }
+            sb_puts(&g->out, ");\n");
         }
-        sb_puts(&g->out, ");\n");
     }
 
     /* Extern variable declarations: `extern Type name;` */
@@ -1807,41 +1882,12 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
 
     if (st->nexterns > 0) sb_putc(&g->out, '\n');
 
-    /* ------- Forward declarations ------- */
-    /* Typedef declarations (including array typedefs). */
-    for (int i = 0; i < prog->nchildren; i++) {
-        Node* d = prog->children[i];
-        if (d->kind == ND_TYPEDEF_DECL)
-            emit_typedef_decl(g, d);
-    }
-    /* Non-generic structs and forward declarations. */
-    for (int i = 0; i < prog->nchildren; i++) {
-        Node* d = prog->children[i];
-        if (d->kind == ND_STRUCT_DECL && !is_generic_template(d))
-            emit_struct_fwd(g, d);
-        if (d->kind == ND_STRUCT_FWD)
-            emit_struct_fwd_decl(g, d);
-    }
     /* _Static_assert pass-through */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
         if (d->kind == ND_STATIC_ASSERT && d->raw_text)
             sb_printf(&g->out, "%s\n", d->raw_text);
     }
-    /* Union forward declarations and bodies. */
-    for (int i = 0; i < prog->nchildren; i++) {
-        Node* d = prog->children[i];
-        if (d->kind == ND_UNION_DECL)
-            emit_union_decl(g, d);
-        if (d->kind == ND_UNION_FWD)
-            emit_union_fwd_decl(g, d);
-    }
-    /* Specialised structs: one per SymMono. */
-    for (int i = 0; i < st->nmonos; i++) {
-        SymMono* m = &st->monos[i];
-        sb_printf(&g->out, "typedef struct %s %s;\n", m->mangled, m->mangled);
-    }
-    sb_putc(&g->out, '\n');
 
     /* ------- Function / method forward declarations ------- */
     for (int i = 0; i < prog->nchildren; i++) {
