@@ -187,10 +187,12 @@ static void emit_type_core(G* g, Type* t);
 static void emit_type(G* g, Type* t) {
     if (!t) { sb_puts(&g->out, "/*null-type*/ void"); return; }
     Type* rt = resolve_type(g, t);
+    if (!rt) { sb_puts(&g->out, "/*null-type*/ void"); return; }
     switch (rt->kind) {
         case TY_PTR:
             emit_type(g, rt->base);
             sb_putc(&g->out, '*');
+            if (rt->is_const) sb_puts(&g->out, " const");
             return;
         case TY_NAMED:
             if (rt->ntargs > 0) sb_puts(&g->out, ty_mangle(rt));
@@ -225,18 +227,38 @@ static void emit_type(G* g, Type* t) {
     }
 }
 
-/* Core type emission for primitives and simple types (no TY_FUNC/TY_BITFIELD) */
+/* Core type emission for primitives and simple types */
 static void emit_type_core(G* g, Type* t) {
     if (!t) { sb_puts(&g->out, "void"); return; }
     Type* rt = resolve_type(g, t);
+    if (!rt) { sb_puts(&g->out, "void"); return; }
     switch (rt->kind) {
         case TY_PTR:
             emit_type_core(g, rt->base);
             sb_putc(&g->out, '*');
+            if (rt->is_const) sb_puts(&g->out, " const");
             return;
         case TY_NAMED:
             if (rt->ntargs > 0) sb_puts(&g->out, ty_mangle(rt));
             else                sb_puts(&g->out, rt->name);
+            return;
+        case TY_FUNC:
+            /* Fallback: emit as function pointer without name */
+            emit_type_core(g, rt->base);
+            sb_puts(&g->out, "(*)(");
+            for (int i = 0; i < rt->nfunc_params; i++) {
+                if (i) sb_puts(&g->out, ", ");
+                emit_type_core(g, rt->func_params[i]);
+            }
+            if (rt->func_variadic) {
+                if (rt->nfunc_params > 0) sb_puts(&g->out, ", ");
+                sb_puts(&g->out, "...");
+            }
+            sb_puts(&g->out, ")");
+            return;
+        case TY_BITFIELD:
+            emit_type_core(g, rt->base);
+            sb_printf(&g->out, " : %d", rt->bit_width);
             return;
         default:
             if (rt->is_const) sb_puts(&g->out, "const ");
@@ -267,11 +289,19 @@ static void emit_type_core(G* g, Type* t) {
 static void emit_type_with_name(G* g, Type* t, const char* name) {
     if (!t) { sb_printf(&g->out, "/*null-type*/ void %s", name ? name : ""); return; }
     Type* rt = resolve_type(g, t);
+    if (!rt) { sb_printf(&g->out, "/*null-type*/ void %s", name ? name : ""); return; }
 
     if (rt->kind == TY_FUNC) {
-        /* Function type: emit as `ret (*name)(params)` */
-        emit_type_core(g, rt->base);
-        sb_printf(&g->out, " (*%s)(", name ? name : "");
+        /* Function type: emit as `ret (*name)(params)` or `ret (* const name)(params)` */
+        const char* n = name ? name : "";
+        if (t->kind == TY_PTR && t->is_const) {
+            /* const function pointer: ret (* const name)(params) */
+            emit_type_core(g, rt->base);
+            sb_printf(&g->out, " (* const %s)(", n);
+        } else {
+            emit_type_core(g, rt->base);
+            sb_printf(&g->out, " (*%s)(", n);
+        }
         for (int i = 0; i < rt->nfunc_params; i++) {
             if (i) sb_puts(&g->out, ", ");
             emit_type(g, rt->func_params[i]);

@@ -384,6 +384,9 @@ bool ty_is_integer(const Type* t) {
         case TY_U8: case TY_U16: case TY_U32: case TY_U64:
         case TY_ISIZE: case TY_USIZE:
             return true;
+        case TY_BITFIELD:
+            /* Bitfield inherits integer status from its base type */
+            return ty_is_integer(t->base);
         default:
             return false;
     }

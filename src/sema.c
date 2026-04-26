@@ -118,6 +118,16 @@ static void collect_from_type(Vec* mv, Arena** arena, Type* t) {
             if (t->ntargs > 0)
                 mono_add(mv, arena, t->name, t->targs, t->ntargs);
             return;
+        case TY_FUNC:
+            /* Function type: collect from return type and all parameter types */
+            collect_from_type(mv, arena, t->base);
+            for (int i = 0; i < t->nfunc_params; i++)
+                collect_from_type(mv, arena, t->func_params[i]);
+            return;
+        case TY_BITFIELD:
+            /* Bitfield: collect from the base type */
+            collect_from_type(mv, arena, t->base);
+            return;
         default: return;
     }
 }
@@ -1294,6 +1304,28 @@ static void tc_stmt(TC* tc, Node* s) {
 
         case ND_BREAK:
         case ND_CONTINUE:
+            return;
+
+        /* Transparent pass-through nodes — no type checking needed */
+        case ND_ASM:
+        case ND_DROP:
+        case ND_STATIC_ASSERT:
+        case ND_EXTERN_DECL:
+        case ND_TYPEDEF_DECL:
+        case ND_EXTERN_VAR:
+        case ND_CONST_DECL:
+        case ND_ANON_STRUCT:
+        case ND_ANON_UNION:
+        case ND_FIELD:
+        case ND_PARAM:
+        case ND_FUNC_DECL:
+        case ND_STRUCT_DECL:
+        case ND_UNION_DECL:
+        case ND_STRUCT_FWD:
+        case ND_UNION_FWD:
+        case ND_IMPL:
+        case ND_PROGRAM:
+        case ND_FIELD_INIT:
             return;
 
         default:

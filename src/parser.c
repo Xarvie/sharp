@@ -597,7 +597,7 @@ static Type* parse_declarator_internal(P* p, Type* base, const char** out_name, 
              * The pointer's base is the return type, and we need to
              * wrap the function type in a pointer.
              * If base is not a pointer, it's the return type directly. */
-            if (base->kind == TY_PTR) {
+            if (base && base->kind == TY_PTR) {
                 Type* ret_type = base->base;
                 bool ptr_is_const = base->is_const;
                 base = type_func(p->arena, ret_type, params, nparams, variadic);
@@ -2305,13 +2305,24 @@ type_start_path:
                         g_error_count = saved_err;
                         continue;
                     } else if (lex_peek(p->lex).kind == TK_LBRACE ||
-                               lex_peek(p->lex).kind == TK_ARROW) {
+                           lex_peek(p->lex).kind == TK_ARROW) {
                         /* Sharp function definition — restore and parse normally */
                         lex_restore(p->lex, saved);
                         g_error_count = saved_err;
+                        free(params.data); /* speculative parse discarded */
                         nv_push(&decls, parse_func(p));
                         continue;
                     }
+                    /* Neither ';' nor '{'/'→' — speculative parse failed,
+                     * restore and fall through to variable parsing */
+                    free(params.data);
+                    lex_restore(p->lex, saved);
+                    g_error_count = saved_err;
+                } else {
+                    /* Missing ')' — speculative parse failed */
+                    free(params.data);
+                    lex_restore(p->lex, saved);
+                    g_error_count = saved_err;
                 }
             } else if (fname) {
                 /* Not a function — could be global variable or array.
