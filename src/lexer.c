@@ -41,6 +41,7 @@ static const Keyword kws[] = {
     {"_Bool",    5, TK_BOOL},
 
     /* C declaration modifiers */
+    {"inline",      6, TK___INLINE},
     {"__inline__",  10, TK___INLINE__},
     {"__inline",    8, TK___INLINE},
     {"__attribute__", 13, TK___ATTRIBUTE__},

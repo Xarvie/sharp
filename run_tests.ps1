@@ -4,7 +4,10 @@
 
 $ErrorActionPreference = "SilentlyContinue"
 
-$SHARPC = "cmake-build-debug\sharpc.exe"
+# Set TCC include path for the preprocessor
+$env:SHARPC_TCC_DIR = "$PSScriptRoot\third_party\tcc"
+
+$SHARPC = "cmake-build-debug\Debug\sharpc.exe"
 $TESTS_DIR = "tests"
 $GCC = "C:\msys64\mingw64\bin\gcc.exe"
 $CLANG = "C:\msys64\clang64\bin\clang.exe"
@@ -122,18 +125,24 @@ foreach ($spFile in $spFiles) {
             $compileOk = ($LASTEXITCODE -eq 0)
         }
         "msvc" {
-            # Use vcvarsall.bat to set up MSVC environment, then call cl
-            $tempBat = "$env:TEMP\vs_build_$PID.bat"
-            Set-Content $tempBat @"
+            # Try direct compilation first (cl.exe may work if env is set), then vcvarsall
+            & $CL_EXE /nologo /O2 /Fe:$exeFile $cFile 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $compileOk = $true
+            } else {
+                # Use vcvarsall.bat to set up MSVC environment, then call cl
+                $tempBat = "$env:TEMP\vs_build_$PID.bat"
+                Set-Content $tempBat @"
 call "$VCVARS" amd64 >nul 2>nul
-"$CL_EXE" /nologo /std:c11 /Fe:$exeFile $cFile 2>nul
+"$CL_EXE" /nologo /O2 /Fe:$exeFile $cFile 2>nul
 echo COMPILER_EXIT:%ERRORLEVEL%
 "@
-            $result = & cmd /c $tempBat 2>$null
-            Remove-Item $tempBat -ErrorAction SilentlyContinue
-            $compilerOutput = $result -join "`n"
-            if ($compilerOutput -match 'COMPILER_EXIT:(\d+)') {
-                $compileOk = ($matches[1] -eq "0")
+                $result = & cmd /c $tempBat 2>$null
+                Remove-Item $tempBat -ErrorAction SilentlyContinue
+                $compilerOutput = $result -join "`n"
+                if ($compilerOutput -match 'COMPILER_EXIT:(\d+)') {
+                    $compileOk = ($matches[1] -eq "0")
+                }
             }
         }
     }

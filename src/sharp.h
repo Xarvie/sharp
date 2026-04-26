@@ -306,6 +306,7 @@ typedef enum {
     ND_PRINT,          /* print(expr)   — writes to stdout, no newline */
     ND_PRINTLN,        /* println(expr) — writes to stdout + '\n' */
     ND_CAST,           /* (Type)expr — C-style type cast */
+    ND_SIZEOF,         /* sizeof(Type) or sizeof(expr) — compile-time size */
     ND_EXTERN_DECL,    /* extern return_type name(params); — C linkage decl */
     ND_TYPEDEF_DECL,   /* typedef Type name; — type alias */
     ND_EXTERN_VAR,     /* extern Type name; — external variable decl */

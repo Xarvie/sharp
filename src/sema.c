@@ -319,16 +319,17 @@ SymTable* sema_build(Node* program, Arena** arena) {
         vec_push(&cv, &rec);
     }
 
-    /* Pass 4b: extern variable declarations. */
+    /* Pass 4b: extern variable declarations and global variable definitions. */
     Vec xv = { NULL, 0, 0, sizeof(SymValue) };
     for (int i = 0; i < program->nchildren; i++) {
         Node* d = program->children[i];
-        if (d->kind != ND_EXTERN_VAR) continue;
-        SymValue rec;
-        rec.name = d->name;
-        rec.type = d->declared_type;
-        rec.decl = d;
-        vec_push(&xv, &rec);
+        if (d->kind == ND_EXTERN_VAR || d->kind == ND_VARDECL) {
+            SymValue rec;
+            rec.name = d->name;
+            rec.type = d->declared_type;
+            rec.decl = d;
+            vec_push(&xv, &rec);
+        }
     }
 
     /* Pass 4b: phase-9 typedef declarations. */
@@ -564,7 +565,7 @@ static Type* tc_scope_lookup(TC* tc, const char* name) {
         if (strcmp(tc->st->consts[i].name, name) == 0)
             return tc->st->consts[i].type;
     }
-    /* Check extern variable declarations */
+    /* Check extern variable declarations and global variable definitions */
     for (int i = 0; i < tc->st->nvalues; i++) {
         if (strcmp(tc->st->values[i].name, name) == 0)
             return tc->st->values[i].type;
@@ -1025,6 +1026,19 @@ static Type* tc_expr(TC* tc, Node* e) {
             /* Attach the cast type to the node for downstream passes */
             set_ast_type(e, ct);
             return ct;
+        }
+
+        case ND_SIZEOF: {
+            /* sizeof(Type) or sizeof(expr) — result is always size_t */
+            Node* child = e->rhs; /* expression form */
+            if (child) {
+                (void)tc_expr(tc, child);
+            }
+            /* declared_type for the type form */
+            /* Result type is size_t (usize in Sharp) */
+            Type* result = type_prim(tc->arena, TY_USIZE);
+            set_ast_type(e, result);
+            return result;
         }
 
         case ND_CALL: {

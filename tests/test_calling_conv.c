@@ -11,7 +11,7 @@ extern void __fastcall fast_fn(int32_t a, int32_t b);
 int32_t main(void);
 
 int32_t main(void) {
-    int32_t* __unaligned ptr;
+    int32_t * __unaligned ptr;
     return 0;
 }
 

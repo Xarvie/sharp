@@ -7,7 +7,7 @@
 double main(void);
 
 double main(void) {
-    double inf_val = (1.0 / 0.0);
+    double inf_val = (float)(9.9999999999999995e+36 * 9.9999999999999995e+36);
     if ((inf_val > 1.0)) {
         return 42.0;
     }

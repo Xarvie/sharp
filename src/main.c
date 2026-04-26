@@ -320,8 +320,8 @@ int main(int argc, char** argv) {
     cpp_define(cpp_ctx, "__TINYC__",         "1");
 
     /* Floating-point constants used by system headers (math.h, etc.) */
-    cpp_define(cpp_ctx, "INFINITY",  "(1.0/0.0)");
-    cpp_define(cpp_ctx, "NAN",       "(0.0/0.0)");
+    cpp_define(cpp_ctx, "INFINITY",  "((float)(1e+37*1e+37))");
+    cpp_define(cpp_ctx, "NAN",       "((float)(0.0f))");
 
 #ifdef _WIN32
     /* MSYS2/MinGW fallback */
@@ -340,6 +340,16 @@ int main(int argc, char** argv) {
         cpp_result_free(&pp);
         cpp_ctx_free(cpp_ctx);
         return 1;
+    }
+
+    /* Debug: dump preprocessed output if SHARPC_DUMP_PP is set */
+    if (getenv("SHARPC_DUMP_PP")) {
+        FILE* pf = fopen("preprocessed.out", "w");
+        if (pf) {
+            fputs(pp.text, pf);
+            fclose(pf);
+            fprintf(stderr, "[debug] preprocessed output written to preprocessed.out\n");
+        }
     }
 
     /* For diagnostic source display, read the original file so error context

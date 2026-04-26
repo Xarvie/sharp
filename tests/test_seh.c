@@ -8,7 +8,8 @@ int32_t main(void);
 
 int32_t main(void) {
     __try {
- i32 x = 1;
+ int32_t x = 1;
+ } __except(1) {
  }
  
     return 0;

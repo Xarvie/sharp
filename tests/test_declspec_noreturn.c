@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-__attribute__((noreturn)) extern void exit(int32_t code);
+__declspec(noreturn) extern void exit(int32_t code);
 
 
 int32_t main(void);

@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef uint32_t wint_t;
 
 int32_t main(void);
 

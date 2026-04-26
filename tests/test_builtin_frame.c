@@ -3,15 +3,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-extern void* __builtin_frame_address(int32_t level);
-extern size_t __alignof__(void* p);
 
 
 int32_t main(void);
 
 int32_t main(void) {
     int32_t x = 42;
-    size_t align = __alignof__((void*)(&x));
+    size_t align = __alignof(x);
     return 0;
 }
 

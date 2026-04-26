@@ -190,9 +190,26 @@ static void emit_type(G* g, Type* t) {
     if (!rt) { sb_puts(&g->out, "/*null-type*/ void"); return; }
     switch (rt->kind) {
         case TY_PTR:
-            emit_type(g, rt->base);
-            sb_putc(&g->out, '*');
-            if (rt->is_const) sb_puts(&g->out, " const");
+            if (rt->base && rt->base->kind == TY_FUNC) {
+                /* Pointer to function: TY_FUNC already produces (*) syntax,
+                 * so just emit the function type without adding extra '*' */
+                emit_type_core(g, rt->base->base);
+                sb_puts(&g->out, "(*)(");
+                for (int i = 0; i < rt->base->nfunc_params; i++) {
+                    if (i) sb_puts(&g->out, ", ");
+                    emit_type(g, rt->base->func_params[i]);
+                }
+                if (rt->base->func_variadic) {
+                    if (rt->base->nfunc_params > 0) sb_puts(&g->out, ", ");
+                    sb_puts(&g->out, "...");
+                }
+                sb_puts(&g->out, ")");
+                if (rt->is_const) sb_puts(&g->out, " const");
+            } else {
+                emit_type(g, rt->base);
+                sb_putc(&g->out, '*');
+                if (rt->is_const) sb_puts(&g->out, " const");
+            }
             return;
         case TY_NAMED:
             if (rt->ntargs > 0) sb_puts(&g->out, ty_mangle(rt));
@@ -286,28 +303,60 @@ static void emit_type_core(G* g, Type* t) {
  * For `int (*fp)(int)`, this emits: `int (*fp)(int)`
  * For `int x`, this emits: `int x`
  * For `int* p`, this emits: `int* p` */
+
+/* Forward declaration */
+static void emit_type_with_name(G* g, Type* t, const char* name);
+
+/* Emit a type name with `__unaligned` inserted before the first `*`.
+ * MSVC requires: `int * __unaligned ptr` not `int* ptr __unaligned`. */
+static void emit_type_with_name_unaligned(G* g, Type* t, const char* name) {
+    if (!t) { sb_printf(&g->out, "/*null-type*/ void * __unaligned %s", name ? name : ""); return; }
+    Type* rt = resolve_type(g, t);
+    if (!rt) { sb_printf(&g->out, "/*null-type*/ void * __unaligned %s", name ? name : ""); return; }
+
+    if (rt->kind == TY_PTR) {
+        /* Emit base type, then `* __unaligned name` */
+        emit_type_core(g, rt->base);
+        sb_printf(&g->out, " * __unaligned %s", name ? name : "");
+        return;
+    }
+
+    /* Fallback: just emit normally */
+    emit_type_with_name(g, t, name);
+}
+
 static void emit_type_with_name(G* g, Type* t, const char* name) {
     if (!t) { sb_printf(&g->out, "/*null-type*/ void %s", name ? name : ""); return; }
     Type* rt = resolve_type(g, t);
     if (!rt) { sb_printf(&g->out, "/*null-type*/ void %s", name ? name : ""); return; }
 
-    if (rt->kind == TY_FUNC) {
+    /* Function type (possibly through a pointer): emit as `ret (*name)(params)` */
+    Type* func_rt = rt;
+    bool is_func_ptr = false;
+    if (func_rt->kind == TY_FUNC) {
+        is_func_ptr = false;
+    } else if (func_rt->kind == TY_PTR && func_rt->base && func_rt->base->kind == TY_FUNC) {
+        is_func_ptr = true;
+        func_rt = func_rt->base;
+    }
+
+    if (func_rt->kind == TY_FUNC) {
         /* Function type: emit as `ret (*name)(params)` or `ret (* const name)(params)` */
         const char* n = name ? name : "";
         if (t->kind == TY_PTR && t->is_const) {
             /* const function pointer: ret (* const name)(params) */
-            emit_type_core(g, rt->base);
+            emit_type_core(g, func_rt->base);
             sb_printf(&g->out, " (* const %s)(", n);
         } else {
-            emit_type_core(g, rt->base);
+            emit_type_core(g, func_rt->base);
             sb_printf(&g->out, " (*%s)(", n);
         }
-        for (int i = 0; i < rt->nfunc_params; i++) {
+        for (int i = 0; i < func_rt->nfunc_params; i++) {
             if (i) sb_puts(&g->out, ", ");
-            emit_type(g, rt->func_params[i]);
+            emit_type(g, func_rt->func_params[i]);
         }
-        if (rt->func_variadic) {
-            if (rt->nfunc_params > 0) sb_puts(&g->out, ", ");
+        if (func_rt->func_variadic) {
+            if (func_rt->nfunc_params > 0) sb_puts(&g->out, ", ");
             sb_puts(&g->out, "...");
         }
         sb_puts(&g->out, ")");
@@ -579,6 +628,10 @@ static Type* expr_type(G* g, Node* e) {
             /* (Type)expr — the result type is the target cast type. */
             return cast_type(e);
 
+        case ND_SIZEOF:
+            /* sizeof — result type is always size_t / usize */
+            return type_prim(g->arena, TY_USIZE);
+
         case ND_CALL: {
             Node* callee = call_callee(e);
             if (callee && callee->kind == ND_MEMBER) {
@@ -819,6 +872,19 @@ static void emit_call(G* g, Node* e) {
     }
 
     /* Ordinary call: just emit callee then parenthesised args. */
+    /* Handle compiler intrinsics: __alignof__ → __alignof (MSVC) */
+    if (callee && callee->kind == ND_IDENT) {
+        const char* cname = ident_name(callee);
+        if (strcmp(cname, "__alignof__") == 0) {
+            sb_puts(&g->out, "__alignof(");
+            for (int i = 0; i < nargs; i++) {
+                if (i) sb_puts(&g->out, ", ");
+                emit_expr(g, args[i]);
+            }
+            sb_putc(&g->out, ')');
+            return;
+        }
+    }
     emit_expr(g, callee);
     sb_putc(&g->out, '(');
     for (int i = 0; i < nargs; i++) {
@@ -967,6 +1033,20 @@ static void emit_expr(G* g, Node* e) {
             emit_type(g, ty);
             sb_putc(&g->out, ')');
             emit_expr(g, cast_expr(e));
+            return;
+        }
+
+        case ND_SIZEOF: {
+            /* sizeof(Type) or sizeof(expr) */
+            sb_puts(&g->out, "sizeof(");
+            if (e->declared_type) {
+                /* sizeof(Type) form */
+                emit_type(g, e->declared_type);
+            } else if (e->rhs) {
+                /* sizeof(expr) form */
+                emit_expr(g, e->rhs);
+            }
+            sb_putc(&g->out, ')');
             return;
         }
 
@@ -1313,6 +1393,11 @@ static void emit_vardecl_inline(G* g, Node* s) {
     const char* name = vardecl_name(s);
     Node*       init = vardecl_init(s);
 
+    /* __declspec(thread) for thread-local storage */
+    if (s->declspec) {
+        sb_printf(&g->out, "__declspec(%s) ", s->declspec);
+    }
+
     if (s->lhs) {
         /* Array declaration with explicit size: emit as C `T name[size]` */
         Type* base = (dt && ty_kind(dt) == TY_PTR) ? ty_base(dt) : dt;
@@ -1325,10 +1410,16 @@ static void emit_vardecl_inline(G* g, Node* s) {
         emit_expr(g, s->lhs);
         sb_putc(&g->out, ']');
     } else {
-        emit_type_with_name(g, dt, name);
-        if (s->cc) {
+        /* Check if cc is __unaligned — in MSVC it must appear before * */
+        if (s->cc && strcmp(s->cc, "__unaligned") == 0) {
+            /* Emit as: type_with_name but insert __unaligned before * */
+            emit_type_with_name_unaligned(g, dt, name);
+        } else if (s->cc) {
+            emit_type_with_name(g, dt, name);
             sb_putc(&g->out, ' ');
             sb_puts(&g->out, s->cc);
+        } else {
+            emit_type_with_name(g, dt, name);
         }
     }
     if (init) {
@@ -1373,7 +1464,25 @@ static void emit_union_fwd_decl(G* g, Node* u) {
     sb_printf(&g->out, "typedef union %s %s;\n", u->name, u->name);
 }
 
+static bool is_crt_sdk_typedef(const char* name) {
+    static const char* skip[] = {
+        "wchar_t", "wint_t", "wctype_t",
+        "__time32_t", "__time64_t", "time_t",
+        "_locale_t", "_locale_tstruct",
+        "size_t", "ptrdiff_t", "intptr_t", "uintptr_t",
+        "ssize_t", "int8_t", "int16_t", "int32_t", "int64_t",
+        "uint8_t", "uint16_t", "uint32_t", "uint64_t",
+        "va_list", "__gnuc_va_list",
+        "pthreadlocinfo", "pthreadmbcinfo",
+        NULL
+    };
+    for (int i = 0; skip[i]; i++)
+        if (strcmp(name, skip[i]) == 0) return true;
+    return false;
+}
+
 static void emit_typedef_decl(G* g, Node* d) {
+    if (is_crt_sdk_typedef(d->name)) return;
     Type* dt = d->declared_type;
     if (dt && dt->kind == TY_NAMED) {
         SymStruct* ss = sema_find_struct(g->st, dt->name);
@@ -1406,13 +1515,77 @@ static void emit_struct_body(G* g, Node* s) {
     for (int i = 0; i < s->nfields; i++) {
         Node* f = s->fields[i];
         sb_puts(&g->out, "    ");
-        emit_type_with_name(g, f->declared_type, f->name);
-        if (f->lhs) {
-            sb_putc(&g->out, '[');
-            emit_expr(g, f->lhs);
-            sb_putc(&g->out, ']');
+
+        /* Check if this field has nested struct/union fields.
+         * If so, emit the nested struct definition inline before the field. */
+        if (f->fields && f->nfields > 0) {
+            /* Get the struct/union tag name from the type */
+            const char* tag_name = f->name;
+            if (f->declared_type && f->declared_type->name) {
+                tag_name = f->declared_type->name;
+            }
+            bool is_union = (f->kind == ND_ANON_UNION) ||
+                            (f->declared_type && f->declared_type->name &&
+                             strncmp(f->declared_type->name, "union ", 6) == 0);
+
+            /* Check if anonymous (name starts with __anon_) */
+            bool is_anon = (tag_name && strncmp(tag_name, "__anon_", 7) == 0);
+
+            if (is_anon) {
+                /* Anonymous struct/union: emit inline definition with no tag */
+                sb_puts(&g->out, is_union ? "union {\n" : "struct {\n");
+                for (int j = 0; j < f->nfields; j++) {
+                    Node* nf = f->fields[j];
+                    sb_puts(&g->out, "        ");
+                    emit_type_with_name(g, nf->declared_type, nf->name);
+                    if (nf->lhs) {
+                        sb_putc(&g->out, '[');
+                        emit_expr(g, nf->lhs);
+                        sb_putc(&g->out, ']');
+                    }
+                    if (nf->bit_width > 0) {
+                        sb_printf(&g->out, " : %d", nf->bit_width);
+                    }
+                    sb_puts(&g->out, ";\n");
+                }
+                sb_puts(&g->out, "    }");
+                if (!is_union && f->kind == ND_ANON_STRUCT) {
+                    /* Anonymous struct — no field name needed */
+                }
+                sb_puts(&g->out, ";\n");
+            } else {
+                /* Named nested struct: emit full definition with tag and field name */
+                const char* kw = is_union ? "union" : "struct";
+                /* tag_name might already include "struct " or "union " prefix */
+                const char* tag = tag_name;
+                if (tag_name && strncmp(tag_name, "struct ", 7) == 0) tag = tag_name + 7;
+                else if (tag_name && strncmp(tag_name, "union ", 6) == 0) tag = tag_name + 6;
+                sb_printf(&g->out, "%s %s {\n", kw, tag);
+                for (int j = 0; j < f->nfields; j++) {
+                    Node* nf = f->fields[j];
+                    sb_puts(&g->out, "        ");
+                    emit_type_with_name(g, nf->declared_type, nf->name);
+                    if (nf->lhs) {
+                        sb_putc(&g->out, '[');
+                        emit_expr(g, nf->lhs);
+                        sb_putc(&g->out, ']');
+                    }
+                    if (nf->bit_width > 0) {
+                        sb_printf(&g->out, " : %d", nf->bit_width);
+                    }
+                    sb_puts(&g->out, ";\n");
+                }
+                sb_printf(&g->out, "    } %s;\n", f->name ? f->name : "");
+            }
+        } else {
+            emit_type_with_name(g, f->declared_type, f->name);
+            if (f->lhs) {
+                sb_putc(&g->out, '[');
+                emit_expr(g, f->lhs);
+                sb_putc(&g->out, ']');
+            }
+            sb_puts(&g->out, ";\n");
         }
-        sb_puts(&g->out, ";\n");
     }
     sb_puts(&g->out, "};\n\n");
 }
@@ -1556,11 +1729,34 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
         "\n");
 
     /* Phase 7: emit extern function declarations. */
+    /* Detect alloca / __builtin_alloca usage — need <malloc.h> for MSVC */
+    bool need_malloc_h = false;
     for (int i = 0; i < st->nexterns; i++) {
         SymExtern* e = &st->externs[i];
-        /* __declspec(noreturn) → __attribute__((noreturn)) */
+        if (strcmp(e->name, "alloca") == 0 ||
+            strcmp(e->name, "__builtin_alloca") == 0 ||
+            strcmp(e->name, "_alloca") == 0) {
+            need_malloc_h = true;
+        }
+    }
+    if (need_malloc_h) {
+        sb_puts(&g->out, "#include <malloc.h>\n");
+    }
+
+    for (int i = 0; i < st->nexterns; i++) {
+        SymExtern* e = &st->externs[i];
+    /* Skip alloca-like intrinsics — they are provided by <malloc.h> or compiler */
+        if (strcmp(e->name, "alloca") == 0 ||
+            strcmp(e->name, "__builtin_alloca") == 0 ||
+            strcmp(e->name, "_alloca") == 0 ||
+            strcmp(e->name, "__alignof__") == 0 ||
+            strcmp(e->name, "__builtin_frame_address") == 0 ||
+            strcmp(e->name, "__builtin_return_address") == 0) {
+            continue;
+        }
+        /* __declspec(noreturn) → __declspec(noreturn) for MSVC compatibility */
         if (e->decl->declspec && strcmp(e->decl->declspec, "noreturn") == 0) {
-            sb_puts(&g->out, "__attribute__((noreturn)) ");
+            sb_puts(&g->out, "__declspec(noreturn) ");
         }
         sb_puts(&g->out, "extern ");
         emit_type(g, e->ret_type);
@@ -1592,6 +1788,21 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
         sb_puts(&g->out, "extern ");
         emit_type(g, d->declared_type);
         sb_printf(&g->out, " %s;\n", d->name);
+    }
+
+    /* Global variable declarations: `Type name;` (including __declspec(thread)) */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind != ND_VARDECL) continue;
+        if (d->declspec) {
+            sb_printf(&g->out, "__declspec(%s) ", d->declspec);
+        }
+        emit_type_with_name(g, d->declared_type, d->name);
+        if (d->rhs) {
+            sb_puts(&g->out, " = ");
+            emit_expr(g, d->rhs);
+        }
+        sb_puts(&g->out, ";\n");
     }
 
     if (st->nexterns > 0) sb_putc(&g->out, '\n');

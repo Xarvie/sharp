@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef int8_t __static_assert_i32[1];
+typedef int8_t* __static_assert_i32;
 
 int32_t main(void);
 
