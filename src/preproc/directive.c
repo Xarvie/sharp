@@ -506,13 +506,20 @@ static void handle_elif(CppState *st, TokList *line, CppLoc loc) {
         f->in_true_branch = false;
         return;
     }
+
+    /* Step 1: resolve defined() BEFORE macro expansion (ISO C11 §6.10.1p4) */
+    TokList preresolved = resolve_all_defined(st->macros, line);
+    /* Step 2: macro-expand the remaining tokens */
     TokList expanded = {0};
-    macro_expand(line, st->macros, st->interns, st->diags, &expanded);
+    macro_expand(&preresolved, st->macros, st->interns, st->diags, &expanded);
+    tl_free(&preresolved);
+    /* Step 3: evaluate the constant expression */
     bool err = false;
     intmax_t val = cpp_eval_if_expr(&expanded, st->macros, st->interns,
                                      st->diags, &err);
     tl_free(&expanded);
     bool cond = !err && val != 0;
+
     /* Only activate if parent scopes are all live */
     bool parent_live = true;
     for (int i = 0; i < st->cond_depth - 1; i++)
