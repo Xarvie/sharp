@@ -272,6 +272,37 @@ static char *find_include(CppState *st, const char *name, bool is_system,
     return find_include_ex(st, name, is_system, current_file, NULL);
 }
 
+/* Check if a header file exists in the search paths (for __has_include).
+ * Uses the same logic as find_include_ex but just checks existence. */
+static bool cpp_has_include(CppState *st, const char *name, bool is_system) {
+    /* For absolute paths, just check access() */
+    if (name[0] == '/' || (name[0] && name[1] == ':'))
+        return access(name, R_OK) == 0;
+
+    char path[4096];
+
+    /* For <...> search system/user paths */
+    const StrArr *paths[] = { &st->user_paths, &st->sys_paths };
+    for (int pi = 0; pi < 2; pi++) {
+        const StrArr *arr = paths[pi];
+        for (size_t i = 0; i < arr->len; i++) {
+            snprintf(path, sizeof path, "%s/%s", arr->data[i], name);
+            if (access(path, R_OK) == 0) return true;
+#ifdef _WIN32
+            snprintf(path, sizeof path, "%s\\%s", arr->data[i], name);
+            if (access(path, R_OK) == 0) return true;
+#endif
+        }
+    }
+
+    /* For "..." try relative to current directory too */
+    if (!is_system) {
+        if (access(name, R_OK) == 0) return true;
+    }
+
+    return false;
+}
+
 /* =========================================================================
  * Directive handlers
  * ====================================================================== */
@@ -458,13 +489,110 @@ static TokList resolve_all_defined(MacroTable *mt, const TokList *in) {
     return cur;
 }
 
+/* Resolve `__has_include("file")` / `__has_include(<file>)` in-place,
+ * replacing with pp-number "1" or "0" (C23 §6.10.1). Must run BEFORE
+ * macro expansion because the header name must not be expanded. */
+static TokList resolve_has_include(CppState *st, const TokList *in) {
+    TokList out = {0};
+    for (TokNode *n = in->head; n; n = n->next) {
+        if (n->tok.kind == CPPT_IDENT &&
+            (strcmp(pptok_spell(&n->tok), "__has_include") == 0 ||
+             strcmp(pptok_spell(&n->tok), "__has_include_next") == 0)) {
+            bool is_next = (strcmp(pptok_spell(&n->tok), "__has_include_next") == 0);
+            bool result = false;
+            TokNode *nx = n->next;
+            while (nx && nx->tok.kind == CPPT_SPACE) nx = nx->next;
+            if (nx && nx->tok.kind == CPPT_PUNCT &&
+                strcmp(pptok_spell(&nx->tok), "(") == 0) {
+                nx = nx->next;
+                while (nx && nx->tok.kind == CPPT_SPACE) nx = nx->next;
+                if (nx && nx->tok.kind == CPPT_STRING_LIT) {
+                    /* __has_include("file.h") */
+                    const char *sp = pptok_spell(&nx->tok);
+                    size_t len = strlen(sp);
+                    if (len >= 2 && sp[0] == '"' && sp[len-1] == '"') {
+                        char name_buf[4096];
+                        size_t nlen = len - 2;
+                        if (nlen < sizeof(name_buf)) {
+                            memcpy(name_buf, sp + 1, nlen);
+                            name_buf[nlen] = '\0';
+                            result = cpp_has_include(st, name_buf, false);
+                        }
+                    }
+                    nx = nx->next;
+                } else if (nx && nx->tok.kind == CPPT_PUNCT &&
+                           strcmp(pptok_spell(&nx->tok), "<") == 0) {
+                    /* __has_include(<file.h>) */
+                    StrBuf hdr = {0};
+                    nx = nx->next;
+                    while (nx && !(nx->tok.kind == CPPT_PUNCT &&
+                                   strcmp(pptok_spell(&nx->tok), ">") == 0)) {
+                        sb_push(&hdr, pptok_spell(&nx->tok),
+                                strlen(pptok_spell(&nx->tok)));
+                        nx = nx->next;
+                    }
+                    if (nx) nx = nx->next; /* skip '>' */
+                    if (hdr.len > 0) {
+                        result = cpp_has_include(st, hdr.buf, true);
+                    }
+                    sb_free(&hdr);
+                }
+                /* skip ')' */
+                while (nx && nx->tok.kind == CPPT_SPACE) nx = nx->next;
+                if (nx && nx->tok.kind == CPPT_PUNCT &&
+                    strcmp(pptok_spell(&nx->tok), ")") == 0)
+                    nx = nx->next;
+            } else {
+                /* Not __has_include(...) — leave as-is */
+                tl_append_copy(&out, &n->tok);
+                continue;
+            }
+            (void)is_next; /* __has_include_next needs extra logic, for now same */
+            PPTok r = {0};
+            r.kind = CPPT_PP_NUMBER;
+            r.loc  = n->tok.loc;
+            sb_push_cstr(&r.spell, result ? "1" : "0");
+            tl_append(&out, r);
+            /* Append remaining tokens */
+            for (TokNode *rest = nx; rest; rest = rest->next)
+                tl_append_copy(&out, &rest->tok);
+            return out;
+        } else {
+            tl_append_copy(&out, &n->tok);
+        }
+    }
+    return out;
+}
+
+static TokList resolve_all_has_include(CppState *st, const TokList *in) {
+    TokList cur = {0};
+    for (TokNode *n = in->head; n; n = n->next)
+        tl_append_copy(&cur, &n->tok);
+    for (int pass = 0; pass < 64; pass++) {
+        bool found = false;
+        for (TokNode *n = cur.head; n; n = n->next)
+            if (n->tok.kind == CPPT_IDENT &&
+                (strcmp(pptok_spell(&n->tok), "__has_include") == 0 ||
+                 strcmp(pptok_spell(&n->tok), "__has_include_next") == 0))
+                { found = true; break; }
+        if (!found) break;
+        TokList next = resolve_has_include(st, &cur);
+        tl_free(&cur);
+        cur = next;
+    }
+    return cur;
+}
+
 static void handle_if(CppState *st, TokList *line, CppLoc loc) {
     /* Step 1: resolve defined() BEFORE macro expansion (ISO C11 §6.10.1p4) */
     TokList preresolved = resolve_all_defined(st->macros, line);
+    /* Step 1b: resolve __has_include(...) (C23 §6.10.1) */
+    TokList hi_resolved = resolve_all_has_include(st, &preresolved);
+    tl_free(&preresolved);
     /* Step 2: macro-expand the remaining tokens */
     TokList expanded = {0};
-    macro_expand(&preresolved, st->macros, st->interns, st->diags, &expanded);
-    tl_free(&preresolved);
+    macro_expand(&hi_resolved, st->macros, st->interns, st->diags, &expanded);
+    tl_free(&hi_resolved);
     /* Step 3: evaluate the constant expression */
     bool err = false;
     intmax_t val = cpp_eval_if_expr(&expanded, st->macros, st->interns,
@@ -509,10 +637,13 @@ static void handle_elif(CppState *st, TokList *line, CppLoc loc) {
 
     /* Step 1: resolve defined() BEFORE macro expansion (ISO C11 §6.10.1p4) */
     TokList preresolved = resolve_all_defined(st->macros, line);
+    /* Step 1b: resolve __has_include(...) (C23 §6.10.1) */
+    TokList hi_resolved = resolve_all_has_include(st, &preresolved);
+    tl_free(&preresolved);
     /* Step 2: macro-expand the remaining tokens */
     TokList expanded = {0};
-    macro_expand(&preresolved, st->macros, st->interns, st->diags, &expanded);
-    tl_free(&preresolved);
+    macro_expand(&hi_resolved, st->macros, st->interns, st->diags, &expanded);
+    tl_free(&hi_resolved);
     /* Step 3: evaluate the constant expression */
     bool err = false;
     intmax_t val = cpp_eval_if_expr(&expanded, st->macros, st->interns,
@@ -673,6 +804,23 @@ static PPTok make_line_tok(CppState *st, CppLoc loc) {
     return t;
 }
 
+static PPTok make_timestamp_tok(CppState *st, CppLoc loc) {
+    PPTok t = {0};
+    t.kind = CPPT_STRING_LIT;
+    t.loc  = loc;
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    const char *days[] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
+    const char *mons[] = { "Jan","Feb","Mar","Apr","May","Jun",
+                           "Jul","Aug","Sep","Oct","Nov","Dec" };
+    char ts[256];
+    snprintf(ts, sizeof ts, "\"%s %s %02d %02d:%02d:%02d %04d\"",
+             days[tm->tm_wday], mons[tm->tm_mon], tm->tm_mday,
+             tm->tm_hour, tm->tm_min, tm->tm_sec, tm->tm_year + 1900);
+    sb_push_cstr(&t.spell, ts);
+    return t;
+}
+
 /* =========================================================================
  * Token processing — read from reader, handle directives, expand macros,
  * emit to output.
@@ -781,6 +929,8 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
                     handle_error(st, &line, dir_loc, true);
                 } else if (strcmp(dname, "pragma") == 0) {
                     handle_pragma(st, &line, dir_loc, reader_filename(rd));
+                } else if (strcmp(dname, "ident")  == 0) {
+                    /* #ident is a legacy directive — silently ignored */
                 } else {
                     emit_diag(st, CPP_DIAG_ERROR, dir_loc,
                               "unknown directive: #%s", dname);
@@ -838,6 +988,14 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
                 pptok_free(&t);
                 emit_tok_text(st, &ct);
                 pptok_free(&ct);
+                continue;
+            }
+            if (strcmp(name, "__TIMESTAMP__") == 0) {
+                PPTok tt = make_timestamp_tok(st, t.loc);
+                tt.has_leading_space = t.has_leading_space;
+                pptok_free(&t);
+                emit_tok_text(st, &tt);
+                pptok_free(&tt);
                 continue;
             }
 
