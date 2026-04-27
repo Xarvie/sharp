@@ -333,6 +333,32 @@ Type* ty_bitfield(Type* base, int width) {
     return t;
 }
 
+Type* ty_array(Type* elem, int size) {
+    if (!s_arena) ty_init();
+    table_ensure();
+    uint64_t h = fnv_init();
+    h = fnv_mix(h, (uint64_t)TY_ARRAY);
+    h = fnv_mix(h, (uint64_t)(uintptr_t)elem);
+    h = fnv_mix(h, (uint64_t)size);
+    size_t mask = s_table_cap - 1;
+    size_t slot = (size_t)(h & mask);
+    while (s_table[slot].type) {
+        Type* t = s_table[slot].type;
+        if (t->kind == TY_ARRAY && t->base == elem && t->array_size == size)
+            return t;
+        slot = (slot + 1) & mask;
+    }
+    Type* t = (Type*)arena_alloc(&s_arena, sizeof(Type));
+    memset(t, 0, sizeof(*t));
+    t->kind = TY_ARRAY;
+    t->base = elem;
+    t->array_size = size;
+    s_table[slot].hash = h;
+    s_table[slot].type = t;
+    s_table_len++;
+    return t;
+}
+
 /* ===================================================================== *
  *   Const qualifier
  * ===================================================================== */

@@ -238,6 +238,11 @@ static void emit_type(G* g, Type* t) {
                 sb_puts(&g->out, buf);
             }
             return;
+        case TY_ARRAY:
+            /* Array type: emit base type only, dimension appended by caller */
+            emit_type(g, rt->base);
+            sb_printf(&g->out, "[%d]", rt->array_size);
+            return;
         default:
             emit_type_core(g, rt);
             return;
@@ -367,6 +372,26 @@ static void emit_type_with_name(G* g, Type* t, const char* name) {
         emit_type_core(g, rt->base);
         sb_printf(&g->out, " %s : %d", name ? name : "", rt->bit_width);
         return;
+    }
+
+    /* Handle array types: emit base type, name, then all array dimensions */
+    {
+        Type* cur = rt;
+        int dims[16];
+        int ndims = 0;
+        while (cur->kind == TY_ARRAY) {
+            if (ndims < 16) dims[ndims++] = cur->array_size;
+            cur = cur->base;
+        }
+        if (ndims > 0) {
+            /* We have array dimensions: emit base type, name, then [d1][d2]... */
+            emit_type(g, cur);
+            sb_printf(&g->out, " %s", name ? name : "");
+            for (int i = ndims - 1; i >= 0; i--) {
+                sb_printf(&g->out, "[%d]", dims[i]);
+            }
+            return;
+        }
     }
 
     /* Simple type: emit type then name */

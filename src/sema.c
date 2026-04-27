@@ -1012,6 +1012,8 @@ static Type* tc_expr(TC* tc, Node* e) {
             }
             if (!lt) return NULL;
             if (ty_is_pointer_like(lt)) return ty_base(lt);
+            /* Array type: indexing returns the element type */
+            if (lt->kind == TY_ARRAY) return lt->base;
             diag_emit(DIAG_ERROR, E_INDEX_TYPE, e->line, 0, 0,
                       "type '%s' is not indexable (only raw pointers are)",
                       type_str(tc, lt));

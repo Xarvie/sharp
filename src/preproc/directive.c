@@ -208,9 +208,11 @@ static char *find_include_ex(CppState *st, const char *name, bool is_system,
     auto_skip:; /* label for the skip_until logic */
     (void)0;
 
-    /* For "..." first search relative to the including file's directory
-     * (skipped when skip_until is active or is_system).                   */
-    if (!is_system && current_file && !skipping) {
+    /* For "..." and "<...>" first search relative to the including file's
+     * directory (skipped when skip_until is active).
+     * This handles cases where system headers use <> for same-directory
+     * includes (common in TCC/winapi headers). */
+    if (current_file && !skipping) {
         const char *slash = strrchr(current_file, '/');
 #ifdef _WIN32
         const char *bslash = strrchr(current_file, '\\');
@@ -230,14 +232,6 @@ static char *find_include_ex(CppState *st, const char *name, bool is_system,
         }
         /* If no directory separator (e.g. virtual filename like "<test>"),
          * fall through to try the name directly relative to CWD.          */
-    }
-
-    /* For "..." with no including-dir context, try the file directly
-     * (relative to the current working directory).                        */
-    if (!is_system && !skipping) {
-        snprintf(path, sizeof path, "%s", name);
-        if (access(path, R_OK) == 0)
-            return cpp_xstrdup(path);
     }
 
     /* User include paths */

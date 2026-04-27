@@ -297,6 +297,7 @@ Type* type_func(Arena** a, Type* ret, Type** params, int nparams, bool variadic)
     (void)a; return ty_func(ret, params, nparams, variadic);
 }
 Type* type_bitfield(Arena** a, Type* base, int width)        { (void)a; return ty_bitfield(base, width); }
+Type* type_array(Arena** a, Type* elem, int size)            { (void)a; return ty_array(elem, size); }
 
 bool type_is_primitive(TypeKind k) {
     return (k >= TY_VOID && k <= TY_USIZE);

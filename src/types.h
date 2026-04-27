@@ -46,6 +46,7 @@ Type* ty_const  (Type* base);   /* const-qualified type */
 /* Phase C: function type and bitfield constructors */
 Type* ty_func   (Type* ret, Type** params, int nparams, bool variadic);
 Type* ty_bitfield(Type* base, int width);
+Type* ty_array  (Type* elem, int size);
 
 /* ===================================================================== *
  *   Queries
