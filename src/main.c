@@ -376,7 +376,6 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         cpp_define(cpp, "__builtin_va_start(ap,x)",  "");
         cpp_define(cpp, "__builtin_va_end(ap)",      "");
         cpp_define(cpp, "__builtin_va_arg(ap,t)",    "(t)0");
-        cpp_define(cpp, "__gnuc_va_list",            "void*");
     }
 }
 
