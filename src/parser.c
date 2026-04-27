@@ -262,7 +262,7 @@ static bool is_type_start(TokKind k) {
            k == TK_SHORT || k == TK_LONG || k == TK_UNSIGNED || k == TK_SIGNED || k == TK_CHAR ||
            k == TK_INT_TYPE || k == TK_FLOAT_TYPE || k == TK_DOUBLE_TYPE ||
            k == TK___INT64 ||
-           k == TK_CONST || k == TK_EXTERN ||
+           k == TK_CONST || k == TK_EXTERN || k == TK_STATIC ||
            k == TK___INLINE__ || k == TK___INLINE ||
            k == TK___DECLSPEC || k == TK___ATTRIBUTE__ ||
            k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL || k == TK___UNALIGNED ||
@@ -364,6 +364,15 @@ static Node* try_parse_nested_anon_struct_union(P* p, int fline) {
         Tok ft = lex_next(p->lex);
         nest_fname = arena_strndup(p->arena, ft.start, ft.len);
     }
+    /* Handle array suffix: `struct { ... } name[6];` */
+    if (accept(p, TK_LBRACKET)) {
+        int depth = 1;
+        while (depth > 0 && lex_peek(p->lex).kind != TK_EOF) {
+            if (lex_peek(p->lex).kind == TK_LBRACKET) depth++;
+            else if (lex_peek(p->lex).kind == TK_RBRACKET) depth--;
+            lex_next(p->lex);
+        }
+    }
     expect(p, TK_SEMI, "expected ';' after field");
 
     static int nested_counter = 0;
@@ -386,7 +395,7 @@ static Type* parse_type(P* p) {
      * that are not type keywords. */
     for (;;) {
         TokKind k = lex_peek(p->lex).kind;
-        if (k == TK___INLINE__ || k == TK___INLINE || k == TK_EXTERN ||
+        if (k == TK___INLINE__ || k == TK___INLINE || k == TK_EXTERN || k == TK_STATIC ||
             k == TK___RESTRICT || k == TK___RESTRICT__ || k == TK_RESTRICT) {
             lex_next(p->lex);
         } else if (k == TK___DECLSPEC) {
@@ -1032,6 +1041,20 @@ static Node* parse_unary(P* p) {
         case TK_TILDE: op = OP_BNOT;  break;
         case TK_AMP:   op = OP_ADDR;  break;  /* &e : address-of */
         case TK_STAR:  op = OP_DEREF; break;  /* *e : dereference */
+        case TK_PLUSPLUS: op = OP_PREINC; lex_next(p->lex); {
+            Node* operand = parse_unary(p);
+            Node* n = mk(p, ND_UNOP, t.line);
+            n->op = OP_PREINC;
+            n->rhs = operand;
+            return n;
+        }
+        case TK_MINUSMINUS: op = OP_PREDEC; lex_next(p->lex); {
+            Node* operand = parse_unary(p);
+            Node* n = mk(p, ND_UNOP, t.line);
+            n->op = OP_PREDEC;
+            n->rhs = operand;
+            return n;
+        }
         default: is_unary = false; op = OP_POS; break;
     }
     if (is_unary) {
@@ -1641,7 +1664,7 @@ static Node* parse_for(P* p) {
 static Node* parse_return(P* p) {
     Tok t = lex_next(p->lex); /* 'return' */
     Node* n = mk(p, ND_RETURN, t.line);
-    if (lex_peek(p->lex).kind != TK_SEMI) n->rhs = parse_expr(p);
+    if (lex_peek(p->lex).kind != TK_SEMI && lex_peek(p->lex).kind != TK_RBRACE) n->rhs = parse_expr(p);
     expect(p, TK_SEMI, "expected ';' after return");
     return n;
 }
@@ -1789,6 +1812,13 @@ static Node* parse_stmt(P* p) {
                 size_t id_len = (size_t)t.len;
                 bool is_storage_kw = (id_len == 8 && strncmp(id_str, "__thread", 8) == 0);
                 if (is_storage_kw) return parse_vardecl_c(p);
+            }
+            /* C null statement: bare `;` */
+            if (t.kind == TK_SEMI) {
+                lex_next(p->lex);
+                Node* n = mk(p, ND_EXPR_STMT, t.line);
+                n->rhs = NULL;
+                return n;
             }
             {
                 Node* e = parse_expr(p);
@@ -2165,6 +2195,21 @@ static Node* parse_func_common(P* p, const char* parent, bool is_static) {
     int line = lex_peek(p->lex).line;
     const char* cc1 = parse_calling_conv(p);
     Type* ret = parse_type(p);
+    /* Handle multiple __attribute__, calling conventions, and inline keywords
+     * that appear between return type and function name.
+     * UCRT/MinGW headers use patterns like:
+     *   void __cdecl __attribute__((noreturn)) func(void);
+     *   extern __inline__ __attribute__((...)) void __cdecl __attribute__((...)) func(void); */
+    for (;;) {
+        if (lex_peek(p->lex).kind == TK___DECLSPEC) { skip_declspec(p); }
+        else if (lex_peek(p->lex).kind == TK___ATTRIBUTE__) { skip_attribute(p); }
+        else if (lex_peek(p->lex).kind == TK___INLINE__ || lex_peek(p->lex).kind == TK___INLINE) { lex_next(p->lex); }
+        else if (lex_peek(p->lex).kind == TK___CDECL || lex_peek(p->lex).kind == TK___STDCALL ||
+                 lex_peek(p->lex).kind == TK___FASTCALL || lex_peek(p->lex).kind == TK___CRTDECL) { parse_calling_conv(p); }
+        else if (lex_peek(p->lex).kind == TK___EXTENSION__) { lex_next(p->lex); }
+        else if (lex_peek(p->lex).kind == TK_IDENT && lex_ident_is(lex_peek(p->lex), "_Complex")) { lex_next(p->lex); }
+        else { break; }
+    }
     const char* cc2 = parse_calling_conv(p);
     const char* cc = cc1 ? cc1 : cc2;
     const char* name = parse_method_name(p, parent != NULL);
@@ -2197,6 +2242,26 @@ static Node* parse_func_common(P* p, const char* parent, bool is_static) {
         }
     }
     expect(p, TK_RPAREN, "expected ')'");
+
+    /* Skip __asm__("symbol") and trailing __attribute__ that can appear
+     * between function params and body in system headers */
+    while (lex_peek(p->lex).kind == TK___ATTRIBUTE__) skip_attribute(p);
+    if (lex_peek(p->lex).kind == TK_ASM) {
+        lex_next(p->lex);
+        if (lex_peek(p->lex).kind == TK_IDENT && (lex_ident_is(lex_peek(p->lex), "volatile") || lex_ident_is(lex_peek(p->lex), "__volatile__"))) {
+            lex_next(p->lex);
+        }
+        if (lex_peek(p->lex).kind == TK_LPAREN) {
+            int depth = 1;
+            lex_next(p->lex);
+            while (depth > 0 && lex_peek(p->lex).kind != TK_EOF) {
+                if (lex_peek(p->lex).kind == TK_LPAREN) depth++;
+                else if (lex_peek(p->lex).kind == TK_RPAREN) depth--;
+                lex_next(p->lex);
+            }
+        }
+        while (lex_peek(p->lex).kind == TK___ATTRIBUTE__) skip_attribute(p);
+    }
 
     /* Function body: C-style block `{ stmts }` */
     Node* body = parse_block(p);
@@ -2506,6 +2571,11 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                 bool is_union = (lex_peek(p->lex).kind == TK_UNION);
                 Tok t0 = lex_next(p->lex); /* consume 'struct'/'union' */
 
+                /* Skip __declspec/attributes between struct/union and '{':
+                 *   typedef struct __declspec(align(16)) { ... } Name; */
+                if (lex_peek(p->lex).kind == TK___DECLSPEC) skip_declspec(p);
+                if (lex_peek(p->lex).kind == TK___ATTRIBUTE__) skip_attribute(p);
+
                 /* Anonymous: `typedef struct { ... } Name;` — generate a name */
                 if (lex_peek(p->lex).kind == TK_LBRACE) {
                     /* Generate an internal name */
@@ -2781,50 +2851,9 @@ Node* parse_program(Lexer* lx, Arena** arena) {
             sa->raw_text = arena_strndup(p->arena, start, (int)len);
             nv_push(&decls, sa);
         } else if (t.kind == TK_STATIC) {
-             /* Skip static declarations (static inline functions from C headers) */
-             LexerState saved = lex_save(p->lex);
-             lex_next(p->lex); /* consume 'static' */
-             bool saw_inline = (accept(p, TK___INLINE__) || accept(p, TK___INLINE) || accept(p, TK___INLINE));
-            if (saw_inline) {
-                /* Parse enough to find and skip the function body */
-                skip_attribute(p);
-                parse_calling_conv(p);
-                /* Skip return type until we find the function name */
-                while (lex_peek(p->lex).kind != TK_IDENT && lex_peek(p->lex).kind != TK_EOF) {
-                    lex_next(p->lex);
-                }
-                if (lex_peek(p->lex).kind == TK_IDENT) {
-                    lex_next(p->lex); /* consume function name */
-                }
-                skip_attribute(p);
-                if (lex_peek(p->lex).kind == TK_LPAREN) {
-                    /* Skip parameter list */
-                    int depth = 1;
-                    lex_next(p->lex); /* consume '(' */
-                    while (depth > 0 && lex_peek(p->lex).kind != TK_EOF) {
-                        if (lex_peek(p->lex).kind == TK_LPAREN) depth++;
-                        else if (lex_peek(p->lex).kind == TK_RPAREN) depth--;
-                        lex_next(p->lex);
-                    }
-                    skip_attribute(p);
-                }
-                if (lex_peek(p->lex).kind == TK_LBRACE) {
-                    /* Skip body */
-                    lex_next(p->lex);
-                    int depth = 1;
-                    while (depth > 0 && lex_peek(p->lex).kind != TK_EOF) {
-                        if (lex_peek(p->lex).kind == TK_LBRACE) depth++;
-                        else if (lex_peek(p->lex).kind == TK_RBRACE) depth--;
-                        lex_next(p->lex);
-                    }
-                } else if (lex_peek(p->lex).kind == TK_SEMI) {
-                    lex_next(p->lex);
-                }
-            } else {
-                /* Not a static inline — restore and try as regular declaration */
-                lex_restore(p->lex, saved);
-                goto type_start_path;
-            }
+             /* static declarations (static inline functions, static variables, etc. from C headers)
+              * Just restore and let the type_start_path handle it via the prefix loop */
+             goto type_start_path;
         } else if (t.kind == TK_EXTERN) {
             /* Check for extern linkage block: `extern "C++" { ... }` */
             LexerState saved = lex_save(p->lex);
@@ -2844,6 +2873,10 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                 lex_restore(p->lex, saved);
                 goto type_start_path;
             }
+        } else if (t.kind == TK___EXTENSION__) {
+            /* __extension__ is a GCC marker to suppress warnings — skip it and continue */
+            lex_next(p->lex);
+            continue;
         } else if (is_type_start(t.kind)) {
 type_start_path:
             /* Peek ahead to distinguish between:
@@ -2865,6 +2898,7 @@ type_start_path:
             for (;;) {
                 TokKind k = lex_peek(p->lex).kind;
                 if (k == TK_EXTERN) { saw_extern_top = true; lex_next(p->lex); }
+                else if (k == TK_STATIC) { lex_next(p->lex); }
                 else if (k == TK___INLINE__ || k == TK___INLINE) {
                     saw_inline = true;
                     lex_next(p->lex);
@@ -2874,6 +2908,8 @@ type_start_path:
                     lex_next(p->lex);
                 } else if (k == TK___ATTRIBUTE__) {
                     skip_attribute(p);
+                } else if (k == TK___EXTENSION__) {
+                    lex_next(p->lex);
                 } else if (k == TK_IDENT) {
                     /* Skip common Windows calling convention macros that may not be expanded:
                      * WINAPI, APIENTRY, CALLBACK, NTAPI, etc.
@@ -2886,7 +2922,8 @@ type_start_path:
                         lex_ident_is(ident, "WINBASEAPI") || lex_ident_is(ident, "WINADVAPI") ||
                         lex_ident_is(ident, "WINUSERAPI") || lex_ident_is(ident, "WINGDIAPI") ||
                         lex_ident_is(ident, "WINCONAPI") || lex_ident_is(ident, "_CRTIMP") || lex_ident_is(ident, "_CRTIMP1") ||
-                        lex_ident_is(ident, "__MINGW_NOTHROW") || lex_ident_is(ident, "__MINGW_ATTRIB_NORETURN")) {
+                        lex_ident_is(ident, "__MINGW_NOTHROW") || lex_ident_is(ident, "__MINGW_ATTRIB_NORETURN") ||
+                        lex_ident_is(ident, "__mingw_ovr")) {
                         lex_next(p->lex);
                     } else {
                         break;
@@ -2898,12 +2935,18 @@ type_start_path:
 
             const char* cc = parse_calling_conv(p);
             Type* ret = parse_type(p);
-            /* Skip __declspec(...) that can appear after return type:
-             *   void __declspec(noreturn) abort(void); */
-            if (lex_peek(p->lex).kind == TK___DECLSPEC) skip_declspec(p);
-            /* Skip __attribute__ that can appear after return type:
-             *   void __attribute__((noreturn)) abort(void); */
-            skip_attribute(p);
+            /* Handle multiple __attribute__ and calling conventions after return type.
+             * UCRT headers use patterns like:
+             *   extern __inline__ __attribute__((...)) __attribute__((...)) rettype func(); */
+            for (;;) {
+                if (lex_peek(p->lex).kind == TK___DECLSPEC) { skip_declspec(p); }
+                else if (lex_peek(p->lex).kind == TK___ATTRIBUTE__) { skip_attribute(p); }
+                else if (lex_peek(p->lex).kind == TK___INLINE__ || lex_peek(p->lex).kind == TK___INLINE) { lex_next(p->lex); }
+                else if (lex_peek(p->lex).kind == TK___CDECL || lex_peek(p->lex).kind == TK___STDCALL ||
+                         lex_peek(p->lex).kind == TK___FASTCALL || lex_peek(p->lex).kind == TK___CRTDECL) { parse_calling_conv(p); }
+                else if (lex_peek(p->lex).kind == TK_IDENT && lex_ident_is(lex_peek(p->lex), "_Complex")) { lex_next(p->lex); }
+                else { break; }
+            }
             const char* cc2 = parse_calling_conv(p);
             if (!cc) cc = cc2;
 
@@ -3073,8 +3116,24 @@ type_start_path:
                 g_silent = false;
 
                 if (has_rparen) {
-                    /* Optional trailing __attribute__((...)) */
-                    skip_attribute(p);
+                    /* Optional trailing __attribute__((...)) — may appear multiple times:
+                     *   void func(void) __attribute__((noreturn)) __attribute__((nonnull(2)));
+                     *   wchar_t *_wctime(const time_t *) __asm__("_wctime64"); */
+                    while (lex_peek(p->lex).kind == TK___ATTRIBUTE__) skip_attribute(p);
+                    /* Skip __asm__("symbol") that can appear after function params */
+                    if (lex_peek(p->lex).kind == TK_ASM) {
+                        lex_next(p->lex);
+                        if (lex_peek(p->lex).kind == TK_LPAREN) {
+                            int depth = 1;
+                            lex_next(p->lex);
+                            while (depth > 0 && lex_peek(p->lex).kind != TK_EOF) {
+                                if (lex_peek(p->lex).kind == TK_LPAREN) depth++;
+                                else if (lex_peek(p->lex).kind == TK_RPAREN) depth--;
+                                lex_next(p->lex);
+                            }
+                        }
+                        while (lex_peek(p->lex).kind == TK___ATTRIBUTE__) skip_attribute(p);
+                    }
                     if (lex_peek(p->lex).kind == TK_SEMI) {
                         /* C function declaration: `int foo(int x);` */
                         lex_next(p->lex); /* consume ';' */

@@ -340,7 +340,8 @@ typedef enum {
     OP_BAND, OP_BOR, OP_BXOR, OP_BNOT, OP_SHL, OP_SHR,
     OP_ASSIGN, OP_ADDEQ, OP_SUBEQ, OP_MULEQ, OP_DIVEQ, OP_MODEQ,
     OP_DEREF, OP_ADDR,         /* phase 3: unary `*e` and `&e` */
-    OP_POSTINC, OP_POSTDEC     /* phase 4: postfix `e++` / `e--` */
+    OP_POSTINC, OP_POSTDEC,    /* phase 4: postfix `e++` / `e--` */
+    OP_PREINC, OP_PREDEC       /* phase 5: prefix `++e` / `--e` */
 } OpKind;
 
 struct Node {
