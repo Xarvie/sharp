@@ -3,17 +3,17 @@
 /* Expected: Parser should handle anonymous nested structs */
 
 struct Outer {
-    i32 x;
+    int x;
     struct {
-        i32 a;
-        i32 b;
+        int a;
+        int b;
     };
     union {
-        i32 c;
-        f64 d;
+        int c;
+        double d;
     };
 }
 
-i32 main() {
+int main() {
     return 0;
 }

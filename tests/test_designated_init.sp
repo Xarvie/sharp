@@ -3,11 +3,11 @@
 /* Expected: Parser should handle .field = value syntax */
 
 struct Point {
-    i32 x;
-    i32 y;
+    int x;
+    int y;
 }
 
-i32 main() {
+int main() {
     struct Point p = { .x = 1, .y = 2 };
     return 0;
 }

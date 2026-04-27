@@ -1,4 +1,4 @@
-i32 main() {
-    const u8* msg = "hello const";
+int main() {
+    const char* msg = "hello const";
     return 0;
 }

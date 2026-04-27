@@ -4,6 +4,6 @@
 #undef NDEBUG
 #pragma pop_macro("NDEBUG")
 
-i32 main() {
+int main() {
     return 0;
 }

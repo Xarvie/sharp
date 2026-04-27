@@ -3,4 +3,4 @@
 int add(int a, int b) {
     return a + b;
 }
-i32 main() { return add(1, 2); }
+int main() { return add(1, 2); }

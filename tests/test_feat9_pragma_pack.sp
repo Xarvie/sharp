@@ -5,13 +5,13 @@
 
 struct packed {
     char a;
-    i32 b;
+    int b;
     char c;
 }
 
 #pragma pack(pop)
 
-i32 main() {
+int main() {
     struct packed p;
     return sizeof(p);
 }

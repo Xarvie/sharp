@@ -3,17 +3,17 @@
 /* Expected: Parser should handle multiple typedef aliases and function pointers */
 
 /* Simple function pointer typedef */
-typedef void (*sighandler_t)(i32);
+typedef void (*sighandler_t)(int);
 
 /* Function pointer with multiple params */
-typedef i32 (*cmp_fn)(const void*, const void*);
+typedef int (*cmp_fn)(const void*, const void*);
 
 /* Multiple aliases on same line */
-typedef i32 errno_t, *Perrno_t, **PPerrno_t;
+typedef int errno_t, *Perrno_t, **PPerrno_t;
 
 /* Typedef for array type */
-typedef i32 int_array[10];
+typedef int int_array[10];
 
-i32 main() {
+int main() {
     return 0;
 }

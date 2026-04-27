@@ -13,7 +13,7 @@ extern __inline__ int add(int a, int b) {
 extern __declspec(dllimport) int external_value;
 
 /* Usage */
-i32 main() {
-    i32 x = add(1, 2);
+int main() {
+    int x = add(1, 2);
     return 0;
 }

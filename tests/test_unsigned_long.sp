@@ -1,5 +1,5 @@
 /* compiler: any */
-i32 main() {
+int main() {
     unsigned long x;
     return 0;
 }

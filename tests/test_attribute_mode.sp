@@ -2,6 +2,6 @@
 /* §26 __attribute__((mode(DI))) */
 typedef int word_type __attribute__((mode(DI)));
 
-i32 main() {
+int main() {
     return 0;
 }

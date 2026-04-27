@@ -1,5 +1,5 @@
 /* compiler: any */
-i32 main() {
+int main() {
     __inline__ int x = 0;
     return 0;
 }

@@ -3,7 +3,7 @@
 
 typedef __int64 my_int64;
 
-i32 main() {
+int main() {
     __int64 x;
     my_int64 y;
     return 0;

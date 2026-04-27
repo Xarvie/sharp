@@ -7,7 +7,7 @@ $ErrorActionPreference = "SilentlyContinue"
 # Set TCC include path for the preprocessor
 $env:SHARP_TCC_DIR = "$PSScriptRoot\third_party\tcc"
 
-$SHARPC = "cmake-build-debug\Debug\sharpc.exe"
+$SHARPC = "cmake-build-debug\sharpc.exe"
 $TESTS_DIR = "tests"
 $GCC = "C:\msys64\mingw64\bin\gcc.exe"
 $CLANG = "C:\msys64\clang64\bin\clang.exe"

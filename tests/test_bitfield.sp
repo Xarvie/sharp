@@ -3,12 +3,12 @@
 /* Expected: Parser should handle unsigned int field : width syntax */
 
 struct Flags {
-    u32 a : 1;
-    u32 b : 2;
-    u32 c : 4;
-    u32 d : 25;
+    int a : 1;
+    int b : 2;
+    int c : 4;
+    int d : 25;
 }
 
-i32 main() {
+int main() {
     return 0;
 }

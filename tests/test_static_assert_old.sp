@@ -4,6 +4,6 @@
 
 typedef char __static_assert_i32[1];
 
-i32 main() {
+int main() {
     return 42;
 }

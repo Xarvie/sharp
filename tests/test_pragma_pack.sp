@@ -3,12 +3,12 @@
 #pragma pack(push, 1)
 
 struct Packed {
-    u8 a;
-    i32 b;
+    char a;
+    int b;
 };
 
 #pragma pack(pop)
 
-i32 main() {
+int main() {
     return 0;
 }

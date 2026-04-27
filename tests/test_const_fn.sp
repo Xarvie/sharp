@@ -1,14 +1,14 @@
 /* compiler: any */
 /* test_const_fn.sp - Test const in function parameters */
 
-extern i32 puts(const u8* s);
+extern int puts(const char* s);
 
-void print_msg(const u8* msg) {
+void print_msg(const char* msg) {
     puts(msg);
 }
 
-i32 main() {
-    const u8* hello = "hello";
+int main() {
+    const char* hello = "hello";
     print_msg(hello);
     return 0;
 }

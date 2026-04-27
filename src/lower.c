@@ -243,11 +243,11 @@ static Type* l_expr_type(L* l, Node* e) {
     if (!e) return NULL;
     if (e->type) return e->type;   /* parser/sema annotation */
     switch (e->kind) {
-        case ND_INT:   return ty_prim(TY_I32);
-        case ND_FLOAT: return ty_prim(TY_F64);
+        case ND_INT:   return ty_prim(TY_INT);
+        case ND_FLOAT: return ty_prim(TY_DOUBLE);
         case ND_BOOL:  return ty_prim(TY_BOOL);
-        case ND_CHAR:  return ty_prim(TY_U8);
-        case ND_STR:   return ty_ptr(ty_prim(TY_U8));
+        case ND_CHAR:  return ty_prim(TY_CHAR);
+        case ND_STR:   return ty_ptr(ty_prim(TY_CHAR));
         case ND_NULL:  return ty_ptr(ty_prim(TY_VOID));
         case ND_IDENT: {
             const char* name = e->name;

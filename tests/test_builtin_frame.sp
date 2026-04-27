@@ -2,10 +2,10 @@
 /* §27 __builtin_frame_address / __alignof__ */
 
 extern void* __builtin_frame_address(int level);
-extern usize __alignof__(i32 x);
+extern long __alignof__(int x);
 
-i32 main() {
-    i32 x = 42;
-    usize align = __alignof__(x);
+int main() {
+    int x = 42;
+    long align = __alignof__(x);
     return 0;
 }

@@ -4,6 +4,6 @@
 
 const char* ts = __TIMESTAMP__;
 
-i32 main() {
+int main() {
     return 0;
 }

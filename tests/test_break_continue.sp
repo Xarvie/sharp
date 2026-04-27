@@ -1,9 +1,9 @@
 /* compiler: any */
 /* TDD-Stmt-5: break / continue */
 
-i32 main() {
-    i32 sum = 0;
-    i32 i = 0;
+int main() {
+    int sum = 0;
+    int i = 0;
     while (i < 10) {
         i = i + 1;
         if (i == 3) continue;

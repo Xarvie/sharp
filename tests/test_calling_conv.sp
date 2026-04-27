@@ -11,7 +11,7 @@ extern int __stdcall stdcall_fn(int x);
 extern void __fastcall fast_fn(int a, int b);
 
 /* Variable with __unaligned (TDD-2.4) */
-i32 main() {
+int main() {
     __unaligned int* ptr;
     return 0;
 }

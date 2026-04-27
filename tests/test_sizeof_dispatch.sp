@@ -3,7 +3,7 @@
 extern void fpclassify_impl(double x);
 extern void fpclassify_impl_f(float x);
 
-i32 main() {
+int main() {
     double x = 1.0;
     return 0;
 }

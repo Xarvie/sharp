@@ -171,19 +171,16 @@ typedef enum {
     TK_PRINT,        /* print(expr) built-in */
     TK_PRINTLN,      /* println(expr) built-in */
 
-    /* primitive-type keywords — Sharp style (modern, clean) */
+    /* C-style type keywords */
     TK_VOID, TK_BOOL,
-    TK_I8,  TK_I16, TK_I32, TK_I64,
-    TK_U8,  TK_U16, TK_U32, TK_U64,
-    TK_F32, TK_F64, TK_ISIZE, TK_USIZE,
-
-    /* C-style type modifiers */
     TK_SHORT, TK_LONG, TK_UNSIGNED, TK_SIGNED, TK_CHAR,
     TK_INT_TYPE, TK_FLOAT_TYPE, TK_DOUBLE_TYPE,
     TK___INT64,
 
     /* C declaration modifiers */
     TK___INLINE__, TK___INLINE,
+    TK___EXTENSION__,
+    TK___THREAD,
     TK___ATTRIBUTE__,
     TK___DECLSPEC,
     TK_STATIC_ASSERT,
@@ -236,9 +233,13 @@ typedef struct Type Type;
 typedef enum {
     TY_VOID,
     TY_BOOL,
-    TY_I8,  TY_I16, TY_I32, TY_I64,
-    TY_U8,  TY_U16, TY_U32, TY_U64,
-    TY_F32, TY_F64, TY_ISIZE, TY_USIZE,
+    TY_CHAR,
+    TY_SHORT,
+    TY_INT,
+    TY_LONG,
+    TY_LONGLONG,
+    TY_FLOAT,
+    TY_DOUBLE,
     TY_PTR,      /* base pointer */
     TY_NAMED,    /* user-declared struct, resolved by name */
     TY_FUNC,     /* function type: ret(params...) — for function pointers */
@@ -257,8 +258,8 @@ struct Type {
     Type**        targs;
     int           ntargs;
     /* Const qualifier — applies to the type itself, not transitively
-     * into the base. For `const u8*`, the TY_PTR has is_const=false
-     * and its base (TY_U8) has is_const=true. For `u8* const`, the
+     * into the base. For `const char*`, the TY_PTR has is_const=false
+     * and its base (TY_CHAR) has is_const=true. For `char* const`, the
      * TY_PTR itself has is_const=true. */
     bool          is_const;
     /* Phase C: function type parameters (TY_FUNC) */
@@ -297,7 +298,7 @@ typedef enum {
     ND_STATIC_ASSERT,
 
     /* statements */
-    ND_BLOCK, ND_VARDECL, ND_IF, ND_WHILE, ND_FOR,
+    ND_BLOCK, ND_VARDECL, ND_DECL_SPEC, ND_IF, ND_WHILE, ND_FOR,
     ND_RETURN, ND_EXPR_STMT, ND_BREAK, ND_CONTINUE,
 
     /* expressions */

@@ -1,11 +1,12 @@
 /* compiler: any */
-/* Feature 6: wchar_t / wint_t types */
+/* Feature 6: wchar_t / wint_t types - use without system wchar.h */
 
-extern i32 fwprintf(void* stream, const wchar_t* fmt, ...);
-extern wint_t fgetwc(void* stream);
+typedef int wchar_t;
+typedef long wint_t;
 
-i32 main() {
-    wchar_t* ws;
-    wint_t wc;
+int main() {
+    wchar_t c = 0;
+    wchar_t* ws = 0;
+    wint_t wc = 0;
     return 0;
 }

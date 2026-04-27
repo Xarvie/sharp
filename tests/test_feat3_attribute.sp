@@ -3,8 +3,8 @@
 
 extern
 __attribute__((format(printf, 1, 2)))
-i32 my_printf(const char* fmt, ...);
+int my_printf(const char* fmt, ...);
 
-i32 main() {
+int main() {
     return 0;
 }

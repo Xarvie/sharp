@@ -1,8 +1,10 @@
 /* compiler: any */
 /* §12 __restrict__ 关键字 */
-extern i32 strlen(const i8* __restrict__ s);
+#include <stddef.h>
 
-i32 main() {
-    i32* __restrict__ p = null;
+extern int strlen(const char* __restrict__ s);
+
+int main() {
+    int* __restrict__ p = NULL;
     return 0;
 }

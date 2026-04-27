@@ -1,10 +1,11 @@
 /* compiler: any */
 /* C Feature: const function pointer declarations */
 /* The generated C code must produce correct syntax like:
- *   i32 (* const fp)(i32, i32)
+ *   int (* const fp)(int, int)
  */
+#include <stddef.h>
 
-i32 main() {
-    i32 (* const fp)(i32, i32) = null;
+int main() {
+    int (* const fp)(int, int) = NULL;
     return 0;
 }

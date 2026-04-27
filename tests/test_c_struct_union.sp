@@ -23,7 +23,7 @@ typedef struct {
 } Point;
 
 /* Usage */
-i32 main() {
+int main() {
     union Value v;
     struct Node n;
     Point p;

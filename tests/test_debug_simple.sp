@@ -1,4 +1,4 @@
-i32 main() {
-    i32 x = 5;
+int main() {
+    int x = 5;
     return 0;
 }

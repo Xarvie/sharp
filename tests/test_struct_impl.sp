@@ -2,17 +2,17 @@
 /* TDD-Struct-4: struct + impl + method call */
 
 struct Vec2 {
-    i32 x;
-    i32 y;
+    int x;
+    int y;
 };
 
 impl Vec2 {
-    i32 sum() {
+    int sum() {
         return self.x + self.y;
     }
 }
 
-i32 main() {
+int main() {
     Vec2 v;
     v.x = 3;
     v.y = 4;

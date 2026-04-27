@@ -2,10 +2,10 @@
 /* C Declarator: restrict qualifier on function parameters */
 /* Expected: Parser should handle restrict keyword in parameter lists */
 
-extern char* strncpy(char* restrict dest, const char* restrict src, usize n);
-extern void* memcpy(void* restrict dest, const void* restrict src, usize n);
-extern void* memmove(void* dest, const void* src, usize n);
+extern char* strncpy(char* restrict dest, const char* restrict src, long n);
+extern void* memcpy(void* restrict dest, const void* restrict src, long n);
+extern void* memmove(void* dest, const void* src, long n);
 
-i32 main() {
+int main() {
     return 0;
 }

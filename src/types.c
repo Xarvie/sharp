@@ -17,11 +17,11 @@
 
 #include "sharp.h"
 #include "types.h"
-
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
 
 /* ===================================================================== *
  *   Module state
@@ -30,7 +30,7 @@
 static Arena* s_arena = NULL;
 
 /* Prim singletons: indexed by TypeKind. Populated lazily. */
-static Type* s_prim[TY_USIZE + 1];
+static Type* s_prim[TY_DOUBLE + 1];
 
 /* Open-addressed hash table for composite types. */
 typedef struct {
@@ -400,18 +400,15 @@ size_t ty_hash(const Type* t) {
 
 bool ty_is_primitive(const Type* t) {
     if (!t) return false;
-    return t->kind >= TY_VOID && t->kind <= TY_USIZE;
+    return t->kind >= TY_VOID && t->kind <= TY_DOUBLE;
 }
 
 bool ty_is_integer(const Type* t) {
     if (!t) return false;
     switch (t->kind) {
-        case TY_I8: case TY_I16: case TY_I32: case TY_I64:
-        case TY_U8: case TY_U16: case TY_U32: case TY_U64:
-        case TY_ISIZE: case TY_USIZE:
+        case TY_CHAR: case TY_SHORT: case TY_INT: case TY_LONG: case TY_LONGLONG:
             return true;
         case TY_BITFIELD:
-            /* Bitfield inherits integer status from its base type */
             return ty_is_integer(t->base);
         default:
             return false;
@@ -421,7 +418,7 @@ bool ty_is_integer(const Type* t) {
 bool ty_is_signed_integer(const Type* t) {
     if (!t) return false;
     switch (t->kind) {
-        case TY_I8: case TY_I16: case TY_I32: case TY_I64: case TY_ISIZE:
+        case TY_CHAR: case TY_SHORT: case TY_INT: case TY_LONG: case TY_LONGLONG:
             return true;
         default:
             return false;
@@ -429,7 +426,7 @@ bool ty_is_signed_integer(const Type* t) {
 }
 
 bool ty_is_float(const Type* t) {
-    return t && (t->kind == TY_F32 || t->kind == TY_F64);
+    return t && (t->kind == TY_FLOAT || t->kind == TY_DOUBLE);
 }
 
 bool ty_is_numeric(const Type* t) {
@@ -526,28 +523,63 @@ bool ty_assignable(const Type* to, const Type* from) {
     if (!to || !from) return true;   /* unknown → don't double-diagnose */
     if (ty_eq(to, from)) return true;
 
-    /* NULL literal has type void* — assignable to any pointer (including function pointers). */
-    if (from->kind == TY_PTR && from->base && from->base->kind == TY_VOID) {
-        if (to->kind == TY_PTR) return true;
+    /* Resolve C primitive names for compatibility checks.
+     * Handles TY_NAMED("int") ↔ TY_PRIM(TY_INT) equivalence,
+     * including pointer base types like int* ↔ TY_PTR(TY_PRIM(TY_INT)). */
+    Type to_tmp[1], from_tmp[1];
+    const Type* to_r = to;
+    const Type* from_r = from;
+
+    if (to->kind == TY_PTR && to->base && to->base->kind == TY_NAMED && to->base->name) {
+        Type* sub = ty_resolve_c_named(to->base->name);
+        if (sub) {
+            to_tmp[0] = *to;
+            to_tmp[0].base = sub;
+            to_r = to_tmp;
+        }
+    } else if (to->kind == TY_NAMED && to->name) {
+        Type* r = ty_resolve_c_named(to->name);
+        if (r) to_r = r;
     }
 
+    if (from->kind == TY_PTR && from->base && from->base->kind == TY_NAMED && from->base->name) {
+        Type* sub = ty_resolve_c_named(from->base->name);
+        if (sub) {
+            from_tmp[0] = *from;
+            from_tmp[0].base = sub;
+            from_r = from_tmp;
+        }
+    } else if (from->kind == TY_NAMED && from->name) {
+        Type* r = ty_resolve_c_named(from->name);
+        if (r) from_r = r;
+    }
+
+    if (ty_eq(to_r, from_r)) return true;
+
+    /* NULL literal has type void* — assignable to any pointer (including function pointers).
+     * Also allow int literal 0 → any pointer (C's null pointer constant rule). */
+    if (from_r->kind == TY_PTR && from_r->base && from_r->base->kind == TY_VOID) {
+        if (to_r->kind == TY_PTR) return true;
+    }
+    if (from_r->kind == TY_INT && to_r->kind == TY_PTR) return true;
+
     /* Const discard check: you cannot assign const T* to T*. */
-    if (to->kind == TY_PTR && from->kind == TY_PTR) {
+    if (to_r->kind == TY_PTR && from_r->kind == TY_PTR) {
         /* Pointee: const T* → T* is not allowed (discard const). */
-        if (from->base && to->base) {
-            if (from->base->is_const && !to->base->is_const) {
+        if (from_r->base && to_r->base) {
+            if (from_r->base->is_const && !to_r->base->is_const) {
                 return false;
             }
         }
         /* If both pointees are compatible (same kind), allow T* → const T*. */
-        if (ty_eq(from->base, to->base)) return true;
+        if (ty_eq(from_r->base, to_r->base)) return true;
     }
 
 
     /* Numeric ↔ numeric (C's usual arithmetic conversions). */
-    if (ty_is_numeric(to) && ty_is_numeric(from)) return true;
-    if (to->kind == TY_BOOL && ty_is_integer(from)) return true;
-    if (ty_is_integer(to) && from->kind == TY_BOOL) return true;
+    if (ty_is_numeric(to_r) && ty_is_numeric(from_r)) return true;
+    if (to_r->kind == TY_BOOL && ty_is_integer(from_r)) return true;
+    if (ty_is_integer(to_r) && from_r->kind == TY_BOOL) return true;
 
     return false;
 }
@@ -558,27 +590,26 @@ bool ty_assignable(const Type* to, const Type* from) {
 
 Type* ty_resolve_c_named(const char* name) {
     if (!name) return NULL;
-    /* Exact matches for the raw spellings produced by parse_c_type_raw. */
-    if (!strcmp(name, "int"))               return ty_prim(TY_I32);
-    if (!strcmp(name, "unsigned int"))      return ty_prim(TY_U32);
-    if (!strcmp(name, "long"))              return ty_prim(TY_I64);
-    if (!strcmp(name, "unsigned long"))     return ty_prim(TY_U64);
-    if (!strcmp(name, "long long"))         return ty_prim(TY_I64);
-    if (!strcmp(name, "unsigned long long"))return ty_prim(TY_U64);
-    if (!strcmp(name, "short"))             return ty_prim(TY_I16);
-    if (!strcmp(name, "unsigned short"))    return ty_prim(TY_U16);
-    if (!strcmp(name, "char"))              return ty_prim(TY_I8);
-    if (!strcmp(name, "unsigned char"))     return ty_prim(TY_U8);
-    if (!strcmp(name, "signed int"))        return ty_prim(TY_I32);
-    if (!strcmp(name, "signed long"))       return ty_prim(TY_I64);
-    if (!strcmp(name, "signed long long"))  return ty_prim(TY_I64);
-    if (!strcmp(name, "signed short"))      return ty_prim(TY_I16);
-    if (!strcmp(name, "signed char"))       return ty_prim(TY_I8);
-    if (!strcmp(name, "float"))             return ty_prim(TY_F32);
-    if (!strcmp(name, "double"))            return ty_prim(TY_F64);
-    if (!strcmp(name, "__int64"))           return ty_prim(TY_I64);
-    if (!strcmp(name, "unsigned __int64"))  return ty_prim(TY_U64);
-    if (!strcmp(name, "signed __int64"))    return ty_prim(TY_I64);
+    if (!strcmp(name, "int"))               return ty_prim(TY_INT);
+    if (!strcmp(name, "unsigned int"))      return ty_prim(TY_LONG);
+    if (!strcmp(name, "long"))              return ty_prim(TY_LONG);
+    if (!strcmp(name, "unsigned long"))      return ty_prim(TY_LONG);
+    if (!strcmp(name, "long long"))         return ty_prim(TY_LONGLONG);
+    if (!strcmp(name, "unsigned long long"))return ty_prim(TY_LONGLONG);
+    if (!strcmp(name, "short"))             return ty_prim(TY_SHORT);
+    if (!strcmp(name, "unsigned short"))     return ty_prim(TY_SHORT);
+    if (!strcmp(name, "char"))              return ty_prim(TY_CHAR);
+    if (!strcmp(name, "unsigned char"))     return ty_prim(TY_CHAR);
+    if (!strcmp(name, "signed int"))        return ty_prim(TY_INT);
+    if (!strcmp(name, "signed long"))       return ty_prim(TY_LONG);
+    if (!strcmp(name, "signed long long"))  return ty_prim(TY_LONGLONG);
+    if (!strcmp(name, "signed short"))      return ty_prim(TY_SHORT);
+    if (!strcmp(name, "signed char"))       return ty_prim(TY_CHAR);
+    if (!strcmp(name, "float"))             return ty_prim(TY_FLOAT);
+    if (!strcmp(name, "double"))            return ty_prim(TY_DOUBLE);
+    if (!strcmp(name, "__int64"))           return ty_prim(TY_LONGLONG);
+    if (!strcmp(name, "unsigned __int64"))   return ty_prim(TY_LONGLONG);
+    if (!strcmp(name, "signed __int64"))    return ty_prim(TY_LONGLONG);
     if (!strcmp(name, "_Bool"))             return ty_prim(TY_BOOL);
     return NULL;
 }
@@ -613,53 +644,33 @@ static void render_into(StrBuf* sb, const Type* t) {
             if (t->is_const) sb_puts(sb, "const bool");
             else             sb_puts(sb, "bool");
             return;
-        case TY_I8:
-            if (t->is_const) sb_puts(sb, "const i8");
-            else             sb_puts(sb, "i8");
+        case TY_CHAR:
+            if (t->is_const) sb_puts(sb, "const char");
+            else             sb_puts(sb, "char");
             return;
-        case TY_I16:
-            if (t->is_const) sb_puts(sb, "const i16");
-            else             sb_puts(sb, "i16");
+        case TY_SHORT:
+            if (t->is_const) sb_puts(sb, "const short");
+            else             sb_puts(sb, "short");
             return;
-        case TY_I32:
-            if (t->is_const) sb_puts(sb, "const i32");
-            else             sb_puts(sb, "i32");
+        case TY_INT:
+            if (t->is_const) sb_puts(sb, "const int");
+            else             sb_puts(sb, "int");
             return;
-        case TY_I64:
-            if (t->is_const) sb_puts(sb, "const i64");
-            else             sb_puts(sb, "i64");
+        case TY_LONG:
+            if (t->is_const) sb_puts(sb, "const long");
+            else             sb_puts(sb, "long");
             return;
-        case TY_U8:
-            if (t->is_const) sb_puts(sb, "const u8");
-            else             sb_puts(sb, "u8");
+        case TY_LONGLONG:
+            if (t->is_const) sb_puts(sb, "const long long");
+            else             sb_puts(sb, "long long");
             return;
-        case TY_U16:
-            if (t->is_const) sb_puts(sb, "const u16");
-            else             sb_puts(sb, "u16");
+        case TY_FLOAT:
+            if (t->is_const) sb_puts(sb, "const float");
+            else             sb_puts(sb, "float");
             return;
-        case TY_U32:
-            if (t->is_const) sb_puts(sb, "const u32");
-            else             sb_puts(sb, "u32");
-            return;
-        case TY_U64:
-            if (t->is_const) sb_puts(sb, "const u64");
-            else             sb_puts(sb, "u64");
-            return;
-        case TY_F32:
-            if (t->is_const) sb_puts(sb, "const f32");
-            else             sb_puts(sb, "f32");
-            return;
-        case TY_F64:
-            if (t->is_const) sb_puts(sb, "const f64");
-            else             sb_puts(sb, "f64");
-            return;
-        case TY_ISIZE:
-            if (t->is_const) sb_puts(sb, "const isize");
-            else             sb_puts(sb, "isize");
-            return;
-        case TY_USIZE:
-            if (t->is_const) sb_puts(sb, "const usize");
-            else             sb_puts(sb, "usize");
+        case TY_DOUBLE:
+            if (t->is_const) sb_puts(sb, "const double");
+            else             sb_puts(sb, "double");
             return;
         case TY_PTR:
             render_into(sb, t->base);
@@ -712,18 +723,13 @@ static void mangle_into(StrBuf* sb, const Type* t) {
     switch (t->kind) {
         case TY_VOID:  sb_puts(sb, cp); sb_puts(sb, "void");   return;
         case TY_BOOL:  sb_puts(sb, cp); sb_puts(sb, "bool");   return;
-        case TY_I8:    sb_puts(sb, cp); sb_puts(sb, "i8");     return;
-        case TY_I16:   sb_puts(sb, cp); sb_puts(sb, "i16");    return;
-        case TY_I32:   sb_puts(sb, cp); sb_puts(sb, "i32");    return;
-        case TY_I64:   sb_puts(sb, cp); sb_puts(sb, "i64");    return;
-        case TY_U8:    sb_puts(sb, cp); sb_puts(sb, "u8");     return;
-        case TY_U16:   sb_puts(sb, cp); sb_puts(sb, "u16");    return;
-        case TY_U32:   sb_puts(sb, cp); sb_puts(sb, "u32");    return;
-        case TY_U64:   sb_puts(sb, cp); sb_puts(sb, "u64");    return;
-        case TY_F32:   sb_puts(sb, cp); sb_puts(sb, "f32");    return;
-        case TY_F64:   sb_puts(sb, cp); sb_puts(sb, "f64");    return;
-        case TY_ISIZE: sb_puts(sb, cp); sb_puts(sb, "isize");  return;
-        case TY_USIZE: sb_puts(sb, cp); sb_puts(sb, "usize");  return;
+        case TY_CHAR:  sb_puts(sb, cp); sb_puts(sb, "char");    return;
+        case TY_SHORT: sb_puts(sb, cp); sb_puts(sb, "short");   return;
+        case TY_INT:   sb_puts(sb, cp); sb_puts(sb, "int");     return;
+        case TY_LONG:  sb_puts(sb, cp); sb_puts(sb, "long");    return;
+        case TY_LONGLONG: sb_puts(sb, cp); sb_puts(sb, "ll");   return;
+        case TY_FLOAT: sb_puts(sb, cp); sb_puts(sb, "float");   return;
+        case TY_DOUBLE: sb_puts(sb, cp); sb_puts(sb, "double"); return;
         case TY_PTR:
             if (t->is_const) { sb_puts(sb, "cp_"); mangle_into(sb, t->base); }
             else               { sb_puts(sb, "p_");  mangle_into(sb, t->base); }

@@ -3,8 +3,8 @@
 
 #define _CRTIMP __declspec(dllimport)
 
-_CRTIMP i32 printf(const char* fmt, ...);
+_CRTIMP int printf(const char* fmt, ...);
 
-i32 main() {
+int main() {
     return 0;
 }

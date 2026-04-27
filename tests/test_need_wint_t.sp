@@ -4,6 +4,6 @@
  * 直接移除 typedef 以避免类型冲突。
  */
 
-i32 main() {
+int main() {
     return 0;
 }

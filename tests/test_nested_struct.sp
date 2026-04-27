@@ -3,13 +3,13 @@
 /* Expected: Parser should handle struct defined inside another struct */
 
 struct Outer {
-    i32 x;
+    int x;
     struct Inner {
-        i32 a;
-        i32 b;
+        int a;
+        int b;
     } inner;
 }
 
-i32 main() {
+int main() {
     return 0;
 }

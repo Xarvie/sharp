@@ -3,8 +3,8 @@
 /* NOTE: The core feature being tested is that `extern T name[];` is
  * recognized as an extern declaration with pointer type. */
 
-i32 extern_array_0 = 42;
+int extern_array_0 = 42;
 
-i32 main() {
+int main() {
     return extern_array_0 - 42;
 }

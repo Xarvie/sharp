@@ -300,7 +300,7 @@ Type* type_bitfield(Arena** a, Type* base, int width)        { (void)a; return t
 Type* type_array(Arena** a, Type* elem, int size)            { (void)a; return ty_array(elem, size); }
 
 bool type_is_primitive(TypeKind k) {
-    return (k >= TY_VOID && k <= TY_USIZE);
+    return (k >= TY_VOID && k <= TY_DOUBLE);
 }
 
 bool type_is_pointerlike(Type* t) {

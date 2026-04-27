@@ -1,7 +1,8 @@
 /* compiler: any */
 /* TDD-Expr-4: bool literals and logic operators */
+#include <stdbool.h>
 
-i32 main() {
+int main() {
     bool t = true;
     bool f = false;
     if (t && !f) {

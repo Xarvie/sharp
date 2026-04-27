@@ -4,8 +4,8 @@
  * 测试重点是 INFINITY 在生成的 C 代码中可用。
  */
 
-i32 main() {
-    f64 inf_val = INFINITY;
+int main() {
+    double inf_val = INFINITY;
     if (inf_val > 1.0) {
         return 42;
     }

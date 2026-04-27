@@ -1,5 +1,5 @@
-extern i32 puts(const u8* s);
-i32 main() {
-    const u8* msg = "hello const";
+extern int puts(const char* s);
+int main() {
+    const char* msg = "hello const";
     return 0;
 }

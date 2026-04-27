@@ -11,8 +11,8 @@ impl Box<T> {
     }
 }
 
-i32 main() {
-    Box<i32> b;
+int main() {
+    Box<int> b;
     b.value = 42;
     return b.get(); /* 42 */
 }

@@ -2,9 +2,9 @@
 /* C Feature: Function pointer parameters in extern declarations */
 /* Expected: Parser should handle function pointer types as function parameters */
 
-extern void qsort(void* base, usize nmemb, usize size,
-                  i32 (*compar)(const void*, const void*));
+extern void qsort(void* base, long nmemb, long size,
+                  int (*compar)(const void*, const void*));
 
-i32 main() {
+int main() {
     return 0;
 }

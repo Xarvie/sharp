@@ -8,6 +8,6 @@
 #define HAS_STDIO 0
 #endif
 
-i32 main() {
+int main() {
     return HAS_STDIO;
 }

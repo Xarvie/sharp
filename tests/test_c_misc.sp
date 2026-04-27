@@ -8,7 +8,7 @@ typedef int errno_t;
 extern errno_t clearerr_s(void* stream);
 
 /* Usage */
-i32 main() {
+int main() {
     errno_t err = 0;
     return 0;
 }

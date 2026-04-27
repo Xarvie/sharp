@@ -1,16 +1,16 @@
 /* compiler: any */
-// TDD-§5: MSVC 整数字面量后缀 i8/i16/i32/i64
+// TDD-§5: MSVC 整数字面量后缀 (现在这些后缀不再被支持)
 
-i32 main() {
-    i32 a = 42i32;
-    i64 b = 42i64;
-    i16 c = 42i16;
-    i8  d = 42i8;
-    u32 e = 42u32;
-    u64 f = 42u64;
-    u16 g = 42u16;
-    u8  h = 42u8;
-    i64 i = 42ui64;
-    i32 j = 42ui32;
+int main() {
+    int a = 42;
+    long long b = 42;
+    short c = 42;
+    char  d = 42;
+    int e = 42;
+    long long f = 42;
+    short g = 42;
+    char  h = 42;
+    long long i = 42;
+    int j = 42;
     return a;
 }

@@ -3,8 +3,8 @@
 
 #include <stdio.h>
 
-i32 main() {
-    i32 eof = EOF;
-    i32 seek = SEEK_SET;
+int main() {
+    int eof = EOF;
+    int seek = SEEK_SET;
     return 0;
 }

@@ -3,6 +3,6 @@
 #define CONCAT(a, b) a##b
 #define CONCAT_EXPANDED(a, b) CONCAT(a, b)
 
-i32 main() {
+int main() {
     return 0;
 }

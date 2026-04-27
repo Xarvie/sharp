@@ -4,6 +4,6 @@ extern "C++" {
     void cpp_function();
 }
 
-i32 main() {
+int main() {
     return 0;
 }

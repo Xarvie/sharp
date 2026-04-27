@@ -4,11 +4,11 @@
 
 struct _iobuf {
     char* _ptr;
-    i32 _cnt;
+    int _cnt;
     char* __declspec(nothrow) _base;
-    i32 _flag;
+    int _flag;
 }
 
-i32 main() {
+int main() {
     return 0;
 }
