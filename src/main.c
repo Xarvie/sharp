@@ -370,6 +370,13 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         cpp_define(cpp, "__CRT_INLINE",              "inline");
         cpp_define(cpp, "_CRT_INLINE",               "inline");
         cpp_define(cpp, "__MINGW_LSTR(x,y)",         "");
+
+        /* MinGW GCC builtins — treat va_* as empty/void */
+        cpp_define(cpp, "__builtin_va_list",         "void*");
+        cpp_define(cpp, "__builtin_va_start(ap,x)",  "");
+        cpp_define(cpp, "__builtin_va_end(ap)",      "");
+        cpp_define(cpp, "__builtin_va_arg(ap,t)",    "(t)0");
+        cpp_define(cpp, "__gnuc_va_list",            "void*");
     }
 }
 
