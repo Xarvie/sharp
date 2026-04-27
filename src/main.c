@@ -357,6 +357,19 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         cpp_define(cpp, "_CRT_HYBRIDPATCHABLE__", "");
         cpp_define(cpp, "_SECURECRT_FILL_BUFFER", "");
         cpp_define(cpp, "_CRT_JIT_ENTRY",   "");
+
+        /* MinGW compatibility */
+        cpp_define(cpp, "__MINGW_ATTRIB_NONNULL(x)", "");
+        cpp_define(cpp, "__MINGW_ATTRIB_NORETURN",   "");
+        cpp_define(cpp, "__MINGW_NOTHROW",           "");
+        cpp_define(cpp, "__MINGW_NOTHROW_NONNULL(x)","");
+        cpp_define(cpp, "__MINGW_ATTRIB_PURE",       "");
+        cpp_define(cpp, "__MINGW_ATTRIB_CONST",      "");
+        cpp_define(cpp, "__MINGW_ATTRIB_MALLOC",     "");
+        cpp_define(cpp, "__CRTCONST",                "");
+        cpp_define(cpp, "__CRT_INLINE",              "inline");
+        cpp_define(cpp, "_CRT_INLINE",               "inline");
+        cpp_define(cpp, "__MINGW_LSTR(x,y)",         "");
     }
 }
 
