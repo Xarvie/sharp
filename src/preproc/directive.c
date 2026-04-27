@@ -135,6 +135,12 @@ static void install_builtins(CppState *st, CppLang lang) {
     install_builtin_num(mt, it, "__STDC_HOSTED__",    1);
     install_builtin_num(mt, it, "__STDC_VERSION__",   201112L);
 
+    /* GCC compatibility macros — allows MinGW headers to work.
+     * Sharp aims for C11 compatibility, so we expose GCC-like builtins. */
+    install_builtin_num(mt, it, "__GNUC__",           4);
+    install_builtin_num(mt, it, "__GNUC_MINOR__",     9);
+    install_builtin_num(mt, it, "__GNUC_PATCHLEVEL__", 0);
+
     /* __DATE__ and __TIME__ */
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
@@ -153,6 +159,14 @@ static void install_builtins(CppState *st, CppLang lang) {
         install_builtin_num(mt, it, "__SHARP__", 1);
         install_builtin_str(mt, it, "__SHARP_VERSION__", "\"0.4\"");
     }
+
+    /* Platform target macros (Windows) */
+#ifdef _WIN32
+    install_builtin_num(mt, it, "_WIN32", 1);
+#endif
+#ifdef _WIN64
+    install_builtin_num(mt, it, "_WIN64", 1);
+#endif
 
     /* Pseudo-macros __FILE__ and __LINE__ are handled dynamically
      * in the token-emission path. */

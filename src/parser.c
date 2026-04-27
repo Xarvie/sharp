@@ -1831,10 +1831,13 @@ static Node* parse_struct(P* p) {
     while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
         int line = lex_peek(p->lex).line;
 
-        /* Skip __declspec on field */
+        /* Skip __declspec and __attribute__ on field */
         const char* field_declspec = NULL;
         if (lex_peek(p->lex).kind == TK___DECLSPEC) {
             field_declspec = parse_declspec(p);
+        }
+        while (lex_peek(p->lex).kind == TK___ATTRIBUTE__) {
+            skip_attribute(p);
         }
 
         /* Check for nested struct/union definition:
@@ -1868,6 +1871,9 @@ static Node* parse_struct(P* p) {
                     const char* fd = NULL;
                     if (lex_peek(p->lex).kind == TK___DECLSPEC) {
                         fd = parse_declspec(p);
+                    }
+                    while (lex_peek(p->lex).kind == TK___ATTRIBUTE__) {
+                        skip_attribute(p);
                     }
 
                     /* Try nested anonymous struct/union first */
