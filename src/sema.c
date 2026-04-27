@@ -922,14 +922,28 @@ static Type* tc_expr(TC* tc, Node* e) {
                               type_str(tc, lt), type_str(tc, rt));
                     return NULL;
                 }
-                /* Pick the "wider" of the two for the result — matches C's
-                 * usual arithmetic conversions for the subset we care about. */
+                /* C usual arithmetic conversions — pick the wider type. */
                 if (ty_is_float(lt_r) || ty_is_float(rt_r)) {
                     if (ty_kind(lt_r) == TY_DOUBLE || ty_kind(rt_r) == TY_DOUBLE)
                         return tc_ty(tc, TY_DOUBLE);
                     return tc_ty(tc, TY_FLOAT);
                 }
-                return lt;   /* approximation good enough for phase 8 */
+                /* Integer promotion: rank is char < short < int < long < long long */
+                static const TypeKind int_rank[] = {
+                    TY_BOOL, TY_CHAR, TY_SHORT, TY_INT, TY_LONG, TY_LONGLONG
+                };
+                int li = -1, ri = -1;
+                for (int i = 0; i < 6; i++) {
+                    if (lt_r->kind == int_rank[i]) li = i;
+                    if (rt_r->kind == int_rank[i]) ri = i;
+                }
+                if (li >= 0 && ri >= 0) {
+                    TypeKind wider = (li >= ri) ? lt_r->kind : rt_r->kind;
+                    return tc_ty(tc, wider);
+                }
+                /* Fallback: one operand is bitfield or otherwise non-standard —
+                 * pick the left. */
+                return lt;
             }
             return lt ? lt : rt;
         }

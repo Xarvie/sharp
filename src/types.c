@@ -436,7 +436,6 @@ bool ty_is_numeric(const Type* t) {
 bool ty_is_bool(const Type* t)         { return t && t->kind == TY_BOOL; }
 bool ty_is_void(const Type* t)         { return t && t->kind == TY_VOID; }
 bool ty_is_ptr (const Type* t)         { return t && t->kind == TY_PTR;  }
-bool ty_is_ref (const Type* t)         { (void)t; return false; }  /* removed */
 bool ty_is_named(const Type* t)        { return t && t->kind == TY_NAMED; }
 bool ty_is_pointer_like(const Type* t) {
     return t && t->kind == TY_PTR;
