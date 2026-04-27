@@ -242,7 +242,8 @@ typedef enum {
     TY_PTR,      /* base pointer */
     TY_NAMED,    /* user-declared struct, resolved by name */
     TY_FUNC,     /* function type: ret(params...) — for function pointers */
-    TY_BITFIELD  /* bitfield: base type with width */
+    TY_BITFIELD, /* bitfield: base type with width */
+    TY_ARRAY     /* C array: base element type + compile-time size */
 } TypeKind;
 
 struct Type {
@@ -266,6 +267,8 @@ struct Type {
     bool          func_variadic;
     /* Phase C: bitfield width (TY_BITFIELD) */
     int           bit_width;
+    /* C array size (TY_ARRAY) */
+    int           array_size;
 };
 
 Type* type_prim  (Arena** a, TypeKind k);
@@ -276,6 +279,7 @@ Type* type_const (Arena** a, Type* base);        /* const-qualified type */
 /* Phase C: function type and bitfield constructors */
 Type* type_func  (Arena** a, Type* ret, Type** params, int nparams, bool variadic);
 Type* type_bitfield(Arena** a, Type* base, int width);
+Type* type_array (Arena** a, Type* elem, int size);
 
 bool  type_is_primitive (TypeKind k);
 bool  type_is_pointerlike(Type* t);   /* TY_PTR only */

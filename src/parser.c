@@ -267,6 +267,11 @@ static bool is_type_start(TokKind k) {
 /* Parse an optional calling-convention keyword.
  * Returns the canonical string ("__cdecl", "__stdcall", "__fastcall",
  * "__unaligned") or NULL if the next token is not a calling convention. */
+/* Forward declarations */
+static Type* parse_type(P* p);
+static Type* parse_declarator(P* p, Type* base, const char** out_name);
+static Node* try_parse_nested_anon_struct_union(P* p, int fline);
+
 static const char* parse_calling_conv(P* p) {
     Tok t = lex_peek(p->lex);
     switch (t.kind) {
@@ -274,8 +279,96 @@ static const char* parse_calling_conv(P* p) {
         case TK___STDCALL:   lex_next(p->lex); return "__stdcall";
         case TK___FASTCALL:  lex_next(p->lex); return "__fastcall";
         case TK___UNALIGNED: lex_next(p->lex); return "__unaligned";
+        case TK_IDENT:
+            /* Also recognize common Windows calling convention macros */
+            if (lex_ident_is(t, "WINAPI") || lex_ident_is(t, "APIENTRY") ||
+                lex_ident_is(t, "CALLBACK") || lex_ident_is(t, "NTAPI") ||
+                lex_ident_is(t, "PASCAL") || lex_ident_is(t, "CDECL") ||
+                lex_ident_is(t, "STDCALL") || lex_ident_is(t, "FASTCALL") ||
+                lex_ident_is(t, "WINBASEAPI") || lex_ident_is(t, "WINADVAPI") ||
+                lex_ident_is(t, "WINUSERAPI") || lex_ident_is(t, "WINGDIAPI") ||
+                lex_ident_is(t, "WINCONAPI") || lex_ident_is(t, "_CRTIMP") || lex_ident_is(t, "_CRTIMP1") ||
+                lex_ident_is(t, "__MINGW_NOTHROW") || lex_ident_is(t, "__MINGW_ATTRIB_NORETURN")) {
+                lex_next(p->lex);
+                return "__stdcall";
+            }
+            return NULL;
         default: return NULL;
     }
+}
+
+/* Try to parse a nested anonymous struct/union field.
+ * Returns NULL if not a nested anonymous struct/union.
+ * Returns a field node if successfully parsed. */
+static Node* try_parse_nested_anon_struct_union(P* p, int fline) {
+    TokKind k = lex_peek(p->lex).kind;
+    if (k != TK_STRUCT && k != TK_UNION) return NULL;
+
+    bool is_union = (k == TK_UNION);
+    LexerState saved = lex_save(p->lex);
+    lex_next(p->lex); /* consume 'struct'/'union' */
+
+    if (lex_peek(p->lex).kind != TK_LBRACE) {
+        lex_restore(p->lex, saved);
+        return NULL;
+    }
+
+    lex_next(p->lex); /* consume '{' */
+    NodeVec nested = {0};
+    while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
+        int nfline = lex_peek(p->lex).line;
+
+        /* Recursively handle nested anonymous struct/union */
+        Node* nested_field = try_parse_nested_anon_struct_union(p, nfline);
+        if (nested_field) {
+            nv_push(&nested, nested_field);
+            continue;
+        }
+
+        Type* nbase = parse_type(p);
+        for (;;) {
+            const char* nfname = NULL;
+            Type* nfty = parse_declarator(p, nbase, &nfname);
+            int nbw = 0;
+            if (accept(p, TK_COLON)) {
+                Tok w = expect(p, TK_INT, "expected bitfield width");
+                nbw = (int)w.ival;
+                nfty = type_bitfield(p->arena, nfty, nbw);
+            }
+            if (!nfname) {
+                Tok e = lex_peek(p->lex);
+                errtok(p, &e, "expected field name");
+                expect(p, TK_SEMI, "expected ';' after field");
+                break;
+            }
+            Node* nn = mk(p, ND_FIELD, nfline);
+            nn->declared_type = nfty;
+            nn->name = nfname;
+            nn->bit_width = nbw;
+            nv_push(&nested, nn);
+            if (accept(p, TK_COMMA)) continue;
+            expect(p, TK_SEMI, "expected ';' after field");
+            break;
+        }
+    }
+    expect(p, TK_RBRACE, "expected '}' to close nested struct/union");
+
+    const char* nest_fname = NULL;
+    if (lex_peek(p->lex).kind == TK_IDENT) {
+        Tok ft = lex_next(p->lex);
+        nest_fname = arena_strndup(p->arena, ft.start, ft.len);
+    }
+    expect(p, TK_SEMI, "expected ';' after field");
+
+    static int nested_counter = 0;
+    char nested_name[64];
+    snprintf(nested_name, sizeof(nested_name), "__nested_%s_%d", is_union ? "union" : "struct", nested_counter++);
+    Type* nested_type = type_named(p->arena, arena_strndup(p->arena, nested_name, (int)strlen(nested_name)));
+    Node* nf = mk(p, is_union ? ND_ANON_UNION : ND_ANON_STRUCT, fline);
+    nf->declared_type = nested_type;
+    nf->name = nest_fname ? nest_fname : "";
+    nf->fields = nv_freeze(p, &nested, &nf->nfields);
+    return nf;
 }
 
 static Type* parse_type(P* p) {
@@ -296,6 +389,9 @@ static Type* parse_type(P* p) {
             lex_next(p->lex);
         } else if (k == TK___ATTRIBUTE__) {
             skip_attribute(p);
+        } else if (k == TK_IDENT && lex_ident_is(lex_peek(p->lex), "CONST")) {
+            /* Windows headers use CONST (uppercase) as alias for const */
+            lex_next(p->lex);
         } else {
             break;
         }
@@ -488,6 +584,23 @@ static Type* parse_declarator_internal(P* p, Type* base, const char** out_name, 
     *out_name = NULL;
 
     /* ----- pointer prefix ----- */
+    /* Skip calling convention that appears before '*':
+     * `void (__cdecl *name)(void *)` — skip `__cdecl` after '(' */
+    for (;;) {
+        TokKind k = lex_peek(p->lex).kind;
+        if (k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL) {
+            lex_next(p->lex);
+        } else if (k == TK___ATTRIBUTE__) {
+            skip_attribute(p);
+        } else if (k == TK___UNALIGNED) {
+            lex_next(p->lex);
+        } else if (k == TK_IDENT && lex_ident_is(lex_peek(p->lex), "__unaligned")) {
+            lex_next(p->lex);
+        } else {
+            break;
+        }
+    }
+
     while (accept(p, TK_STAR)) {
         base = type_ptr(p->arena, base);
         /* Optional const/volatile/restrict after each '*' */
@@ -519,6 +632,29 @@ static Type* parse_declarator_internal(P* p, Type* base, const char** out_name, 
         LexerState saved = lex_save(p->lex);
         lex_next(p->lex); /* consume '(' */
 
+        /* Skip calling convention that appears after '(' in function pointer params:
+         * `void (__cdecl *name)(void *)` — skip `__cdecl` before parsing declarator */
+        for (;;) {
+            TokKind k = lex_peek(p->lex).kind;
+            if (k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL) {
+                lex_next(p->lex);
+            } else if (k == TK_IDENT) {
+                /* Also skip Windows calling convention macros */
+                Tok ident = lex_peek(p->lex);
+                if (lex_ident_is(ident, "WINAPI") || lex_ident_is(ident, "APIENTRY") ||
+                    lex_ident_is(ident, "CALLBACK") || lex_ident_is(ident, "NTAPI") ||
+                    lex_ident_is(ident, "PASCAL") || lex_ident_is(ident, "CDECL") ||
+                    lex_ident_is(ident, "STDCALL") || lex_ident_is(ident, "FASTCALL") ||
+                    lex_ident_is(ident, "WINBASEAPI") || lex_ident_is(ident, "WINADVAPI")) {
+                    lex_next(p->lex);
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
         /* Try to parse an inner declarator. If it fails and we're abstract,
          * it might be a parameter list. */
         int saved_err = g_error_count;
@@ -538,14 +674,15 @@ static Type* parse_declarator_internal(P* p, Type* base, const char** out_name, 
             g_error_count = saved_err;
             /* Don't consume '(', let the suffix parser handle it */
         }
-    } else if (t.kind == TK_IDENT && !abstract) {
-        /* Named declarator */
+    } else if (t.kind == TK_IDENT) {
+        /* Named declarator — consume the identifier.
+         * In non-abstract mode, save it as the declarator name.
+         * In abstract mode (function params), we still consume the identifier
+         * to handle `DWORD CtrlType` style parameters. */
         lex_next(p->lex);
-        *out_name = arena_strndup(p->arena, t.start, t.len);
-    } else if (t.kind == TK_IDENT && abstract) {
-        /* In abstract declarator, an identifier could be a type name */
-        /* Check if it looks like a type (already handled by base) */
-        /* For pure abstract, we don't consume identifiers here */
+        if (!abstract) {
+            *out_name = arena_strndup(p->arena, t.start, t.len);
+        }
     }
 
     /* Skip __attribute__ that appears after the declarator name.
@@ -1502,7 +1639,7 @@ static Node* parse_stmt(P* p) {
             int line = t.line;
             const char* start = t.start;
             lex_next(p->lex); /* consume '__asm__' */
-            if (lex_peek(p->lex).kind == TK_IDENT && lex_ident_is(lex_peek(p->lex), "volatile")) {
+            if (lex_peek(p->lex).kind == TK_IDENT && (lex_ident_is(lex_peek(p->lex), "volatile") || lex_ident_is(lex_peek(p->lex), "__volatile__"))) {
                 lex_next(p->lex);
             }
             /* Skip everything until matching ');' or ';' */
@@ -1680,28 +1817,51 @@ static Node* parse_struct(P* p) {
                 lex_next(p->lex); /* consume '{' */
                 NodeVec nested_fields = {0};
                 while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
-                    /* Recursively parse fields (simplified: type + name + ;) */
+                    /* Recursively parse fields */
                     int fline = lex_peek(p->lex).line;
                     const char* fd = NULL;
                     if (lex_peek(p->lex).kind == TK___DECLSPEC) {
                         fd = parse_declspec(p);
                     }
-                    Type* fbase = parse_decl_specifiers(p);
-                    const char* fn = NULL;
-                    Type* fty = parse_declarator(p, fbase, &fn);
-                    int bw = 0;
-                    if (accept(p, TK_COLON)) {
-                        Tok w = expect(p, TK_INT, "expected bitfield width");
-                        bw = (int)w.ival;
-                        fty = type_bitfield(p->arena, fty, bw);
+
+                    /* Try nested anonymous struct/union first */
+                    Node* nnf = try_parse_nested_anon_struct_union(p, fline);
+                    if (nnf) {
+                        nv_push(&nested_fields, nnf);
+                        continue;
                     }
-                    expect(p, TK_SEMI, "expected ';' after field");
-                    Node* nf = mk(p, ND_FIELD, fline);
-                    nf->declared_type = fty;
-                    nf->name = fn ? fn : "";
-                    nf->bit_width = bw;
-                    nf->declspec = fd;
-                    nv_push(&nested_fields, nf);
+
+                    Type* fbase = parse_decl_specifiers(p);
+
+                    /* Handle comma-separated fields */
+                    for (;;) {
+                        const char* fn = NULL;
+                        Type* fty = parse_declarator(p, fbase, &fn);
+                        int bw = 0;
+                        if (accept(p, TK_COLON)) {
+                            Tok w = expect(p, TK_INT, "expected bitfield width");
+                            bw = (int)w.ival;
+                            fty = type_bitfield(p->arena, fty, bw);
+                        }
+                        if (accept(p, TK_COMMA)) {
+                            /* Continue with same base type */
+                            Node* nf = mk(p, ND_FIELD, fline);
+                            nf->declared_type = fty;
+                            nf->name = fn ? fn : "";
+                            nf->bit_width = bw;
+                            nf->declspec = fd;
+                            nv_push(&nested_fields, nf);
+                            continue;
+                        }
+                        expect(p, TK_SEMI, "expected ';' after field");
+                        Node* nf = mk(p, ND_FIELD, fline);
+                        nf->declared_type = fty;
+                        nf->name = fn ? fn : "";
+                        nf->bit_width = bw;
+                        nf->declspec = fd;
+                        nv_push(&nested_fields, nf);
+                        break;
+                    }
                 }
                 expect(p, TK_RBRACE, "expected '}' to close nested struct/union");
 
@@ -1782,39 +1942,49 @@ static Node* parse_struct(P* p) {
 
         /* Parse field using declarator system */
         Type* base = parse_decl_specifiers(p);
-        const char* fname = NULL;
-        Type* fty = parse_declarator(p, base, &fname);
 
-        /* Check for bitfield */
-        int bit_width = 0;
-        if (accept(p, TK_COLON)) {
-            Tok w = expect(p, TK_INT, "expected bitfield width");
-            bit_width = (int)w.ival;
-            fty = type_bitfield(p->arena, fty, bit_width);
-        }
+        /* Handle comma-separated fields: `type a, b, c;` */
+        for (;;) {
+            const char* fname = NULL;
+            Type* fty = parse_declarator(p, base, &fname);
 
-        expect(p, TK_SEMI, "expected ';' after field");
-
-        /* Determine node kind */
-        Node* f;
-        if (!fname) {
-            /* Anonymous struct/union field */
-            if (is_struct_or_union_type(fty)) {
-                bool is_union = (fty->name && strncmp(fty->name, "union ", 6) == 0);
-                f = mk(p, is_union ? ND_ANON_UNION : ND_ANON_STRUCT, line);
-            } else {
-                /* Anonymous non-struct field — error, but create ND_FIELD for recovery */
-                f = mk(p, ND_FIELD, line);
-                f->name = "";
+            /* Check for bitfield */
+            int bit_width = 0;
+            if (accept(p, TK_COLON)) {
+                Tok w = expect(p, TK_INT, "expected bitfield width");
+                bit_width = (int)w.ival;
+                fty = type_bitfield(p->arena, fty, bit_width);
             }
-        } else {
-            f = mk(p, ND_FIELD, line);
-            f->name = fname;
+
+            /* Determine node kind */
+            Node* f;
+            if (!fname) {
+                /* Anonymous struct/union field */
+                if (is_struct_or_union_type(fty)) {
+                    bool is_union = (fty->name && strncmp(fty->name, "union ", 6) == 0);
+                    f = mk(p, is_union ? ND_ANON_UNION : ND_ANON_STRUCT, line);
+                } else {
+                    /* Anonymous non-struct field — error, but create ND_FIELD for recovery */
+                    f = mk(p, ND_FIELD, line);
+                    f->name = "";
+                }
+            } else {
+                f = mk(p, ND_FIELD, line);
+                f->name = fname;
+            }
+            f->declared_type = fty;
+            f->bit_width = bit_width;
+            f->declspec = field_declspec;
+            nv_push(&fields, f);
+
+            /* If comma, continue to next field name with same base type */
+            if (accept(p, TK_COMMA)) {
+                continue;
+            }
+            /* Otherwise expect ';' and break */
+            expect(p, TK_SEMI, "expected ';' after field");
+            break;
         }
-        f->declared_type = fty;
-        f->bit_width = bit_width;
-        f->declspec = field_declspec;
-        nv_push(&fields, f);
     }
     expect(p, TK_RBRACE, "expected '}' to close struct");
     accept(p, TK_SEMI); /* optional ';' after struct body */
@@ -2116,18 +2286,163 @@ Node* parse_program(Lexer* lx, Arena** arena) {
     NodeVec decls = {0};
     while (lex_peek(p->lex).kind != TK_EOF) {
         Tok t = lex_peek(p->lex);
-        if (t.kind == TK_STRUCT) {
-            nv_push(&decls, parse_struct(p));
-        } else if (t.kind == TK_UNION) {
-            nv_push(&decls, parse_union(p));
+        if (t.kind == TK_STRUCT || t.kind == TK_UNION) {
+            /* Peek ahead to distinguish:
+             * - `struct Tag { ... };` — struct definition
+             * - `struct Tag;` — forward declaration
+             * - `struct Tag *func(...);` — function declaration with struct return type
+             * - `struct Tag var;` — variable declaration with struct type */
+            LexerState saved = lex_save(p->lex);
+            lex_next(p->lex); /* consume 'struct'/'union' */
+            
+            bool is_struct_def = false;
+            bool is_forward_decl = false;
+            
+            if (lex_peek(p->lex).kind == TK_IDENT) {
+                Tok tag = lex_next(p->lex);
+                if (lex_peek(p->lex).kind == TK_LBRACE) {
+                    is_struct_def = true;
+                } else if (lex_peek(p->lex).kind == TK_SEMI) {
+                    is_forward_decl = true;
+                }
+                /* Otherwise: `struct Tag *...` or `struct Tag name;` — not a struct definition */
+            } else if (lex_peek(p->lex).kind == TK_LBRACE) {
+                is_struct_def = true;
+            }
+            
+            lex_restore(p->lex, saved);
+            
+            if (is_struct_def || is_forward_decl) {
+                if (t.kind == TK_STRUCT) {
+                    nv_push(&decls, parse_struct(p));
+                } else {
+                    nv_push(&decls, parse_union(p));
+                }
+            } else {
+                /* Function/variable declaration with struct return type */
+                goto type_start_path;
+            }
         } else if (t.kind == TK_IMPL) {
             nv_push(&decls, parse_impl(p));
         } else if (t.kind == TK_TYPEDEF) {
             lex_next(p->lex); /* consume 'typedef' */
             int line = t.line;
 
+            /* C-style: `typedef enum { ... } Name;` or `typedef enum Tag Name;` */
+            if (lex_peek(p->lex).kind == TK_ENUM) {
+                lex_next(p->lex); /* consume 'enum' */
+
+                if (lex_peek(p->lex).kind == TK_LBRACE) {
+                    /* Anonymous enum: `typedef enum { ... } Name;` */
+                    static int anon_counter = 0;
+                    char anon_name[64];
+                    snprintf(anon_name, sizeof(anon_name), "__anon_enum_%d", anon_counter++);
+
+                    expect(p, TK_LBRACE, "expected '{' in enum");
+                    /* Skip enum body: `A=1, B, C` */
+                    while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
+                        if (lex_peek(p->lex).kind == TK_IDENT) lex_next(p->lex);
+                        if (accept(p, TK_ASSIGN)) {
+                            while (lex_peek(p->lex).kind != TK_COMMA &&
+                                   lex_peek(p->lex).kind != TK_RBRACE &&
+                                   lex_peek(p->lex).kind != TK_EOF) {
+                                lex_next(p->lex);
+                            }
+                        }
+                        if (lex_peek(p->lex).kind == TK_COMMA) lex_next(p->lex);
+                    }
+                    expect(p, TK_RBRACE, "expected '}' to close enum");
+
+                    const char* ename = arena_strndup(p->arena, anon_name, strlen(anon_name));
+                    Type* etype = type_named(p->arena, ename);
+                    for (;;) {
+                        Type* atype = etype;
+                        const char* alname = NULL;
+                        atype = parse_declarator(p, atype, &alname);
+
+                        if (!alname) {
+                            Tok err_t = lex_peek(p->lex);
+                            errtok(p, &err_t, "expected typedef name after enum");
+                            break;
+                        }
+                        Node* nd = mk(p, ND_TYPEDEF_DECL, line);
+                        nd->declared_type = atype;
+                        nd->name = alname;
+                        nv_push(&decls, nd);
+                        if (!accept(p, TK_COMMA)) break;
+                    }
+                    expect(p, TK_SEMI, "expected ';' after typedef");
+                } else {
+                    /* Named enum: `typedef enum Tag { ... } Name;` or `typedef enum Tag Name;` */
+                    Tok tag = lex_next(p->lex);
+
+                    if (lex_peek(p->lex).kind == TK_LBRACE) {
+                        expect(p, TK_LBRACE, "expected '{' in enum");
+                        /* Skip enum body */
+                        while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
+                            if (lex_peek(p->lex).kind == TK_IDENT) lex_next(p->lex);
+                            if (accept(p, TK_ASSIGN)) {
+                                while (lex_peek(p->lex).kind != TK_COMMA &&
+                                       lex_peek(p->lex).kind != TK_RBRACE &&
+                                       lex_peek(p->lex).kind != TK_EOF) {
+                                    lex_next(p->lex);
+                                }
+                            }
+                            if (lex_peek(p->lex).kind == TK_COMMA) lex_next(p->lex);
+                        }
+                        expect(p, TK_RBRACE, "expected '}' to close enum");
+
+                        char nm[256];
+                        int n = snprintf(nm, sizeof(nm), "enum %.*s", tag.len, tag.start);
+                        const char* ename = arena_strndup(p->arena, nm, n);
+                        Type* etype = type_named(p->arena, ename);
+                        for (;;) {
+                            Type* atype = etype;
+                            const char* alname = NULL;
+                            atype = parse_declarator(p, atype, &alname);
+
+                            if (!alname) {
+                                Tok err_t = lex_peek(p->lex);
+                                errtok(p, &err_t, "expected typedef name after enum");
+                                break;
+                            }
+                            Node* nd = mk(p, ND_TYPEDEF_DECL, line);
+                            nd->declared_type = atype;
+                            nd->name = alname;
+                            nv_push(&decls, nd);
+                            if (!accept(p, TK_COMMA)) break;
+                        }
+                        expect(p, TK_SEMI, "expected ';' after typedef");
+                    } else {
+                        /* Forward reference: `typedef enum Tag Name;` */
+                        char nm[256];
+                        int n = snprintf(nm, sizeof(nm), "enum %.*s", tag.len, tag.start);
+                        Type* base = type_named(p->arena, arena_strndup(p->arena, nm, n));
+
+                        for (;;) {
+                            const char* tname = NULL;
+                            Type* ty = parse_declarator(p, base, &tname);
+
+                            if (!tname) {
+                                Tok err_t = lex_peek(p->lex);
+                                errtok(p, &err_t, "expected typedef name");
+                                break;
+                            }
+
+                            Node* nd = mk(p, ND_TYPEDEF_DECL, line);
+                            nd->declared_type = ty;
+                            nd->name = tname;
+                            nv_push(&decls, nd);
+
+                            if (!accept(p, TK_COMMA)) break;
+                        }
+
+                        expect(p, TK_SEMI, "expected ';' after typedef");
+                    }
+                }
+            }
             /* C-style: `typedef struct { ... } Name;` or `typedef union { ... } Name;` */
-            if (lex_peek(p->lex).kind == TK_STRUCT || lex_peek(p->lex).kind == TK_UNION) {
+            else if (lex_peek(p->lex).kind == TK_STRUCT || lex_peek(p->lex).kind == TK_UNION) {
                 bool is_union = (lex_peek(p->lex).kind == TK_UNION);
                 Tok t0 = lex_next(p->lex); /* consume 'struct'/'union' */
 
@@ -2142,44 +2457,33 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                     NodeVec fields = {0};
                     while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
                         int fline = lex_peek(p->lex).line;
-                        Type* fbase = parse_type(p);
 
-                        /* Handle pointer suffix */
-                        while (accept(p, TK_STAR)) {
-                            fbase = type_ptr(p->arena, fbase);
+                        /* Try nested anonymous struct/union first */
+                        Node* nf = try_parse_nested_anon_struct_union(p, fline);
+                        if (nf) {
+                            nv_push(&fields, nf);
+                            continue;
                         }
 
-                        /* Comma-separated fields */
+                        Type* fbase = parse_type(p);
+
+                        /* Handle comma-separated fields using full declarator parsing */
                         for (;;) {
                             const char* fname = NULL;
-                            if (lex_peek(p->lex).kind == TK_IDENT) {
-                                Tok ft = lex_next(p->lex);
-                                fname = arena_strndup(p->arena, ft.start, ft.len);
-                            } else if (lex_peek(p->lex).kind == TK_LBRACKET) {
-                                /* Anonymous array field: `type[N];` */
-                                fname = "";
-                            } else {
-                                Tok err_t = lex_peek(p->lex);
-                                errtok(p, &err_t, "expected field name");
-                                expect(p, TK_SEMI, "expected ';' after field");
-                                break;
-                            }
+                            Type* fty = parse_declarator(p, fbase, &fname);
 
                             int bw = 0;
                             if (accept(p, TK_COLON)) {
                                 Tok w = expect(p, TK_INT, "expected bitfield width");
                                 bw = (int)w.ival;
-                                fbase = type_bitfield(p->arena, fbase, bw);
+                                fty = type_bitfield(p->arena, fty, bw);
                             }
 
-                            /* Array suffix: `type name[N];` */
-                            Type* fty = fbase;
-                            if (accept(p, TK_LBRACKET)) {
-                                if (!accept(p, TK_RBRACKET)) {
-                                    parse_expr(p);
-                                    expect(p, TK_RBRACKET, "expected ']'");
-                                }
-                                fty = type_ptr(p->arena, fbase);
+                            if (!fname) {
+                                Tok err_t = lex_peek(p->lex);
+                                errtok(p, &err_t, "expected field name");
+                                expect(p, TK_SEMI, "expected ';' after field");
+                                break;
                             }
 
                             Node* f = mk(p, ND_FIELD, fline);
@@ -2189,7 +2493,9 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                             nv_push(&fields, f);
 
                             if (accept(p, TK_COMMA)) continue;
-                            expect(p, TK_SEMI, "expected ';' after field");
+                            if (!accept(p, TK_SEMI)) {
+                                if (lex_peek(p->lex).kind != TK_RBRACE) lex_next(p->lex);
+                            }
                             break;
                         }
                     }
@@ -2201,14 +2507,26 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                     su->name = aname;
                     su->fields = nv_freeze(p, &fields, &su->nfields);
 
-                    Tok alias = expect(p, TK_IDENT, "expected typedef name after struct/union");
-                    expect(p, TK_SEMI, "expected ';' after typedef");
+                    /* Parse comma-separated typedef aliases: `} Name1, *Name2;` */
+                    Type* stype = type_named(p->arena, aname);
+                    for (;;) {
+                        Type* atype = stype;
+                        const char* alname = NULL;
+                        atype = parse_declarator(p, atype, &alname);
 
-                    Node* nd = mk(p, ND_TYPEDEF_DECL, line);
-                    nd->declared_type = type_named(p->arena, aname);
-                    nd->name = arena_strndup(p->arena, alias.start, alias.len);
-                    nv_push(&decls, nd);
+                        if (!alname) {
+                            Tok err_t = lex_peek(p->lex);
+                            errtok(p, &err_t, "expected typedef name after struct/union");
+                            break;
+                        }
+                        Node* nd = mk(p, ND_TYPEDEF_DECL, line);
+                        nd->declared_type = atype;
+                        nd->name = alname;
+                        nv_push(&decls, nd);
+                        if (!accept(p, TK_COMMA)) break;
+                    }
                     nv_push(&decls, su);
+                    expect(p, TK_SEMI, "expected ';' after typedef");
                 } else {
                     /* Could be:
                      *   `typedef struct Tag Name;` — reference existing struct tag
@@ -2221,13 +2539,47 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                         NodeVec fields = {0};
                         while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
                             int fline = lex_peek(p->lex).line;
-                            Type* ty = parse_type(p);
-                            Tok fid = expect(p, TK_IDENT, "expected field name");
-                            expect(p, TK_SEMI, "expected ';' after field");
-                            Node* f = mk(p, ND_FIELD, fline);
-                            f->declared_type = ty;
-                            f->name = arena_strndup(p->arena, fid.start, fid.len);
-                            nv_push(&fields, f);
+
+                            /* Try nested anonymous struct/union first */
+                            Node* nf = try_parse_nested_anon_struct_union(p, fline);
+                            if (nf) {
+                                nv_push(&fields, nf);
+                                continue;
+                            }
+
+                            Type* fbase = parse_type(p);
+
+                            /* Handle comma-separated fields using full declarator parsing */
+                            for (;;) {
+                                const char* fname = NULL;
+                                Type* fty = parse_declarator(p, fbase, &fname);
+
+                                int bw = 0;
+                                if (accept(p, TK_COLON)) {
+                                    Tok w = expect(p, TK_INT, "expected bitfield width");
+                                    bw = (int)w.ival;
+                                    fty = type_bitfield(p->arena, fty, bw);
+                                }
+
+                                if (!fname) {
+                                    Tok err_t = lex_peek(p->lex);
+                                    errtok(p, &err_t, "expected field name");
+                                    if (!accept(p, TK_SEMI)) lex_next(p->lex);
+                                    break;
+                                }
+
+                                Node* f = mk(p, ND_FIELD, fline);
+                                f->declared_type = fty;
+                                f->name = fname;
+                                f->bit_width = bw;
+                                nv_push(&fields, f);
+
+                                if (accept(p, TK_COMMA)) continue;
+                                if (!accept(p, TK_SEMI)) {
+                                    if (lex_peek(p->lex).kind != TK_RBRACE) lex_next(p->lex);
+                                }
+                                break;
+                            }
                         }
                         expect(p, TK_RBRACE, "expected '}' to close struct");
 
@@ -2239,19 +2591,48 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                         su->name = arena_strndup(p->arena, tag.start, tag.len);
                         su->fields = nv_freeze(p, &fields, &su->nfields);
 
-                        Tok alias = expect(p, TK_IDENT, "expected typedef name");
-                        expect(p, TK_SEMI, "expected ';' after typedef");
+                        /* Parse comma-separated typedef aliases: `} Name1, *Name2;` */
+                        Type* stype = type_named(p->arena, sname);
+                        for (;;) {
+                            Type* atype = stype;
+                            const char* alname = NULL;
+                            atype = parse_declarator(p, atype, &alname);
 
-                        Node* nd = mk(p, ND_TYPEDEF_DECL, line);
-                        nd->declared_type = type_named(p->arena, sname);
-                        nd->name = arena_strndup(p->arena, alias.start, alias.len);
-                        nv_push(&decls, nd);
+                            if (!alname) {
+                                Tok err_t = lex_peek(p->lex);
+                                errtok(p, &err_t, "expected typedef name after struct/union");
+                                break;
+                            }
+                            Node* nd = mk(p, ND_TYPEDEF_DECL, line);
+                            nd->declared_type = atype;
+                            nd->name = alname;
+                            nv_push(&decls, nd);
+                            if (!accept(p, TK_COMMA)) break;
+                        }
                         nv_push(&decls, su);
+                        expect(p, TK_SEMI, "expected ';' after typedef");
                     } else {
                         /* Named struct reference: `typedef struct Tag Name;` or `typedef struct Tag *Name;` */
                         char nm[256];
                         int n = snprintf(nm, sizeof(nm), "struct %.*s", tag.len, tag.start);
                         Type* base = type_named(p->arena, arena_strndup(p->arena, nm, n));
+
+                        /* Skip modifiers between tag and declarator: UNALIGNED, __unaligned, etc. */
+                        for (;;) {
+                            TokKind mk = lex_peek(p->lex).kind;
+                            if (mk == TK___UNALIGNED) {
+                                lex_next(p->lex);
+                            } else if (mk == TK_IDENT) {
+                                Tok ident = lex_peek(p->lex);
+                                if (lex_ident_is(ident, "UNALIGNED")) {
+                                    lex_next(p->lex);
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
 
                         /* Parse comma-separated declarators */
                         for (;;) {
@@ -2433,6 +2814,23 @@ type_start_path:
                     lex_next(p->lex);
                 } else if (k == TK___ATTRIBUTE__) {
                     skip_attribute(p);
+                } else if (k == TK_IDENT) {
+                    /* Skip common Windows calling convention macros that may not be expanded:
+                     * WINAPI, APIENTRY, CALLBACK, NTAPI, etc.
+                     * Also skip Windows API decoration macros: _CRTIMP, __MINGW_NOTHROW, etc. */
+                    Tok ident = lex_peek(p->lex);
+                    if (lex_ident_is(ident, "WINAPI") || lex_ident_is(ident, "APIENTRY") ||
+                        lex_ident_is(ident, "CALLBACK") || lex_ident_is(ident, "NTAPI") ||
+                        lex_ident_is(ident, "PASCAL") || lex_ident_is(ident, "CDECL") ||
+                        lex_ident_is(ident, "STDCALL") || lex_ident_is(ident, "FASTCALL") ||
+                        lex_ident_is(ident, "WINBASEAPI") || lex_ident_is(ident, "WINADVAPI") ||
+                        lex_ident_is(ident, "WINUSERAPI") || lex_ident_is(ident, "WINGDIAPI") ||
+                        lex_ident_is(ident, "WINCONAPI") || lex_ident_is(ident, "_CRTIMP") || lex_ident_is(ident, "_CRTIMP1") ||
+                        lex_ident_is(ident, "__MINGW_NOTHROW") || lex_ident_is(ident, "__MINGW_ATTRIB_NORETURN")) {
+                        lex_next(p->lex);
+                    } else {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -2487,30 +2885,40 @@ type_start_path:
                             /* Use parse_type for struct/union */
                             pty = parse_type(p);
                         } else {
-                            /* Use parse_c_type for primitive types (int, unsigned int, etc.) */
-                            TypeKind tk = parse_c_type(p);
-                            if (tk == TY_VOID) {
-                                /* Not a recognized primitive type, try parse_type */
-                                pty = parse_type(p);
-                            } else {
-                                pty = type_prim(p->arena, tk);
-                            }
-                            /* Pointer suffix */
-                            while (accept(p, TK_STAR)) {
-                                pty = type_ptr(p->arena, pty);
-                                if (accept(p, TK_CONST)) {
-                                    pty = type_const(p->arena, pty);
-                                }
-                            }
+                            /* Use parse_type for all types (handles primitives, named types, void, etc.) */
+                            pty = parse_type(p);
                         }
                         
                         /* If current token is identifier, consume it as parameter name */
 
-                        /* Handle complex declarator: function pointer parameter like `void (*)(void)` */
+                        /* Handle complex declarator: function pointer parameter like `void (*)(void)` or `unsigned (__stdcall *name)(void *)` */
                         if (lex_peek(p->lex).kind == TK_LPAREN) {
                             /* Save state and try to parse `(*)(params)` pattern */
                             LexerState fp_save = lex_save(p->lex);
                             lex_next(p->lex); /* consume '(' */
+
+                            /* Skip calling convention that appears after '(' in function pointer params */
+                            for (;;) {
+                                TokKind k = lex_peek(p->lex).kind;
+                                if (k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL) {
+                                    lex_next(p->lex);
+                                } else if (k == TK_IDENT) {
+                                    /* Also skip Windows calling convention macros */
+                                    Tok ident = lex_peek(p->lex);
+                                    if (lex_ident_is(ident, "WINAPI") || lex_ident_is(ident, "APIENTRY") ||
+                                        lex_ident_is(ident, "CALLBACK") || lex_ident_is(ident, "NTAPI") ||
+                                        lex_ident_is(ident, "PASCAL") || lex_ident_is(ident, "CDECL") ||
+                                        lex_ident_is(ident, "STDCALL") || lex_ident_is(ident, "FASTCALL") ||
+                                        lex_ident_is(ident, "WINBASEAPI") || lex_ident_is(ident, "WINADVAPI")) {
+                                        lex_next(p->lex);
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+
                             if (accept(p, TK_STAR)) {
                                 /* It's a function pointer: `(*)(params)` or `(*name)(params)` */
                                 if (accept(p, TK_RPAREN)) {

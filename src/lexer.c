@@ -6,6 +6,7 @@ typedef struct { const char* s; int len; TokKind kind; } Keyword;
 static const Keyword kws[] = {
     {"struct",   6, TK_STRUCT},  {"impl",     4, TK_IMPL},
     {"union",    5, TK_UNION},   {"const",    5, TK_CONST},
+    {"enum",     4, TK_ENUM},
     {"static",   6, TK_STATIC},  {"return",   6, TK_RETURN},
     {"if",       2, TK_IF},      {"else",     4, TK_ELSE},
     {"while",    5, TK_WHILE},   {"for",      3, TK_FOR},
@@ -91,10 +92,10 @@ Tok lex_peek_n(Lexer* lx, int n) {
     if (n == 0) return lx->peek0;
     if (n == 1) return lx->peek1;
     LexerState s = lex_save(lx);
-    lex_next(lx); /* advance past peek0 */
-    Tok t = lx->peek1; /* this is now n=2 */
-    for (int i = 2; i < n; i++) lex_next(lx);
-    t = lex_peek(lx);
+    /* Advance n times to get to the nth token ahead */
+    for (int i = 0; i < n; i++) lex_next(lx);
+    /* lex_peek returns peek0, which is now the nth token from the original position */
+    Tok t = lex_peek(lx);
     lex_restore(lx, s);
     return t;
 }
