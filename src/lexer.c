@@ -52,6 +52,7 @@ static const Keyword kws[] = {
     {"__cdecl",     7, TK___CDECL},
     {"__stdcall",   9, TK___STDCALL},
     {"__fastcall", 10, TK___FASTCALL},
+    {"__CRTDECL",   9, TK___CRTDECL},
     {"__unaligned", 11, TK___UNALIGNED},
     {"__restrict", 10, TK___RESTRICT},
     {"__restrict__", 12, TK___RESTRICT__},

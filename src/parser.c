@@ -283,6 +283,7 @@ static const char* parse_calling_conv(P* p) {
         case TK___CDECL:     lex_next(p->lex); return "__cdecl";
         case TK___STDCALL:   lex_next(p->lex); return "__stdcall";
         case TK___FASTCALL:  lex_next(p->lex); return "__fastcall";
+        case TK___CRTDECL:   lex_next(p->lex); return "__cdecl";
         case TK___UNALIGNED: lex_next(p->lex); return "__unaligned";
         case TK_IDENT:
             /* Also recognize common Windows calling convention macros */
@@ -390,7 +391,7 @@ static Type* parse_type(P* p) {
             lex_next(p->lex);
         } else if (k == TK___DECLSPEC) {
             skip_declspec(p);
-        } else if (k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL || k == TK___UNALIGNED) {
+        } else if (k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL || k == TK___CRTDECL || k == TK___UNALIGNED) {
             lex_next(p->lex);
         } else if (k == TK___ATTRIBUTE__) {
             skip_attribute(p);
@@ -2869,7 +2870,7 @@ type_start_path:
                     lex_next(p->lex);
                 } else if (k == TK___DECLSPEC) {
                     declspec = parse_declspec(p);
-                } else if (k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL || k == TK___UNALIGNED) {
+                } else if (k == TK___CDECL || k == TK___STDCALL || k == TK___FASTCALL || k == TK___CRTDECL || k == TK___UNALIGNED) {
                     lex_next(p->lex);
                 } else if (k == TK___ATTRIBUTE__) {
                     skip_attribute(p);

@@ -186,7 +186,7 @@ typedef enum {
     TK_STATIC_ASSERT,
 
     /* Calling conventions (TDD-2.1~2.4) */
-    TK___CDECL, TK___STDCALL, TK___FASTCALL, TK___UNALIGNED,
+    TK___CDECL, TK___STDCALL, TK___FASTCALL, TK___CRTDECL, TK___UNALIGNED,
     TK___RESTRICT, TK___RESTRICT__,
     TK_RESTRICT,
 

@@ -230,6 +230,10 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         cpp_define(cpp, "_MSC_EXTENSIONS", "1");
         cpp_define(cpp, "_INTEGRAL_MAX_BITS", "64");
         cpp_define(cpp, "_MT",            "1");
+        /* Calling convention aliases */
+        cpp_define(cpp, "__CRTDECL",              "__cdecl");
+        cpp_define(cpp, "__CLRCALL_PURE_OR_CDECL","__cdecl");
+        cpp_define(cpp, "__CLRCALL_OR_CDECL",     "__cdecl");
     }
     /* Standard C */
     cpp_define(cpp, "__STDC__",           "1");
@@ -244,6 +248,116 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
     cpp_define(cpp, "__PTRDIFF_TYPE__",    is_64 ? "long long" : "int");
     cpp_define(cpp, "__INTPTR_TYPE__",     is_64 ? "long long" : "int");
     cpp_define(cpp, "__WCHAR_TYPE__",      is_64 ? "unsigned short" : "unsigned short");
+
+    /* MSVC ABI: SAL annotations and decoration macros — defined empty.
+     * GCC and clang use the same approach when compiling MSVC headers. */
+    if (target->abi == ABI_MSVC) {
+        /* Calling convention macros */
+        cpp_define(cpp, "__CRTDECL",              "__cdecl");
+        cpp_define(cpp, "__CLRCALL_PURE_OR_CDECL","__cdecl");
+        cpp_define(cpp, "__CLRCALL_OR_CDECL",     "__cdecl");
+
+        /* Import/export decoration */
+        cpp_define(cpp, "_CRTIMP",      "");
+        cpp_define(cpp, "_CRTIMP1",     "");
+        cpp_define(cpp, "_ACRTIMP",     "");
+        cpp_define(cpp, "_DCRTIMP",     "");
+        cpp_define(cpp, "_CRTIMP2",     "");
+        cpp_define(cpp, "_CRTIMP2_PURE","");
+        cpp_define(cpp, "_ACRTIMP_ALT", "");
+
+        /* Inline function marker */
+        cpp_define(cpp, "_CRT_STDIO_INLINE",    "__inline");
+        cpp_define(cpp, "_NO_CRT_STDIO_INLINE", "");
+        cpp_define(cpp, "_ACRTIMP_INLINE",      "__inline");
+
+        /* Pragma passthrough */
+        cpp_define(cpp, "__pragma(x)",  "");
+        cpp_define(cpp, "__pragma",     "");
+
+        /* SAL annotations — parameter checks */
+        cpp_define(cpp, "_In_",            "");
+        cpp_define(cpp, "_In_z_",          "");
+        cpp_define(cpp, "_In_opt_",        "");
+        cpp_define(cpp, "_In_opt_z_",      "");
+        cpp_define(cpp, "_In_reads_(x)",   "");
+        cpp_define(cpp, "_In_reads_opt_(x)", "");
+        cpp_define(cpp, "_In_reads_bytes_(x)", "");
+        cpp_define(cpp, "_In_count_(x)",   "");
+        cpp_define(cpp, "_In_range_(x,y)", "");
+        cpp_define(cpp, "_Out_",           "");
+        cpp_define(cpp, "_Out_z_",         "");
+        cpp_define(cpp, "_Out_opt_",       "");
+        cpp_define(cpp, "_Out_writes_(x)", "");
+        cpp_define(cpp, "_Out_writes_z_(x)", "");
+        cpp_define(cpp, "_Out_writes_opt_(x)", "");
+        cpp_define(cpp, "_Out_writes_to_(x,y)", "");
+        cpp_define(cpp, "_Out_writes_bytes_(x)", "");
+        cpp_define(cpp, "_Outptr_",        "");
+        cpp_define(cpp, "_Outptr_opt_",    "");
+        cpp_define(cpp, "_Outptr_result_z_", "");
+        cpp_define(cpp, "_Outptr_result_buffer_(x)", "");
+        cpp_define(cpp, "_Inout_",         "");
+        cpp_define(cpp, "_Inout_opt_",     "");
+        cpp_define(cpp, "_Inout_z_",       "");
+        cpp_define(cpp, "_Inout_updates_(x)", "");
+        cpp_define(cpp, "_Ret_z_",         "");
+        cpp_define(cpp, "_Ret_opt_z_",     "");
+        cpp_define(cpp, "_Ret_writes_(x)", "");
+        cpp_define(cpp, "_Deref_out_",     "");
+        cpp_define(cpp, "_Deref_out_z_",   "");
+        cpp_define(cpp, "_Deref_opt_out_", "");
+        cpp_define(cpp, "_Frees_ptr_",     "");
+        cpp_define(cpp, "_Frees_ptr_opt_", "");
+
+        /* SAL annotations — pre/post conditions */
+        cpp_define(cpp, "_Pre_",           "");
+        cpp_define(cpp, "_Post_",          "");
+        cpp_define(cpp, "_Pre_z_",         "");
+        cpp_define(cpp, "_Post_z_",        "");
+        cpp_define(cpp, "_Post_valid_",    "");
+        cpp_define(cpp, "_Pre_valid_",     "");
+        cpp_define(cpp, "_Pre_writable_byte_size_(x)", "");
+        cpp_define(cpp, "_Pre_readable_byte_size_(x)", "");
+        cpp_define(cpp, "_Post_writable_byte_size_(x)", "");
+        cpp_define(cpp, "_Readable_bytes_(x)", "");
+        cpp_define(cpp, "_Writable_bytes_(x)", "");
+        cpp_define(cpp, "_Null_terminated_", "");
+        cpp_define(cpp, "_NullNull_terminated_", "");
+        cpp_define(cpp, "_Pre_notnull_",   "");
+        cpp_define(cpp, "_Pre_null_",      "");
+        cpp_define(cpp, "_Post_null_",     "");
+
+        /* SAL annotations — return and format */
+        cpp_define(cpp, "_Success_(x)",    "");
+        cpp_define(cpp, "_Return_type_success_(x)", "");
+        cpp_define(cpp, "_Check_return_",  "");
+        cpp_define(cpp, "_Check_return_opt_", "");
+        cpp_define(cpp, "_Check_return_wat_", "");
+        cpp_define(cpp, "_Printf_format_string_", "");
+        cpp_define(cpp, "_Scanf_format_string_", "");
+        cpp_define(cpp, "_Scanf_s_format_string_", "");
+
+        /* SAL annotations — control flow */
+        cpp_define(cpp, "_Always_(x)",     "");
+        cpp_define(cpp, "_When_(x,y)",     "");
+        cpp_define(cpp, "_At_(target, annos)", "");
+        cpp_define(cpp, "_Analysis_assume_(x)", "");
+
+        /* SAL annotations — struct fields */
+        cpp_define(cpp, "_Field_size_(x)", "");
+        cpp_define(cpp, "_Field_size_opt_(x)", "");
+        cpp_define(cpp, "_Field_range_(x,y)", "");
+        cpp_define(cpp, "_Struct_size_bytes_(x)", "");
+
+        /* UCRT internal */
+        cpp_define(cpp, "_ACRTIMP_NOALIAS", "");
+        cpp_define(cpp, "_ACRTIMP_NONALIAS_RET", "");
+        cpp_define(cpp, "_CRTRESTRICT",     "");
+        cpp_define(cpp, "_CRT_HYBRIDPATCHABLE__", "");
+        cpp_define(cpp, "_SECURECRT_FILL_BUFFER", "");
+        cpp_define(cpp, "_CRT_JIT_ENTRY",   "");
+    }
 }
 
 static char* read_file(const char* path);
@@ -448,10 +562,18 @@ int main(int argc, char** argv) {
     /* Apply target triple: define macros */
     apply_target_macros(cpp_ctx, &target);
 
-    /* System include paths — use TCC headers for parsing.
-     * TCC headers are parser-friendly (no SAL annotations, no __declspec).
-     * The generated C code is later compiled by clang with the real
-     * UCRT/MSVC headers for correct type definitions. */
+    /* System include paths — search order:
+     * 1. User -I paths (added above)
+     * 2. TCC headers (default — parser-friendly)
+     * 3. MinGW fallback (Windows)
+     * 4. /usr/include (Linux/macOS)
+     *
+     * Note: UCRT/MSVC paths are disabled by default because UCRT headers
+     * contain complex SAL annotation patterns that our parser cannot fully
+     * handle yet. The SAL macros are defined as empty in apply_target_macros()
+     * for compatibility when users explicitly #include UCRT headers via -I. */
+
+    /* TCC headers (parser-friendly, proven to work) */
     char tcc_inc[512];
     snprintf(tcc_inc, sizeof(tcc_inc), "%s/include", tcc_dir);
     cpp_add_sys_include(cpp_ctx, tcc_inc);
