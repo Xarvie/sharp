@@ -108,6 +108,144 @@ static int load_libtcc(TccLib* lib, const char* tcc_dir) {
 static void unload_libtcc(TccLib* lib) { if (lib->dl) dlclose(lib->dl); }
 #endif
 
+/* ========================================================================
+ * Target triple system (inspired by Zig: arch-os-abi)
+ * Examples: x86_64-windows-msvc, x86_64-linux-gnu, aarch64-macos-none
+ * ======================================================================== */
+
+typedef enum {
+    ARCH_X86_64, ARCH_X86, ARCH_AARCH64, ARCH_ARM, ARCH_WASM32, ARCH_RISCV64,
+} TargetArch;
+
+typedef enum {
+    OS_WINDOWS, OS_LINUX, OS_MACOS, OS_NONE, OS_WASI,
+} TargetOS;
+
+typedef enum {
+    ABI_MSVC, ABI_GNU, ABI_GNUILP32, ABI_NONE,
+} TargetABI;
+
+typedef struct {
+    TargetArch arch;
+    TargetOS   os;
+    TargetABI  abi;
+} TargetTriple;
+
+static TargetTriple target_default(void) {
+    TargetTriple t = {0};
+#ifdef _WIN32
+    t.arch = ARCH_X86_64; t.os = OS_WINDOWS; t.abi = ABI_MSVC;
+#elif __linux__
+    t.arch = ARCH_X86_64; t.os = OS_LINUX;   t.abi = ABI_GNU;
+#elif __APPLE__
+    t.arch = ARCH_X86_64; t.os = OS_MACOS;   t.abi = ABI_GNU;
+#else
+    t.arch = ARCH_X86_64; t.os = OS_NONE;    t.abi = ABI_NONE;
+#endif
+    return t;
+}
+
+static bool parse_target_triple(const char* str, TargetTriple* out) {
+    char buf[128]; strncpy(buf, str, sizeof(buf) - 1); buf[sizeof(buf) - 1] = '\0';
+    char* p = buf; char* parts[4] = {0}; int np = 0;
+    while (p && np < 4) { parts[np++] = p; p = strchr(p, '-'); if (p) *p++ = '\0'; }
+    if (np < 2) return false;
+    /* arch */
+    if (strcmp(parts[0], "x86_64") == 0 || strcmp(parts[0], "amd64") == 0) out->arch = ARCH_X86_64;
+    else if (strcmp(parts[0], "x86") == 0 || strcmp(parts[0], "i386") == 0 || strcmp(parts[0], "i686") == 0) out->arch = ARCH_X86;
+    else if (strcmp(parts[0], "aarch64") == 0 || strcmp(parts[0], "arm64") == 0) out->arch = ARCH_AARCH64;
+    else if (strncmp(parts[0], "arm", 3) == 0) out->arch = ARCH_ARM;
+    else if (strcmp(parts[0], "wasm32") == 0) out->arch = ARCH_WASM32;
+    else if (strcmp(parts[0], "riscv64") == 0) out->arch = ARCH_RISCV64;
+    else return false;
+    /* os */
+    if (strcmp(parts[1], "windows") == 0 || strcmp(parts[1], "win32") == 0) out->os = OS_WINDOWS;
+    else if (strcmp(parts[1], "linux") == 0) out->os = OS_LINUX;
+    else if (strcmp(parts[1], "macos") == 0 || strcmp(parts[1], "darwin") == 0) out->os = OS_MACOS;
+    else if (strcmp(parts[1], "none") == 0 || strcmp(parts[1], "freestanding") == 0) out->os = OS_NONE;
+    else if (strcmp(parts[1], "wasi") == 0) out->os = OS_WASI;
+    else return false;
+    /* abi (optional) */
+    out->abi = ABI_NONE;
+    if (np >= 3) {
+        if (strcmp(parts[2], "msvc") == 0) out->abi = ABI_MSVC;
+        else if (strcmp(parts[2], "gnu") == 0) out->abi = ABI_GNU;
+        else if (strcmp(parts[2], "gnux32") == 0) out->abi = ABI_GNUILP32;
+    } else {
+        switch (out->os) {
+        case OS_WINDOWS: out->abi = ABI_MSVC; break;
+        case OS_LINUX:   out->abi = ABI_GNU;  break;
+        case OS_MACOS:   out->abi = ABI_GNU;  break;
+        default:         out->abi = ABI_NONE; break;
+        }
+    }
+    return true;
+}
+
+static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
+    /* Architecture */
+    switch (target->arch) {
+    case ARCH_X86_64:
+        cpp_define(cpp, "_M_X64",    "100"); cpp_define(cpp, "_M_AMD64", "100");
+        cpp_define(cpp, "__x86_64__","1");
+        break;
+    case ARCH_X86:
+        cpp_define(cpp, "_M_IX86",   "600"); cpp_define(cpp, "__i386__", "1");
+        break;
+    case ARCH_AARCH64:
+        cpp_define(cpp, "_M_ARM64",  "1");   cpp_define(cpp, "__aarch64__", "1");
+        break;
+    case ARCH_ARM:
+        cpp_define(cpp, "_M_ARM",    "7");   break;
+    case ARCH_WASM32:
+        cpp_define(cpp, "__wasm__",  "1");   cpp_define(cpp, "__wasm32__", "1");
+        break;
+    case ARCH_RISCV64:
+        cpp_define(cpp, "__riscv",   "1");   cpp_define(cpp, "__riscv_xlen", "64");
+        break;
+    }
+    /* OS */
+    switch (target->os) {
+    case OS_WINDOWS:
+        cpp_define(cpp, "_WIN32",    "1");
+        if (target->arch == ARCH_X86_64 || target->arch == ARCH_AARCH64)
+            cpp_define(cpp, "_WIN64","1");
+        break;
+    case OS_LINUX:
+        cpp_define(cpp, "__linux__", "1"); cpp_define(cpp, "linux", "1");
+        break;
+    case OS_MACOS:
+        cpp_define(cpp, "__APPLE__", "1"); cpp_define(cpp, "__MACH__", "1");
+        break;
+    case OS_WASI:
+        cpp_define(cpp, "__wasi__",  "1");
+        break;
+    default: break;
+    }
+    /* MSVC version macros (MSVC ABI) */
+    if (target->abi == ABI_MSVC) {
+        cpp_define(cpp, "_MSC_VER",        "1940");
+        cpp_define(cpp, "_MSC_FULL_VER",   "194033519");
+        cpp_define(cpp, "_MSC_BUILD",      "1");
+        cpp_define(cpp, "_MSC_EXTENSIONS", "1");
+        cpp_define(cpp, "_INTEGRAL_MAX_BITS", "64");
+        cpp_define(cpp, "_MT",            "1");
+    }
+    /* Standard C */
+    cpp_define(cpp, "__STDC__",           "1");
+    cpp_define(cpp, "__STDC_HOSTED__",    "1");
+    cpp_define(cpp, "__STDC_VERSION__",   "201112L");
+    cpp_define(cpp, "__COUNTER__",        "0");
+    /* Size types based on arch */
+    int is_64 = (target->arch == ARCH_X86_64 || target->arch == ARCH_AARCH64 ||
+                 target->arch == ARCH_RISCV64);
+    cpp_define(cpp, "_SIZE_T_DEFINED",     "1");
+    cpp_define(cpp, "__SIZE_TYPE__",       is_64 ? "unsigned long long" : "unsigned int");
+    cpp_define(cpp, "__PTRDIFF_TYPE__",    is_64 ? "long long" : "int");
+    cpp_define(cpp, "__INTPTR_TYPE__",     is_64 ? "long long" : "int");
+    cpp_define(cpp, "__WCHAR_TYPE__",      is_64 ? "unsigned short" : "unsigned short");
+}
+
 static char* read_file(const char* path);
 
 /* Compile a C source file to an executable using libtcc. Returns 0 on success. */
@@ -209,6 +347,7 @@ static char* default_exe_path(const char* in_path) {
 int main(int argc, char** argv) {
     const char* in_path  = NULL;
     const char* out_path = NULL;
+    const char* target_str = NULL;
     bool        dump_hir = false;
     bool        no_link  = false;
 
@@ -219,6 +358,10 @@ int main(int argc, char** argv) {
             dump_hir = true;
         } else if (strcmp(argv[i], "-no-link") == 0) {
             no_link = true;
+        } else if (strncmp(argv[i], "--target=", 9) == 0) {
+            target_str = argv[i] + 9;
+        } else if (strcmp(argv[i], "--target") == 0 && i + 1 < argc) {
+            target_str = argv[++i];
         } else if (argv[i][0] == '-' && argv[i][1] == 0) {
             out_path = "-";
         } else if (strncmp(argv[i], "-I", 2) == 0 && argv[i][2]) {
@@ -240,8 +383,20 @@ int main(int argc, char** argv) {
         }
     }
     if (!in_path) {
-        fprintf(stderr, "usage: sharpc <file.sp> [-o out[.c|.exe]] [-dump-hir] [-no-link]\n");
+        fprintf(stderr, "usage: sharpc <file.sp> [-o out[.c|.exe]] [-dump-hir] [-no-link] [--target <triple>]\n");
+        fprintf(stderr, "  target examples: x86_64-windows-msvc, x86_64-linux-gnu, aarch64-macos-none\n");
         return 2;
+    }
+
+    /* Resolve target triple */
+    TargetTriple target;
+    if (target_str) {
+        if (!parse_target_triple(target_str, &target)) {
+            fprintf(stderr, "error: invalid target triple '%s'\n", target_str);
+            return 2;
+        }
+    } else {
+        target = target_default();
     }
 
     /* Compute TCC directory path for system headers */
@@ -290,41 +445,19 @@ int main(int argc, char** argv) {
         }
     }
 
-    /* Add system include paths — TCC bundled headers first, then OS paths */
+    /* Apply target triple: define macros */
+    apply_target_macros(cpp_ctx, &target);
+
+    /* System include paths — use TCC headers for parsing.
+     * TCC headers are parser-friendly (no SAL annotations, no __declspec).
+     * The generated C code is later compiled by clang with the real
+     * UCRT/MSVC headers for correct type definitions. */
     char tcc_inc[512];
     snprintf(tcc_inc, sizeof(tcc_inc), "%s/include", tcc_dir);
-    cpp_add_sys_include(cpp_ctx, tcc_inc);  /* TCC's own headers (stdio.h, etc.) */
+    cpp_add_sys_include(cpp_ctx, tcc_inc);
 
-    /* Define compiler built-in macros that TCC system headers depend on.
-     * These match the TCC compiler's predefined types. */
-    cpp_define(cpp_ctx, "__SIZE_TYPE__",     "unsigned long long");
-    cpp_define(cpp_ctx, "__PTRDIFF_TYPE__",  "long long");
-    cpp_define(cpp_ctx, "__WCHAR_TYPE__",    "int");
-    cpp_define(cpp_ctx, "__WINT_TYPE__",     "int");
-    cpp_define(cpp_ctx, "__INTMAX_TYPE__",   "long long");
-    cpp_define(cpp_ctx, "__UINTMAX_TYPE__",  "unsigned long long");
-    cpp_define(cpp_ctx, "__INT8_TYPE__",     "signed char");
-    cpp_define(cpp_ctx, "__INT16_TYPE__",    "signed short");
-    cpp_define(cpp_ctx, "__INT32_TYPE__",    "signed int");
-    cpp_define(cpp_ctx, "__INT64_TYPE__",    "signed long long");
-    cpp_define(cpp_ctx, "__UINT8_TYPE__",    "unsigned char");
-    cpp_define(cpp_ctx, "__UINT16_TYPE__",   "unsigned short");
-    cpp_define(cpp_ctx, "__UINT32_TYPE__",   "unsigned int");
-    cpp_define(cpp_ctx, "__UINT64_TYPE__",   "unsigned long long");
-    /* Platform detection — TCC on Windows */
-    cpp_define(cpp_ctx, "_WIN32",            "1");
-    cpp_define(cpp_ctx, "__STDC__",          "1");
-    cpp_define(cpp_ctx, "__STDC_VERSION__",  "201112L");
-    cpp_define(cpp_ctx, "__STRICT_ANSI__",   "1");
-    /* TCC-specific */
-    cpp_define(cpp_ctx, "__TINYC__",         "1");
-
-    /* Floating-point constants used by system headers (math.h, etc.) */
-    cpp_define(cpp_ctx, "INFINITY",  "((float)(1e+37*1e+37))");
-    cpp_define(cpp_ctx, "NAN",       "((float)(0.0f))");
-
+    /* MinGW fallback for additional Windows headers */
 #ifdef _WIN32
-    /* MSYS2/MinGW fallback */
     cpp_add_sys_include(cpp_ctx, "C:/msys64/mingw64/include");
     cpp_add_sys_include(cpp_ctx, "C:/msys64/ucrt64/include");
     cpp_add_sys_include(cpp_ctx, "C:/mingw64/include");
@@ -332,6 +465,13 @@ int main(int argc, char** argv) {
     cpp_add_sys_include(cpp_ctx, "/usr/include");
     cpp_add_sys_include(cpp_ctx, "/usr/local/include");
 #endif
+
+    /* TCC specific */
+    cpp_define(cpp_ctx, "__TINYC__", "1");
+
+    /* Floating-point constants used by system headers (math.h, etc.) */
+    cpp_define(cpp_ctx, "INFINITY",  "((float)(1e+37*1e+37))");
+    cpp_define(cpp_ctx, "NAN",       "((float)(0.0f))");
     /* Emit line markers so error messages map back to original source lines.
      * The Sharp lexer (lexer.c:try_consume_linemarker) absorbs these silently. */
     CppResult pp = cpp_run(cpp_ctx, in_path, CPP_LANG_SHARP);
