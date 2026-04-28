@@ -1015,6 +1015,13 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
 
             /* Try macro expansion */
             if (!t.hide && macro_lookup(st->macros, name)) {
+                /* Expansion limits breached? Pass through unexpanded */
+                if (macro_limits_breached()) {
+                    emit_tok_text(st, &t);
+                    pptok_free(&t);
+                    continue;
+                }
+
                 bool macro_had_leading_space = t.has_leading_space;
 
                 /* Build a small input list starting with this token, then

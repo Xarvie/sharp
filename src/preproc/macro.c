@@ -704,14 +704,17 @@ static TokList substitute(const MacroDef *def,
 
 static int g_expand_depth   = 0;
 static int g_expand_tokens  = 0;
+static bool g_limits_breached = false;  /* once set, skip ALL further expansion */
 
 static void expand_limits_reset(void) {
     g_expand_depth  = 0;
     g_expand_tokens = 0;
+    g_limits_breached = false;
 }
 
 static bool expand_limits_check_depth(CppDiagArr *diags, const char *name, CppLoc loc) {
     if (++g_expand_depth > MAX_EXPAND_DEPTH) {
+        g_limits_breached = true;
         if (diags) {
             CppDiag d = {0};
             d.level = CPP_DIAG_WARNING;
@@ -737,6 +740,7 @@ static bool expand_limits_check_depth(CppDiagArr *diags, const char *name, CppLo
 
 static bool expand_limits_check_tokens(CppDiagArr *diags, CppLoc loc) {
     if (g_expand_tokens > MAX_EXPAND_TOKENS) {
+        g_limits_breached = true;
         if (diags) {
             CppDiag d = {0};
             d.level = CPP_DIAG_WARNING;
@@ -779,6 +783,15 @@ static void expand_list(TokList *input, MacroTable *mt,
         }
 
         const char *name = intern_cstr(interns, pptok_spell(t));
+
+        /* Limits breached? Skip ALL further expansion, pass through as-is. */
+        if (g_limits_breached) {
+            PPTok copy = *t;
+            copy.spell = (StrBuf){0};
+            sb_push_cstr(&copy.spell, pptok_spell(t));
+            tl_append(output, copy);
+            continue;
+        }
 
         /* Blue-painted? Don't expand. */
         if (t->hide) {
@@ -953,9 +966,16 @@ static void expand_list(TokList *input, MacroTable *mt,
 void macro_expand(TokList *input, MacroTable *mt,
                   InternTable *interns, CppDiagArr *diags,
                   TokList *output) {
-    /* Phase C2: Reset expansion limits for each file */
-    expand_limits_reset();
+    /* Phase C2: Don't reset limits if they've already been breached.
+     * This ensures limits are global across the entire preprocessing run,
+     * not per-macro-invocation. */
+    if (!g_limits_breached)
+        expand_limits_reset();
     expand_list(input, mt, interns, diags, output);
+}
+
+bool macro_limits_breached(void) {
+    return g_limits_breached;
 }
 
 /* =========================================================================
