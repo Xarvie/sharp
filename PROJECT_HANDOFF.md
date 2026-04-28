@@ -1,6 +1,6 @@
 # Sharp Compiler (sharpc) 项目交接文档
 
-> 最后更新: 2025年 | 当前版本: 0.4 | 测试通过率: 79/80
+> 最后更新: 2026-04-28 | 当前版本: 0.4 | 测试通过率: 158/161 (UCRT)
 
 ---
 
@@ -196,34 +196,39 @@ C:\msys64\mingw64\bin\gcc.exe hello.c -o hello.exe
 
 ---
 
-## 七、当前状态（79/80 通过）
+## 七、当前状态（158/161 UCRT 头文件通过）
 
-### 唯一失败测试
+### 测试结果
+
+| 指标 | 结果 |
+|------|------|
+| UCRT 头文件测试 | 158 PASS / 0 FAIL / 3 SKIP / 161 TOTAL |
+| sharpc 解析所有 UCRT 头文件 | 15/15 全部通过 |
+| clang C11 语法验证 | 13/15 通过 |
+
+### 已知限制（跳过测试）
 
 | 测试 | 状态 | 原因 |
 |------|------|------|
-| `test_seh` | ❌ FAIL | MSVC 环境变量未正确设置（找不到 `stdint.h`）。编译器生成的 C 代码正确，需要 `vcvars64.bat` 环境 |
+| `test_tcc_basetsd_h` | ⏭ SKIP | TCC basetsd.h 已知兼容问题 |
+| `test_tcc_basetyps_h` | ⏭ SKIP | TCC basetyps.h 已知兼容问题 |
+| `test_tcc_file_h` | ⏭ SKIP | TCC file.h 已知兼容问题 |
 
-### 已知限制
+### clang 验证已知问题
 
-1. **`test_need_wint_t`** — SP 预处理器的 `#ifndef` 条件块不会生成对应的 C 预处理指令到输出中（测试已简化规避）
-2. **SEH 块内的表达式** — `__except(expr)` 中的表达式会被解析，但复杂表达式可能有限制
-3. **泛型模板** — 依赖 TCC 运行时编译，需要 `libtcc.dll` 在路径中
+| 头文件 | 问题 | 原因 |
+|--------|------|------|
+| `corecrt_wctype.h` | `unknown type name 'wctype_t'` | 需要 `<wchar.h>` 提供 `wctype_t` 定义，Windows SDK 依赖问题 |
+| `mbctype.h` | `unknown type name 'wctype_t'` | 同上 |
 
 ### 最近修复的功能（按时间倒序）
 
-1. **SEH 块内 SP 代码解析** — `__try { i32 x = 1; }` 现在 `i32` 正确转换为 `int32_t`
-2. **`__builtin_frame_address` 支持** — GCC/Clang 内置函数隐式识别，无需 `extern` 声明
-3. **`__declspec(thread)` 局部变量** — 函数内 `__declspec(thread) Type var = val;` 正确解析和生成
-4. **`__declspec(thread)` 全局变量** — 不再生成错误的 `extern` 前缀
-5. **`i32 main()` 符合 C 标准** — 测试改为 `i32` 返回值
-6. **函数指针参数** — `void callback(int (*fn)(int))` 正确解析
-7. **C99 指定初始化** — `StructType s = { .field = value }`
-8. **C99 复合字面量** — `(StructType){ .field = value }`
-9. **匿名结构体/联合体** — 作为字段类型
-10. **嵌套结构体定义** — 结构体内的内联结构体
-11. **位域** — `struct { int x : 4; }`
-12. **`<stdio.h>` / `<stdlib.h>` 条件包含** — 按需生成
+1. **匿名 union/struct AST 顺序修复** — 匿名 union/struct 定义现在在 typedef 引用之前输出
+2. **匿名 enum 定义** — `typedef enum { ... } Name;` 现在完整输出 enum 定义
+3. **函数指针 typedef codegen** — `_PVFV*` 不再展开为 `void(*)(void)*`，保留为 `_PVFV*`
+4. **SAL 内部宏定义** — 添加 `_SA_annotes0/1/2/3`、`_SAL_nop_impl_`、`_VCRT_*` 等约 50 个 SAL 宏
+5. **Windows SDK UCRT include 路径** — 添加 VC include + Windows Kits UCRT fallback 路径
+6. **Enum typedef 前向声明** — 枚举定义在引用它的 typedef 之前输出
 
 ---
 

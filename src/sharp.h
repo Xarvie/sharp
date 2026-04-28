@@ -328,6 +328,7 @@ typedef enum {
     /* Phase C: C language compatibility nodes */
     ND_ANON_STRUCT,    /* anonymous struct field (no name) */
     ND_ANON_UNION,     /* anonymous union field (no name) */
+    ND_ENUM_DECL,      /* enum Name { E1=0, E2, ... } — enum definition */
     ND_COMPOUND_LIT,   /* (Type){ init_list } — C99 compound literal */
     ND_INIT_LIST,      /* { expr, expr, ... } — initializer list */
     ND_DESIG_INIT      /* .field = expr — designated initializer */

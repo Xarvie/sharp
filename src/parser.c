@@ -2521,7 +2521,10 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                     char anon_name[64];
                     snprintf(anon_name, sizeof(anon_name), "__anon_enum_%d", anon_counter++);
 
+                    /* Capture enum body text for raw C emission */
                     expect(p, TK_LBRACE, "expected '{' in enum");
+                    const char* body_start = lex_peek(p->lex).start;
+
                     /* Skip enum body: `A=1, B, C` */
                     while (lex_peek(p->lex).kind != TK_RBRACE && lex_peek(p->lex).kind != TK_EOF) {
                         if (lex_peek(p->lex).kind == TK_IDENT) lex_next(p->lex);
@@ -2534,9 +2537,18 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                         }
                         if (lex_peek(p->lex).kind == TK_COMMA) lex_next(p->lex);
                     }
+                    const char* body_end = lex_peek(p->lex).start;
                     expect(p, TK_RBRACE, "expected '}' to close enum");
 
                     const char* ename = arena_strndup(p->arena, anon_name, strlen(anon_name));
+
+                    /* Create enum declaration node with raw body text */
+                    Node* en = mk(p, ND_ENUM_DECL, line);
+                    en->name = ename;
+                    size_t body_len = (size_t)(body_end - body_start);
+                    en->raw_text = arena_strndup(p->arena, body_start, (int)body_len);
+                    nv_push(&decls, en);
+
                     Type* etype = type_named(p->arena, ename);
                     for (;;) {
                         Type* atype = etype;
@@ -2695,6 +2707,9 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                     su->name = aname;
                     su->fields = nv_freeze(p, &fields, &su->nfields);
 
+                    /* Push the struct/union definition FIRST (before typedefs that reference it). */
+                    nv_push(&decls, su);
+
                     /* Parse comma-separated typedef aliases: `} Name1, *Name2;` */
                     Type* stype = type_named(p->arena, aname);
                     for (;;) {
@@ -2713,7 +2728,6 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                         nv_push(&decls, nd);
                         if (!accept(p, TK_COMMA)) break;
                     }
-                    nv_push(&decls, su);
                     expect(p, TK_SEMI, "expected ';' after typedef");
                 } else {
                     /* Could be:
@@ -2779,6 +2793,9 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                         su->name = arena_strndup(p->arena, tag.start, tag.len);
                         su->fields = nv_freeze(p, &fields, &su->nfields);
 
+                        /* Push the struct definition FIRST (before typedefs that reference it). */
+                        nv_push(&decls, su);
+
                         /* Parse comma-separated typedef aliases: `} Name1, *Name2;` */
                         Type* stype = type_named(p->arena, sname);
                         for (;;) {
@@ -2797,7 +2814,6 @@ Node* parse_program(Lexer* lx, Arena** arena) {
                             nv_push(&decls, nd);
                             if (!accept(p, TK_COMMA)) break;
                         }
-                        nv_push(&decls, su);
                         expect(p, TK_SEMI, "expected ';' after typedef");
                     } else {
                         /* Named struct reference: `typedef struct Tag Name;` or `typedef struct Tag *Name;` */

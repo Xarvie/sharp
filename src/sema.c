@@ -1422,6 +1422,7 @@ static void tc_stmt(TC* tc, Node* s) {
         case ND_CONST_DECL:
         case ND_ANON_STRUCT:
         case ND_ANON_UNION:
+        case ND_ENUM_DECL:
         case ND_FIELD:
         case ND_PARAM:
         case ND_FUNC_DECL:

@@ -191,8 +191,18 @@ static void emit_type(G* g, Type* t) {
     switch (rt->kind) {
         case TY_PTR:
             if (rt->base && rt->base->kind == TY_FUNC) {
-                /* Pointer to function: TY_FUNC already produces (*) syntax,
-                 * so just emit the function type without adding extra '*' */
+                /* Pointer to function type resolved from a typedef (e.g. _PVFV*).
+                 * Check if the original (unresolved) type is TY_PTR with TY_NAMED base.
+                 * If so, prefer emitting `name*` rather than expanding the typedef to
+                 * `ret(*)(params)*` which produces invalid C syntax. */
+                if (t->kind == TY_PTR && t->base && t->base->kind == TY_NAMED &&
+                    t->base->ntargs == 0) {
+                    emit_type_name(g, t->base);
+                    sb_putc(&g->out, '*');
+                    if (rt->is_const) sb_puts(&g->out, " const");
+                    return;
+                }
+                /* Raw function pointer: emit as `ret(*)(params)` */
                 emit_type_core(g, rt->base->base);
                 sb_puts(&g->out, "(*)(");
                 for (int i = 0; i < rt->base->nfunc_params; i++) {
@@ -206,6 +216,28 @@ static void emit_type(G* g, Type* t) {
                 sb_puts(&g->out, ")");
                 if (rt->is_const) sb_puts(&g->out, " const");
             } else {
+                /* If base is a TY_NAMED that is NOT a C built-in type,
+                 * emit the typedef name directly followed by `*`. This avoids
+                 * expanding function pointer typedefs (e.g. `_PVFV*` → `void(*)(void)*`)
+                 * which produces invalid C syntax. For C built-in types like
+                 * `va_list`, `size_t`, etc., we still resolve them normally. */
+                Type* base = rt->base;
+                if (base && base->kind == TY_NAMED && base->ntargs == 0 && base->name) {
+                    const char* bn = base->name;
+                    bool is_builtin = (strcmp(bn, "va_list") == 0 ||
+                                       strcmp(bn, "__builtin_va_list") == 0 ||
+                                       strcmp(bn, "wchar_t") == 0 ||
+                                       strcmp(bn, "size_t") == 0 ||
+                                       strcmp(bn, "ptrdiff_t") == 0 ||
+                                       strcmp(bn, "intmax_t") == 0 ||
+                                       strcmp(bn, "uintmax_t") == 0);
+                    if (!is_builtin) {
+                        sb_puts(&g->out, bn);
+                        sb_putc(&g->out, '*');
+                        if (rt->is_const) sb_puts(&g->out, " const");
+                        return;
+                    }
+                }
                 emit_type(g, rt->base);
                 sb_putc(&g->out, '*');
                 if (rt->is_const) sb_puts(&g->out, " const");
@@ -1770,14 +1802,16 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
         sb_puts(&g->out, "#include <malloc.h>\n");
     }
 
-    /* ------- Forward declarations (must come before externs that use them) ------- */
-    /* Typedef declarations (including array typedefs). */
+    /* ------- Forward declarations (must come before types/externs that reference them) ------- */
+    /* Union forward declarations first (anonymous unions may be referenced by typedefs). */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
-        if (d->kind == ND_TYPEDEF_DECL)
-            emit_typedef_decl(g, d);
+        if (d->kind == ND_UNION_DECL)
+            emit_union_decl(g, d);
+        if (d->kind == ND_UNION_FWD)
+            emit_union_fwd_decl(g, d);
     }
-    /* Non-generic structs and forward declarations. */
+    /* Struct forward declarations (anonymous structs may be referenced by typedefs). */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
         if (d->kind == ND_STRUCT_DECL && !is_generic_template(d))
@@ -1785,13 +1819,31 @@ void cgen_c(Node* prog, SymTable* st, FILE* out) {
         if (d->kind == ND_STRUCT_FWD)
             emit_struct_fwd_decl(g, d);
     }
-    /* Union forward declarations. */
+    /* Enum definitions (full definitions must come before typedefs that reference them,
+     * as enums cannot be forward-declared in C11). */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
-        if (d->kind == ND_UNION_DECL)
-            emit_union_decl(g, d);
-        if (d->kind == ND_UNION_FWD)
-            emit_union_fwd_decl(g, d);
+        if (d->kind == ND_ENUM_DECL && d->raw_text) {
+            sb_printf(&g->out, "enum %s {\n", d->name);
+            sb_puts(&g->out, d->raw_text);
+            sb_puts(&g->out, "\n};\n\n");
+        }
+    }
+    /* Typedef declarations (including array typedefs). */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind != ND_TYPEDEF_DECL) continue;
+        /* If the underlying type is an anonymous enum (name starts with __anon_enum_),
+         * emit as `typedef enum X Name;` since C11 requires the enum tag. */
+        Type* base = d->declared_type;
+        while (base && (base->kind == TY_ARRAY || base->kind == TY_PTR))
+            base = base->base;
+        if (base && base->kind == TY_NAMED &&
+            strncmp(base->name, "__anon_enum_", 12) == 0) {
+            sb_printf(&g->out, "typedef enum %s %s;\n", base->name, d->name);
+        } else {
+            emit_typedef_decl(g, d);
+        }
     }
     /* Specialised structs: one per SymMono. */
     for (int i = 0; i < st->nmonos; i++) {
@@ -2035,13 +2087,15 @@ void cgen_buf(Node* prog, SymTable* st, StrBuf* sb) {
     if (st->nexterns > 0) sb_putc(&g->out, '\n');
 
     /* ------- Forward declarations ------- */
-    /* Typedef declarations (including array typedefs). */
+    /* Union forward declarations first (anonymous unions may be referenced by typedefs). */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
-        if (d->kind == ND_TYPEDEF_DECL)
-            emit_typedef_decl(g, d);
+        if (d->kind == ND_UNION_DECL)
+            emit_union_decl(g, d);
+        if (d->kind == ND_UNION_FWD)
+            emit_union_fwd_decl(g, d);
     }
-    /* Non-generic structs and forward declarations. */
+    /* Struct forward declarations (anonymous structs may be referenced by typedefs). */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
         if (d->kind == ND_STRUCT_DECL && !is_generic_template(d))
@@ -2049,19 +2103,35 @@ void cgen_buf(Node* prog, SymTable* st, StrBuf* sb) {
         if (d->kind == ND_STRUCT_FWD)
             emit_struct_fwd_decl(g, d);
     }
+    /* Enum definitions (full definitions must come before typedefs that reference them,
+     * as enums cannot be forward-declared in C11). */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind == ND_ENUM_DECL && d->raw_text) {
+            sb_printf(&g->out, "enum %s {\n", d->name);
+            sb_puts(&g->out, d->raw_text);
+            sb_puts(&g->out, "\n};\n\n");
+        }
+    }
+    /* Typedef declarations (including array typedefs). */
+    for (int i = 0; i < prog->nchildren; i++) {
+        Node* d = prog->children[i];
+        if (d->kind != ND_TYPEDEF_DECL) continue;
+        Type* base = d->declared_type;
+        while (base && (base->kind == TY_ARRAY || base->kind == TY_PTR))
+            base = base->base;
+        if (base && base->kind == TY_NAMED &&
+            strncmp(base->name, "__anon_enum_", 12) == 0) {
+            sb_printf(&g->out, "typedef enum %s %s;\n", base->name, d->name);
+        } else {
+            emit_typedef_decl(g, d);
+        }
+    }
     /* _Static_assert pass-through */
     for (int i = 0; i < prog->nchildren; i++) {
         Node* d = prog->children[i];
         if (d->kind == ND_STATIC_ASSERT && d->raw_text)
             sb_printf(&g->out, "%s\n", d->raw_text);
-    }
-    /* Union forward declarations and bodies. */
-    for (int i = 0; i < prog->nchildren; i++) {
-        Node* d = prog->children[i];
-        if (d->kind == ND_UNION_DECL)
-            emit_union_decl(g, d);
-        if (d->kind == ND_UNION_FWD)
-            emit_union_fwd_decl(g, d);
     }
     /* Specialised structs: one per SymMono. */
     for (int i = 0; i < st->nmonos; i++) {
