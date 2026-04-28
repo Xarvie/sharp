@@ -4,7 +4,7 @@
 
 Sharp 是一个自研的 C/Sharp 编译器，目标是直接解析 MSVC UCRT 头文件（而非依赖 TCC 头文件）。
 
-**当前状态**: 95/95 核心测试全部通过（3 个已知 TCC 问题标记为 SKIP）。所有 13 个 UCRT 头文件（包括 uchar.h）完全通过，无任何错误。
+**当前状态**: 95/95 核心测试全部通过（3 个已知 TCC 问题标记为 SKIP）。所有 46 个可用 UCRT 头文件完全通过（18 个 Windows SDK-only 头文件标记为 SKIP）。
 
 ---
 
@@ -43,25 +43,18 @@ Set-Content $sp "/* auto */`n#include <uchar.h>`nint main() { return 0; }" -Enco
 
 ## UCRT 头文件测试结果
 
-### 全部通过（13/13）
+### 通过（46个）
 
-所有 UCRT 头文件均通过测试，无任何语法解析错误（E1000）或语义分析错误（E300x）。
+所有可用的 UCRT 头文件均通过测试，无任何语法解析错误（E1000）或语义分析错误（E300x）。
 
-| 头文件 | 状态 |
-|--------|------|
-| complex.h | ✅ 通过 |
-| corecrt.h | ✅ 通过 |
-| crtdbg.h | ✅ 通过 |
-| fpieee.h | ✅ 通过 |
-| mbctype.h | ✅ 通过 |
-| mbstring.h | ✅ 通过 |
-| new.h | ✅ 通过 |
-| search.h | ✅ 通过 |
-| stdalign.h | ✅ 通过 |
-| stdnoreturn.h | ✅ 通过 |
-| tgmath.h | ✅ 通过 |
-| uchar.h | ✅ 通过（之前有 18 个语义分析错误，现已全部修复） |
-| wchar.h | ✅ 通过 |
+### Windows SDK-only 头文件（18个，标记为 SKIP）
+
+以下头文件仅在 Windows SDK 中可用，不在 MinGW 包含路径中：
+- safeint.h, safeint_internal.h（C++ only）
+- corecrt_io.h, corecrt_malloc.h, corecrt_math.h, corecrt_math_defines.h
+- corecrt_memcpy_s.h, corecrt_memory.h, corecrt_search.h, corecrt_share.h
+- corecrt_terminate.h, corecrt_wdirect.h, corecrt_wio.h, corecrt_wprocess.h
+- corecrt_wstdio.h, corecrt_wstring.h, corecrt_wtime.h, tgmath.h
 
 ### C++ only 头文件（预期跳过）
 - safeint.h / safeint_internal.h — C++ only，不在任何 include 路径中
@@ -383,9 +376,22 @@ if (op == OP_COMMA) return rt;
 - 3 个跳过是预先存在的 TCC 头文件测试（test_tcc_basetsd_h, test_tcc_basetyps_h, test_tcc_file_h）
 - 这些失败在本次修改前就已存在，不是由本次修改造成的
 
-### UCRT 头文件: 13/13 通过
-- 所有 13 个头文件无语法解析错误（E1000）和语义分析错误（E300x）
-- 1 个头文件 (safeint.h) 是 C++ only，预期跳过
+### UCRT 头文件: 46 PASS, 0 FAIL, 18 SKIP
+- 46 个头文件无语法解析错误（E1000）和语义分析错误（E300x）
+- 18 个 Windows SDK-only 头文件标记为 SKIP（safeint.h, corecrt_io.h 等）
+- 1 个 C++ only 头文件标记为 SKIP（safeint.h）
+
+### 回归测试
+
+统一使用 Python 脚本 `run_tests.py` 运行所有测试：
+```bash
+python run_tests.py          # 运行所有测试
+python run_tests.py --core   # 仅运行核心测试
+python run_tests.py --ucrt   # 仅运行 UCRT 头文件测试
+python run_tests.py -v       # 详细输出
+```
+
+所有旧的 PowerShell 测试脚本已删除。
 
 ---
 
