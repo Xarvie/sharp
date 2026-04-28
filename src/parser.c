@@ -27,6 +27,7 @@ static Node* mk(P* p, NodeKind k, int line) {
     Node* n = ARENA_NEW(p->arena, Node);
     n->kind = k;
     n->line = line;
+    n->source_file = p->lex->filename;
     return n;
 }
 
@@ -451,6 +452,21 @@ static Type* parse_type(P* p) {
         lex_next(p->lex);
         base = type_prim(p->arena, TY_LONGLONG);
     } else if (t.kind == TK_IDENT && lex_ident_is(t, "wchar_t")) {
+        /* wchar_t is a C-standard built-in typedef (C99 §7.17, C11 §7.19).
+         * We handle it specially in the parser because:
+         *   (a) System headers (corecrt.h, wchar.h) use wchar_t extensively
+         *       and are parsed BEFORE sema pass 4c runs, so we need parser-level
+         *       recognition to build correct Type trees.
+         *   (b) User code may still define `typedef int wchar_t;` for sharpc's
+         *       own type system — sema pass 4c handles that by registering
+         *       wchar_t as a typedef mapped to TY_INT.
+         *
+         * This is NOT a violation of parser/semantic separation — wchar_t is
+         * a built-in type in C, similar to int/char, just with an unusual name.
+         * The parser MUST recognize it to correctly handle system headers.
+         *
+         * See also: sema.c L373 (sema pass 4c wchar_t registration)
+         *           sema.c L285 (sema_resolve_type typedef resolution) */
         lex_next(p->lex);
         base = type_named(p->arena, "wchar_t");
     } else if (is_c_type_mod(t.kind)) {
@@ -757,15 +773,32 @@ static Type* parse_declarator_internal(P* p, Type* base, const char** out_name, 
             /* Array suffix: name[N] or name[] */
             lex_next(p->lex); /* consume '[' */
             if (accept(p, TK_RBRACKET)) {
-                /* Unsized array — becomes pointer */
+                /* Unsized array — always decays to pointer (C standard) */
                 base = type_ptr(p->arena, base);
             } else {
-                /* Parse dimension expression, but for type construction
-                 * we just make it a pointer (C arrays decay anyway). */
+                /* Parse dimension expression.
+                 * In non-abstract mode (typedef/variable declarations), preserve
+                 * the array dimension by constructing a TY_ARRAY type.
+                 * In abstract mode (function parameters), arrays decay to pointer
+                 * per C standard §6.7.6.3p7. */
                 Node* dim = parse_expr(p);
-                (void)dim;
                 expect(p, TK_RBRACKET, "expected ']' after array dimension");
-                base = type_ptr(p->arena, base);
+                if (abstract) {
+                    /* Function parameter — array decays to pointer */
+                    base = type_ptr(p->arena, base);
+                } else {
+                    /* typedef/variable declaration — preserve dimension */
+                    int sz = 0;
+                    if (dim && dim->kind == ND_INT) {
+                        sz = (int)dim->ival;
+                    }
+                    /* If dimension is non-constant or zero-sized, fall back to pointer */
+                    if (sz > 0) {
+                        base = type_array(p->arena, base, sz);
+                    } else {
+                        base = type_ptr(p->arena, base);
+                    }
+                }
             }
         } else if (s.kind == TK_LPAREN) {
             /* Function parameter list */
@@ -3226,17 +3259,9 @@ type_start_path:
                         continue;
                     } else if (lex_peek(p->lex).kind == TK_LBRACE) {
                         /* Function definition with body.
-                         * For `extern __inline__` from system headers (tcc/include), skip the body —
+                         * For `extern __inline__` from system headers, skip the body —
                          * we only need the declaration. For user code, parse the full definition. */
-                        const char* cur_file = p->lex->filename;
-                        bool is_system_header = (cur_file && (strstr(cur_file, "tcc/include") != NULL ||
-                                                               strstr(cur_file, "third_party\\tcc\\include") != NULL ||
-                                                               strstr(cur_file, "Windows Kits") != NULL ||
-                                                               strstr(cur_file, "Microsoft Visual Studio") != NULL ||
-                                                               strstr(cur_file, "mingw") != NULL ||
-                                                               strstr(cur_file, "msys64") != NULL ||
-                                                               strstr(cur_file, "/usr/include") != NULL));
-                        if (saw_inline && is_system_header) {
+                        if (saw_inline && is_system_header_path(p->lex->filename)) {
                             /* C header extern __inline__ — skip body */
                             lex_next(p->lex); /* consume '{' */
                             int depth = 1;

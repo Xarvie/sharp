@@ -6,7 +6,7 @@
 int main(void);
 
 int main(void) {
-    int (*fp)(int, int) = (void*)0;
+    int (*fp)(int, int) = (void *)0;
     return 0;
 }
 

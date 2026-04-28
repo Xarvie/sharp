@@ -2,8 +2,8 @@
 
 
 extern char* strncpy(char* dest, char* src, long n);
-extern void* memcpy(void* dest, const void* src, long n);
-extern void* memmove(void* dest, const void* src, long n);
+extern void * memcpy(void *dest, const void *src, long n);
+extern void * memmove(void *dest, const void *src, long n);
 
 int main(void);
 

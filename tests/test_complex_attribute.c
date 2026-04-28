@@ -3,7 +3,7 @@
 
 int x;
 int y;
-void* z;
+void *z;
 int main(void);
 
 int main(void) {

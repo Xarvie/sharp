@@ -5,10 +5,10 @@ typedef struct Flags Flags;
 int main(void);
 
 struct Flags {
-    int a : 1;
-    int b : 2;
-    int c : 4;
-    int d : 25;
+    int a;
+    int b;
+    int c;
+    int d;
 };
 
 int main(void) {

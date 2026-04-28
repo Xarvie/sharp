@@ -352,6 +352,12 @@ struct Node {
     Type*        type;       /* filled by codegen-time type resolver if needed */
     int          line;
 
+    /* Source file tracking — identifies whether this node originated from
+     * user source code or a system/SDK header. Set by parser's mk() from
+     * p->lex->filename at creation time, used by codegen for typedef
+     * filtering and other source-dependent decisions. */
+    const char*  source_file;
+
     /* children list (ND_PROGRAM, ND_BLOCK) */
     Node**       children;
     int          nchildren;
@@ -427,6 +433,36 @@ struct Node {
 
 /* self-receiver kinds */
 enum { SELF_NONE = 0, SELF_VALUE = 1, SELF_REF = 2 };
+
+/* ===================================================================== *
+ *   Source file tracking
+ * ===================================================================== */
+
+/* Unified system header detection. Returns true if the given file path
+ * belongs to a system/SDK header. Single source of truth used by both
+ * parser (inline function skip) and codegen (typedef filtering).
+ *
+ * Covers: Windows SDK, UCRT, MinGW/MSYS, TCC runtime headers.
+ * Add new path patterns here rather than duplicating across call sites. */
+static inline bool is_system_header_path(const char* path) {
+    if (!path) return false;
+    /* TCC / MinGW / MSYS / Cygwin */
+    if (strstr(path, "tcc/include") != NULL) return true;
+    if (strstr(path, "third_party\\tcc\\include") != NULL) return true;
+    if (strstr(path, "third_party/tcc/include") != NULL) return true;
+    if (strstr(path, "mingw") != NULL) return true;
+    if (strstr(path, "msys64") != NULL) return true;
+    if (strstr(path, "/usr/include") != NULL) return true;
+    if (strstr(path, "/cygdrive/") != NULL) return true;
+    if (strstr(path, "w32api") != NULL) return true;
+    /* Windows SDK / UCRT */
+    if (strstr(path, "Windows Kits") != NULL) return true;
+    if (strstr(path, "Microsoft Visual Studio") != NULL) return true;
+    /* LLVM / Clang built-in headers */
+    if (strstr(path, "lib/clang/") != NULL) return true;
+    if (strstr(path, "lib\\clang\\") != NULL) return true;
+    return false;
+}
 
 /* ===================================================================== *
  *   Lexer

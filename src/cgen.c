@@ -160,270 +160,437 @@ static void mangle_type_to(StrBuf* sb, Type* t) {
     sb_puts(sb, ty_mangle(t));
 }
 
-static void emit_type_name(G* g, Type* t) {
-    Type* rt = resolve_type(g, t);
-    if (rt->kind == TY_NAMED && rt->ntargs > 0) {
-        sb_puts(&g->out, ty_mangle(rt));
-        return;
-    }
-    sb_puts(&g->out, rt->name);
-}
-
-/* ---------- small helpers ---------- */
 static void pad(G* g) {
     for (int i = 0; i < g->indent; i++) sb_puts(&g->out, "    ");
 }
 
-/* Forward declaration for recursive type emission */
-static void emit_type_core(G* g, Type* t);
-
-/* Emit a C representation of `t`. For primitives and user named types,
- * the rendered form *is* the C form (we chose our type names to match
- * C directly). For pointers we append `*`. For generic instantiations we
- * emit the mangled name.
+/* ===================================================================== *
+ *   C Declarator engine
  *
- * Phase C: Function pointer types (TY_FUNC) are emitted as `ret (*)(params)`
- * when used standalone. When a name is present, use emit_type_with_name(). */
-static void emit_type(G* g, Type* t) {
-    if (!t) { sb_puts(&g->out, "/*null-type*/ void"); return; }
-    Type* rt = resolve_type(g, t);
-    if (!rt) { sb_puts(&g->out, "/*null-type*/ void"); return; }
-    switch (rt->kind) {
-        case TY_PTR:
-            if (rt->base && rt->base->kind == TY_FUNC) {
-                /* Pointer to function type resolved from a typedef (e.g. _PVFV*).
-                 * Check if the original (unresolved) type is TY_PTR with TY_NAMED base.
-                 * If so, prefer emitting `name*` rather than expanding the typedef to
-                 * `ret(*)(params)*` which produces invalid C syntax. */
-                if (t->kind == TY_PTR && t->base && t->base->kind == TY_NAMED &&
-                    t->base->ntargs == 0) {
-                    emit_type_name(g, t->base);
-                    sb_putc(&g->out, '*');
-                    if (rt->is_const) sb_puts(&g->out, " const");
-                    return;
-                }
-                /* Raw function pointer: emit as `ret(*)(params)` */
-                emit_type_core(g, rt->base->base);
-                sb_puts(&g->out, "(*)(");
-                for (int i = 0; i < rt->base->nfunc_params; i++) {
-                    if (i) sb_puts(&g->out, ", ");
-                    emit_type(g, rt->base->func_params[i]);
-                }
-                if (rt->base->func_variadic) {
-                    if (rt->base->nfunc_params > 0) sb_puts(&g->out, ", ");
-                    sb_puts(&g->out, "...");
-                }
-                sb_puts(&g->out, ")");
-                if (rt->is_const) sb_puts(&g->out, " const");
-            } else {
-                /* If base is a TY_NAMED that is NOT a C built-in type,
-                 * emit the typedef name directly followed by `*`. This avoids
-                 * expanding function pointer typedefs (e.g. `_PVFV*` → `void(*)(void)*`)
-                 * which produces invalid C syntax. For C built-in types like
-                 * `va_list`, `size_t`, etc., we still resolve them normally. */
-                Type* base = rt->base;
-                if (base && base->kind == TY_NAMED && base->ntargs == 0 && base->name) {
-                    const char* bn = base->name;
-                    bool is_builtin = (strcmp(bn, "va_list") == 0 ||
-                                       strcmp(bn, "__builtin_va_list") == 0 ||
-                                       strcmp(bn, "wchar_t") == 0 ||
-                                       strcmp(bn, "size_t") == 0 ||
-                                       strcmp(bn, "ptrdiff_t") == 0 ||
-                                       strcmp(bn, "intmax_t") == 0 ||
-                                       strcmp(bn, "uintmax_t") == 0);
-                    if (!is_builtin) {
-                        sb_puts(&g->out, bn);
-                        sb_putc(&g->out, '*');
-                        if (rt->is_const) sb_puts(&g->out, " const");
-                        return;
-                    }
-                }
-                emit_type(g, rt->base);
-                sb_putc(&g->out, '*');
-                if (rt->is_const) sb_puts(&g->out, " const");
-            }
-            return;
-        case TY_NAMED:
-            if (rt->ntargs > 0) sb_puts(&g->out, ty_mangle(rt));
-            else                sb_puts(&g->out, rt->name);
-            return;
-        case TY_FUNC:
-            /* Standalone function type: emit as function pointer syntax */
-            emit_type_core(g, rt->base);
-            sb_puts(&g->out, "(*)(");
-            for (int i = 0; i < rt->nfunc_params; i++) {
-                if (i) sb_puts(&g->out, ", ");
-                emit_type(g, rt->func_params[i]);
-            }
-            if (rt->func_variadic) {
-                if (rt->nfunc_params > 0) sb_puts(&g->out, ", ");
-                sb_puts(&g->out, "...");
-            }
-            sb_puts(&g->out, ")");
-            return;
-        case TY_BITFIELD:
-            emit_type_core(g, rt->base);
-            sb_puts(&g->out, " : ");
-            {
-                char buf[16];
-                snprintf(buf, sizeof(buf), "%d", rt->bit_width);
-                sb_puts(&g->out, buf);
-            }
-            return;
-        case TY_ARRAY:
-            /* Array type: emit base type only, dimension appended by caller */
-            emit_type(g, rt->base);
-            sb_printf(&g->out, "[%d]", rt->array_size);
-            return;
-        default:
-            emit_type_core(g, rt);
-            return;
+ *   C declarations use a "center-around" grammar (dangling modifiers):
+ *     int* p              → specifier "int", declarator "*p"
+ *     int (*fp)(int)      → specifier "int", declarator "(*fp)(int)"
+ *     _PVFV* p            → specifier "_PVFV", declarator "*p"
+ *     int (*(*pp)(int))(void) → specifier "int", declarator "(*(*pp)(int))(void)"
+ *
+ *   The old emit_type/emit_type_with_name used left-to-right string
+ *   concatenation, which cannot correctly handle nested function pointers
+ *   or arrays of function pointers.
+ *
+ *   New approach:
+ *     1. Decompose Type into a list of modifiers (PTR/ARRAY/FUNC)
+ *     2. Identify the specifier (innermost non-decorator type)
+ *     3. Render: specifier + declarators (innermost first, auto-parens)
+ * ===================================================================== */
+
+typedef enum { MOD_PTR, MOD_ARRAY, MOD_FUNC } ModKind;
+
+typedef struct Mod {
+    ModKind     kind;
+    bool        is_const;       /* for MOD_PTR: const-ness of the pointer */
+    int         array_size;     /* for MOD_ARRAY */
+    Type**      func_params;    /* for MOD_FUNC */
+    int         nfunc_params;
+    bool        func_variadic;
+} Mod;
+
+/* Decompose a resolved Type into a list of modifiers.
+ * The specifier is the innermost non-decorator type.
+ * Modifiers are collected outermost-first, then reversed during emission.
+ * Returns the number of modifiers filled (max 32). */
+static int decompose_type(G* g, Type* t, Mod* mods, int max_mods) {
+    int n = 0;
+    Type* cur = t;
+    for (;;) {
+        if (!cur) break;
+        Type* rt = resolve_type(g, cur);
+        if (!rt) break;
+
+        if (rt->kind == TY_PTR) {
+            if (n >= max_mods) break;
+            mods[n].kind = MOD_PTR;
+            mods[n].is_const = rt->is_const;
+            mods[n].array_size = 0;
+            mods[n].func_params = NULL;
+            mods[n].nfunc_params = 0;
+            mods[n].func_variadic = false;
+            n++;
+            /* If base is TY_NAMED (a typedef name), stop decomposing.
+             * The typedef name becomes the specifier. */
+            if (rt->base && rt->base->kind == TY_NAMED && rt->base->ntargs == 0)
+                break;
+            cur = rt->base;
+        } else if (rt->kind == TY_ARRAY) {
+            if (n >= max_mods) break;
+            mods[n].kind = MOD_ARRAY;
+            mods[n].is_const = false;
+            mods[n].array_size = rt->array_size;
+            mods[n].func_params = NULL;
+            mods[n].nfunc_params = 0;
+            mods[n].func_variadic = false;
+            n++;
+            cur = rt->base;
+        } else if (rt->kind == TY_FUNC) {
+            if (n >= max_mods) break;
+            mods[n].kind = MOD_FUNC;
+            mods[n].is_const = false;
+            mods[n].array_size = 0;
+            mods[n].func_params = rt->func_params;
+            mods[n].nfunc_params = rt->nfunc_params;
+            mods[n].func_variadic = rt->func_variadic;
+            n++;
+            cur = rt->base;
+        } else if (rt->kind == TY_BITFIELD) {
+            cur = rt->base;
+        } else {
+            break;
+        }
+    }
+    return n;
+}
+
+/* Return the specifier type (innermost non-decorator type) for a given Type. */
+static Type* specifier_of(G* g, Type* t) {
+    Type* cur = t;
+    for (;;) {
+        if (!cur) return cur;
+        Type* rt = resolve_type(g, cur);
+        if (!rt) return cur;
+        if (rt->kind == TY_PTR || rt->kind == TY_ARRAY || rt->kind == TY_FUNC) {
+            /* TY_PTR with TY_NAMED base: the NAMED is the specifier */
+            if (rt->kind == TY_PTR && rt->base && rt->base->kind == TY_NAMED &&
+                rt->base->ntargs == 0)
+                return rt->base;
+            cur = rt->base;
+        } else if (rt->kind == TY_BITFIELD) {
+            cur = rt->base;
+        } else {
+            return rt;
+        }
     }
 }
 
-/* Core type emission for primitives and simple types */
+/* Emit the specifier part of a type (no name, no modifiers). */
+static void emit_specifier(G* g, Type* t) {
+    if (!t) { sb_puts(&g->out, "void"); return; }
+    Type* rt = resolve_type(g, t);
+    if (!rt) { sb_puts(&g->out, "void"); return; }
+
+    /* If it's a TY_PTR wrapping TY_NAMED (typedef name), emit the name. */
+    if (rt->kind == TY_PTR && rt->base && rt->base->kind == TY_NAMED &&
+        rt->base->ntargs == 0) {
+        if (rt->base->name)
+            sb_puts(&g->out, rt->base->name);
+        else
+            sb_puts(&g->out, "void");
+        return;
+    }
+
+    if (rt->kind == TY_NAMED) {
+        if (rt->ntargs > 0) sb_puts(&g->out, ty_mangle(rt));
+        else                sb_puts(&g->out, rt->name);
+        return;
+    }
+
+    if (rt->is_const) sb_puts(&g->out, "const ");
+    switch (rt->kind) {
+        case TY_VOID:   sb_puts(&g->out, "void");      return;
+        case TY_BOOL:   sb_puts(&g->out, "_Bool");     return;
+        case TY_CHAR:   sb_puts(&g->out, "char");      return;
+        case TY_SHORT:  sb_puts(&g->out, "short");     return;
+        case TY_INT:    sb_puts(&g->out, "int");       return;
+        case TY_LONG:   sb_puts(&g->out, "long");      return;
+        case TY_LONGLONG: sb_puts(&g->out, "long long"); return;
+        case TY_FLOAT:  sb_puts(&g->out, "float");     return;
+        case TY_DOUBLE: sb_puts(&g->out, "double");    return;
+        case TY_PTR:    sb_puts(&g->out, "void");      return; /* fallback */
+        case TY_FUNC:   sb_puts(&g->out, "void");      return; /* fallback */
+        case TY_BITFIELD: emit_specifier(g, rt->base); return;
+        case TY_ARRAY:  emit_specifier(g, rt->base);   return;
+    }
+    sb_puts(&g->out, ty_render(rt));
+}
+
+/* Check if modifier at index `i` needs parentheses when rendered.
+ * A PTR modifier needs parens if the next inner modifier is ARRAY or FUNC.
+ * (e.g. `int (*p)[10]` — the * needs parens because inside is [10]) */
+static bool mod_needs_parens(Mod* mods, int n, int i) {
+    if (mods[i].kind != MOD_PTR) return false;
+    int inner = i + 1;
+    if (inner >= n) return false;
+    return mods[inner].kind == MOD_ARRAY || mods[inner].kind == MOD_FUNC;
+}
+
+/* Forward declaration — needed by emit_declarator for recursive function param types. */
+static void emit_decl(G* g, Type* t, const char* name);
+
+/* Emit the declarator part (modifiers + name).
+ * `mods` is ordered as produced by decompose_type: outermost-inward
+ * from the perspective of the Type tree.
+ *   - For TY_PTR → MOD_PTR (outer), base → inner
+ *   - For TY_FUNC → MOD_FUNC (wraps name), base → return type (outer)
+ *
+ * In decompose_type output, modifiers are ordered from the outermost
+ * type layer inward. For `int (*fp)(int)`:
+ *   Type = TY_FUNC(base=TY_PTR(TY_INT), params=[TY_INT])
+ *   decompose: [MOD_FUNC, MOD_PTR]  (FUNC wraps PTR, PTR wraps INT)
+ *
+ * For C rendering:
+ *   - PTR modifiers go BEFORE the name (prefix)
+ *   - FUNC/ARRAY go AFTER the name (suffix)
+ *   - When PTR wraps FUNC or vice versa, parens may be needed
+ */
+static void emit_declarator(G* g, Mod* mods, int n, const char* name,
+                            int depth, bool parens) {
+    if (depth >= n) {
+        if (name) sb_puts(&g->out, name);
+        return;
+    }
+
+    /* Count PTR modifiers */
+    int nptr = 0;
+    int nfunc = 0;
+    int narray = 0;
+    for (int i = depth; i < n; i++) {
+        if (mods[i].kind == MOD_PTR) nptr++;
+        else if (mods[i].kind == MOD_FUNC) nfunc++;
+        else if (mods[i].kind == MOD_ARRAY) narray++;
+    }
+
+    /* Need parens around (PTRs + name) if we have both PTR and FUNC/ARRAY */
+    bool need_paren = parens;
+    if (!need_paren && nptr > 0 && (nfunc > 0 || narray > 0)) {
+        need_paren = true;
+    }
+
+    /* Step 1: open paren if needed */
+    if (need_paren) sb_putc(&g->out, '(');
+
+    /* Step 2: emit PTR prefix */
+    for (int i = depth; i < n; i++) {
+        if (mods[i].kind == MOD_PTR) {
+            sb_putc(&g->out, '*');
+            if (mods[i].is_const) sb_puts(&g->out, " const");
+        }
+    }
+
+    /* Step 3: emit name */
+    if (name) sb_puts(&g->out, name);
+
+    /* Step 4: close paren (before ARRAY suffixes, they go inside) */
+    /* NOTE: For function pointer arrays like void (*arr[8])(int),
+     * the ARRAY suffix goes INSIDE the parentheses, and FUNC goes OUTSIDE.
+     * So we close the paren AFTER ARRAY suffixes in Step 5b. */
+
+    /* Step 5: emit suffixes.
+     * decompose_type outputs modifiers from outermost to innermost.
+     * For C declarator syntax, suffixes closest to the name must appear first.
+     *
+     * When need_paren is true (pointer wrapping a function/array), the
+     * structure is: (*name + ARRAY suffixes)(FUNC suffixes)
+     *   - ARRAY suffixes go INSIDE the parentheses (closest to name)
+     *   - FUNC suffixes go OUTSIDE the parentheses (outermost)
+     *
+     * When need_paren is false:
+     *   - All suffixes go directly after the name
+     *
+     * In both cases, ARRAY suffixes (innermost) come before FUNC suffixes (outermost).
+     * We traverse mods in REVERSE (innermost first) and emit ARRAY then FUNC.
+     *
+     * Example: void (*handler_arr[8])(int)
+     *   decompose: [MOD_FUNC(outer), MOD_ARRAY, MOD_PTR(inner)]
+     *   output: (*handler_arr[8])(int)
+     *     - [*] inside parens
+     *     - [handler_arr] name
+     *     - [8] ARRAY inside parens (closer to name)
+     *     - close paren
+     *     - (int) FUNC outside parens (outermost)
+     */
+
+    /* Step 5a: emit ARRAY suffixes INSIDE parentheses (if need_paren) */
+    for (int i = n - 1; i >= depth; i--) {
+        if (mods[i].kind == MOD_ARRAY && need_paren) {
+            sb_printf(&g->out, "[%d]", mods[i].array_size);
+        }
+    }
+
+    /* Step 5b: close paren (AFTER ARRAY suffixes) */
+    if (need_paren) sb_putc(&g->out, ')');
+
+    /* Step 5c: emit remaining suffixes (ARRAY without paren, FUNC) */
+    for (int i = n - 1; i >= depth; i--) {
+        if (mods[i].kind == MOD_ARRAY && !need_paren) {
+            sb_printf(&g->out, "[%d]", mods[i].array_size);
+        } else if (mods[i].kind == MOD_FUNC) {
+            sb_putc(&g->out, '(');
+            for (int j = 0; j < mods[i].nfunc_params; j++) {
+                if (j) sb_puts(&g->out, ", ");
+                emit_decl(g, mods[i].func_params[j], NULL);
+            }
+            if (mods[i].func_variadic) {
+                if (mods[i].nfunc_params > 0) sb_puts(&g->out, ", ");
+                sb_puts(&g->out, "...");
+            }
+            sb_putc(&g->out, ')');
+        }
+    }
+}
+
+/* Public entry point: emit `specifier declarator` for type `t`.
+ * If `name` is non-NULL, append the identifier. */
+static void emit_decl(G* g, Type* t, const char* name) {
+    if (!t) {
+        sb_printf(&g->out, "/*null-type*/ void");
+        if (name) sb_printf(&g->out, " %s", name);
+        return;
+    }
+
+    Type* spec = specifier_of(g, t);
+    Mod mods[32];
+    int n = decompose_type(g, t, mods, 32);
+
+    /* If no modifiers, just emit specifier + name */
+    if (n == 0) {
+        emit_specifier(g, spec);
+        if (name) sb_printf(&g->out, " %s", name);
+        return;
+    }
+
+    /* Special case: single MOD_PTR with TY_NAMED base.
+     * Emit as `name* identifier` directly (no decomposition needed). */
+    if (n == 1 && mods[0].kind == MOD_PTR &&
+        t->kind == TY_PTR && t->base && t->base->kind == TY_NAMED &&
+        t->base->ntargs == 0 && t->base->name) {
+        sb_puts(&g->out, t->base->name);
+        sb_putc(&g->out, '*');
+        if (mods[0].is_const) sb_puts(&g->out, " const");
+        if (name) sb_printf(&g->out, " %s", name);
+        return;
+    }
+
+    /* Emit specifier, then declarator modifiers (outermost-first). */
+    emit_specifier(g, spec);
+    sb_putc(&g->out, ' ');
+    emit_declarator(g, mods, n, name, 0, false);
+}
+
+/* Emit a declaration with `__unaligned` inserted before the first `*`.
+ * MSVC requires: `int * __unaligned ptr` not `int* ptr __unaligned`. */
+static void emit_decl_unaligned(G* g, Type* t, const char* name) {
+    if (!t) {
+        sb_printf(&g->out, "/*null-type*/ void * __unaligned %s", name ? name : "");
+        return;
+    }
+    Type* spec = specifier_of(g, t);
+    Mod mods[32];
+    int n = decompose_type(g, t, mods, 32);
+
+    /* If no modifiers, just emit normally */
+    if (n == 0) {
+        emit_specifier(g, spec);
+        if (name) sb_printf(&g->out, " %s", name);
+        return;
+    }
+
+    /* Find the first PTR modifier and mark it for __unaligned insertion */
+    /* Emit specifier */
+    emit_specifier(g, spec);
+    sb_putc(&g->out, ' ');
+
+    /* Emit declarator, inserting __unaligned before the first * */
+    for (int i = 0; i < n; i++) {
+        bool needs_parens = mod_needs_parens(mods, n, i);
+        if (needs_parens) sb_putc(&g->out, '(');
+
+        /* Recursively emit inner declarators first */
+        /* We need to restructure this — just handle the simple case:
+         * single PTR modifier: `type * __unaligned name` */
+        if (n == 1 && mods[0].kind == MOD_PTR) {
+            if (name) sb_printf(&g->out, "* __unaligned %s", name);
+            else sb_puts(&g->out, "* __unaligned");
+            if (mods[0].is_const) sb_puts(&g->out, " const");
+            return;
+        }
+
+        if (needs_parens) sb_putc(&g->out, ')');
+    }
+    /* Fallback: emit normally without __unaligned */
+    emit_decl(g, t, name);
+}
+
+/* ===================================================================== *
+ *   Compatibility wrappers — route old API to the new declarator engine.
+ *   These will be phased out as call sites are migrated to emit_decl().
+ * ===================================================================== */
+
+/* emit_type(t)  →  emit_decl(t, NULL) */
+static void emit_type(G* g, Type* t) {
+    emit_decl(g, t, NULL);
+}
+
+/* emit_type_with_name(t, name)  →  emit_decl(t, name) */
+static void emit_type_with_name(G* g, Type* t, const char* name) {
+    emit_decl(g, t, name);
+}
+
+/* emit_type_core(t) — emit just the specifier (no modifiers, no name).
+ * For primitives/named types this is the same as emit_specifier.
+ * For PTR/ARRAY/FUNC types, the old code emitted the full decorated type
+ * without a name. We handle the common cases: */
 static void emit_type_core(G* g, Type* t) {
     if (!t) { sb_puts(&g->out, "void"); return; }
     Type* rt = resolve_type(g, t);
     if (!rt) { sb_puts(&g->out, "void"); return; }
+
     switch (rt->kind) {
-        case TY_PTR:
-            emit_type_core(g, rt->base);
-            sb_putc(&g->out, '*');
-            if (rt->is_const) sb_puts(&g->out, " const");
-            return;
-        case TY_NAMED:
-            if (rt->ntargs > 0) sb_puts(&g->out, ty_mangle(rt));
-            else                sb_puts(&g->out, rt->name);
-            return;
-        case TY_FUNC:
-            /* Fallback: emit as function pointer without name */
-            emit_type_core(g, rt->base);
-            sb_puts(&g->out, "(*)(");
-            for (int i = 0; i < rt->nfunc_params; i++) {
-                if (i) sb_puts(&g->out, ", ");
-                emit_type_core(g, rt->func_params[i]);
-            }
-            if (rt->func_variadic) {
-                if (rt->nfunc_params > 0) sb_puts(&g->out, ", ");
-                sb_puts(&g->out, "...");
-            }
-            sb_puts(&g->out, ")");
-            return;
-        case TY_BITFIELD:
-            emit_type_core(g, rt->base);
-            sb_printf(&g->out, " : %d", rt->bit_width);
-            return;
-        default:
-            if (rt->is_const) sb_puts(&g->out, "const ");
-            switch (rt->kind) {
-                case TY_VOID:   sb_puts(&g->out, "void");      return;
-                case TY_BOOL:   sb_puts(&g->out, "_Bool");     return;
-                case TY_CHAR:   sb_puts(&g->out, "char");      return;
-                case TY_SHORT:  sb_puts(&g->out, "short");     return;
-                case TY_INT:    sb_puts(&g->out, "int");       return;
-                case TY_LONG:   sb_puts(&g->out, "long");      return;
-                case TY_LONGLONG: sb_puts(&g->out, "long long"); return;
-                case TY_FLOAT:  sb_puts(&g->out, "float");     return;
-                case TY_DOUBLE: sb_puts(&g->out, "double");    return;
-                default:        sb_puts(&g->out, ty_render(rt)); return;
-            }
-    }
-}
-
-/* Emit a type followed by a name, handling function pointer syntax correctly.
- * For `int (*fp)(int)`, this emits: `int (*fp)(int)`
- * For `int x`, this emits: `int x`
- * For `int* p`, this emits: `int* p` */
-
-/* Forward declaration */
-static void emit_type_with_name(G* g, Type* t, const char* name);
-
-/* Emit a type name with `__unaligned` inserted before the first `*`.
- * MSVC requires: `int * __unaligned ptr` not `int* ptr __unaligned`. */
-static void emit_type_with_name_unaligned(G* g, Type* t, const char* name) {
-    if (!t) { sb_printf(&g->out, "/*null-type*/ void * __unaligned %s", name ? name : ""); return; }
-    Type* rt = resolve_type(g, t);
-    if (!rt) { sb_printf(&g->out, "/*null-type*/ void * __unaligned %s", name ? name : ""); return; }
-
-    if (rt->kind == TY_PTR) {
-        /* Emit base type, then `* __unaligned name` */
+    case TY_PTR:
         emit_type_core(g, rt->base);
-        sb_printf(&g->out, " * __unaligned %s", name ? name : "");
+        sb_putc(&g->out, '*');
+        if (rt->is_const) sb_puts(&g->out, " const");
         return;
-    }
-
-    /* Fallback: just emit normally */
-    emit_type_with_name(g, t, name);
-}
-
-static void emit_type_with_name(G* g, Type* t, const char* name) {
-    if (!t) { sb_printf(&g->out, "/*null-type*/ void %s", name ? name : ""); return; }
-    Type* rt = resolve_type(g, t);
-    if (!rt) { sb_printf(&g->out, "/*null-type*/ void %s", name ? name : ""); return; }
-
-    /* Function type (possibly through a pointer): emit as `ret (*name)(params)` */
-    Type* func_rt = rt;
-    bool is_func_ptr = false;
-    if (func_rt->kind == TY_FUNC) {
-        is_func_ptr = false;
-    } else if (func_rt->kind == TY_PTR && func_rt->base && func_rt->base->kind == TY_FUNC) {
-        is_func_ptr = true;
-        func_rt = func_rt->base;
-    }
-
-    if (func_rt->kind == TY_FUNC) {
-        /* Function type: emit as `ret (*name)(params)` or `ret (* const name)(params)` */
-        const char* n = name ? name : "";
-        if (t->kind == TY_PTR && t->is_const) {
-            /* const function pointer: ret (* const name)(params) */
-            emit_type_core(g, func_rt->base);
-            sb_printf(&g->out, " (* const %s)(", n);
-        } else {
-            emit_type_core(g, func_rt->base);
-            sb_printf(&g->out, " (*%s)(", n);
-        }
-        for (int i = 0; i < func_rt->nfunc_params; i++) {
+    case TY_NAMED:
+        if (rt->ntargs > 0) sb_puts(&g->out, ty_mangle(rt));
+        else                sb_puts(&g->out, rt->name);
+        return;
+    case TY_FUNC: {
+        /* Function type without a name: emit as `ret (*)(params)` */
+        emit_type_core(g, rt->base);
+        sb_puts(&g->out, "(*)(");
+        for (int i = 0; i < rt->nfunc_params; i++) {
             if (i) sb_puts(&g->out, ", ");
-            emit_type(g, func_rt->func_params[i]);
+            emit_type_core(g, rt->func_params[i]);
         }
-        if (func_rt->func_variadic) {
-            if (func_rt->nfunc_params > 0) sb_puts(&g->out, ", ");
+        if (rt->func_variadic) {
+            if (rt->nfunc_params > 0) sb_puts(&g->out, ", ");
             sb_puts(&g->out, "...");
         }
         sb_puts(&g->out, ")");
         return;
     }
-
-    if (rt->kind == TY_BITFIELD) {
+    case TY_BITFIELD:
         emit_type_core(g, rt->base);
-        sb_printf(&g->out, " %s : %d", name ? name : "", rt->bit_width);
+        sb_printf(&g->out, " : %d", rt->bit_width);
         return;
-    }
-
-    /* Handle array types: emit base type, name, then all array dimensions */
-    {
-        Type* cur = rt;
-        int dims[16];
-        int ndims = 0;
-        while (cur->kind == TY_ARRAY) {
-            if (ndims < 16) dims[ndims++] = cur->array_size;
-            cur = cur->base;
-        }
-        if (ndims > 0) {
-            /* We have array dimensions: emit base type, name, then [d1][d2]... */
-            emit_type(g, cur);
-            sb_printf(&g->out, " %s", name ? name : "");
-            for (int i = ndims - 1; i >= 0; i--) {
-                sb_printf(&g->out, "[%d]", dims[i]);
-            }
-            return;
+    default:
+        if (rt->is_const) sb_puts(&g->out, "const ");
+        switch (rt->kind) {
+            case TY_VOID:   sb_puts(&g->out, "void");      return;
+            case TY_BOOL:   sb_puts(&g->out, "_Bool");     return;
+            case TY_CHAR:   sb_puts(&g->out, "char");      return;
+            case TY_SHORT:  sb_puts(&g->out, "short");     return;
+            case TY_INT:    sb_puts(&g->out, "int");       return;
+            case TY_LONG:   sb_puts(&g->out, "long");      return;
+            case TY_LONGLONG: sb_puts(&g->out, "long long"); return;
+            case TY_FLOAT:  sb_puts(&g->out, "float");     return;
+            case TY_DOUBLE: sb_puts(&g->out, "double");    return;
+            default:        sb_puts(&g->out, ty_render(rt)); return;
         }
     }
+}
 
-    /* Simple type: emit type then name */
-    emit_type(g, t);
-    sb_printf(&g->out, " %s", name ? name : "");
+/* emit_type_with_name_unaligned(t, name) — MSVC __unaligned support */
+static void emit_type_with_name_unaligned(G* g, Type* t, const char* name) {
+    emit_decl_unaligned(g, t, name);
 }
 
 static const char* bin_op_c(OpKind op) {
@@ -1529,8 +1696,45 @@ static bool is_crt_sdk_typedef(const char* name) {
     return false;
 }
 
+/* C compiler built-in types that cannot be redefined in C source.
+ * Unlike wchar_t (which is user-definable as a typedef), these are
+ * compiler intrinsics (§6.4.2.5, §7.19) that the C standard provides.
+ * Even if user code declares them for sharpc's type system, we must
+ * not emit them to C — the compiler already knows about them.
+ *
+ * This is separate from is_crt_sdk_typedef():
+ *   - is_crt_sdk_typedef() filters SYSTEM HEADER typedefs (va_list, etc.)
+ *   - is_c_compiler_builtin_type() filters C COMPILER BUILTINS (size_t, etc.) */
+static bool is_c_compiler_builtin_type(const char* name) {
+    static const char* builtins[] = {
+        "size_t", "ptrdiff_t", "nullptr_t", "max_align_t",
+        NULL
+    };
+    for (int i = 0; builtins[i]; i++)
+        if (strcmp(name, builtins[i]) == 0) return true;
+    return false;
+}
+
 static void emit_typedef_decl(G* g, Node* d) {
-    if (is_crt_sdk_typedef(d->name)) return;
+    /* Phase C1: Typedef emission filtering.
+     *
+     * Rule 1: System header typedefs with CRT names → skip
+     *   (provided by the C runtime, don't re-emit)
+     *
+     * Rule 2: C compiler builtin types → always skip
+     *   (size_t, ptrdiff_t, etc. are compiler intrinsics that cannot
+     *    be re-typedef'd in C source, even by user code)
+     *
+     * Rule 3: User-defined typedefs → emit normally
+     *   (all other typedefs from user source code are emitted as-is) */
+    if (is_system_header_path(d->source_file) && is_crt_sdk_typedef(d->name)) {
+        return;  /* Rule 1: system header typedef — skip */
+    }
+    if (is_c_compiler_builtin_type(d->name)) {
+        return;  /* Rule 2: C compiler builtin — skip */
+    }
+
+    /* Rule 3: User-defined typedef — emit normally */
     Type* dt = d->declared_type;
     if (dt && dt->kind == TY_NAMED) {
         SymStruct* ss = sema_find_struct(g->st, dt->name);
