@@ -653,6 +653,78 @@ static TokList substitute(const MacroDef *def,
     return result;
 }
 
+/* =========================================================================
+ * Expansion depth / token limits to prevent runaway macro expansion
+ * (e.g. P99 library with deeply nested recursive macros)
+ *
+ * These limits are intentionally conservative:
+ *   - Normal C code (even complex headers) rarely exceeds 2000 expansions
+ *   - P99 metaprogramming can use 10K+ expansions but is not "normal C"
+ *   - The goal is to prevent memory explosion, not to fully support P99
+ * ====================================================================== */
+#define MAX_EXPAND_DEPTH   20000   /* max recursive macro expansion calls      */
+#define MAX_EXPAND_TOKENS  50000   /* max tokens produced per file             */
+
+static int g_expand_depth   = 0;
+static int g_expand_tokens  = 0;
+
+static void expand_limits_reset(void) {
+    g_expand_depth  = 0;
+    g_expand_tokens = 0;
+}
+
+static bool expand_limits_check_depth(CppDiagArr *diags, const char *name, CppLoc loc) {
+    if (++g_expand_depth > MAX_EXPAND_DEPTH) {
+        if (diags) {
+            CppDiag d = {0};
+            d.level = CPP_DIAG_WARNING;
+            d.loc = loc;
+            /* Format warning message */
+            char buf[512];
+            int n = snprintf(buf, sizeof(buf),
+                "macro expansion depth limit reached (%d) — %s passed through unexpanded",
+                MAX_EXPAND_DEPTH, name ? name : "(macro)");
+            if (n > 0 && (size_t)n < sizeof(buf))
+                d.msg = (char *)cpp_xmalloc(n + 1);
+            else {
+                d.msg = (char *)cpp_xmalloc(80);
+                snprintf(d.msg, 80, "macro expansion depth limit reached");
+            }
+            if (d.msg) { strcpy(d.msg, buf); d.msg[n] = '\0'; }
+            diag_push(diags, d);
+        }
+        return false;
+    }
+    return true;
+}
+
+static bool expand_limits_check_tokens(CppDiagArr *diags, CppLoc loc) {
+    if (g_expand_tokens > MAX_EXPAND_TOKENS) {
+        if (diags) {
+            CppDiag d = {0};
+            d.level = CPP_DIAG_WARNING;
+            d.loc = loc;
+            char buf[256];
+            int n = snprintf(buf, sizeof(buf),
+                "macro expansion token limit reached (%d) — truncating output",
+                MAX_EXPAND_TOKENS);
+            if (n > 0 && (size_t)n < sizeof(buf))
+                d.msg = (char *)cpp_xmalloc(n + 1);
+            else
+                d.msg = (char *)cpp_xmalloc(60);
+            if (d.msg) { strcpy(d.msg, buf); d.msg[n] = '\0'; }
+            diag_push(diags, d);
+        }
+        return false;
+    }
+    return true;
+}
+
+/* Bump token counter for each token appended to output */
+static void expand_count_token(void) {
+    g_expand_tokens++;
+}
+
 /* Expand a token list recursively. */
 static void expand_list(TokList *input, MacroTable *mt,
                         InternTable *interns, CppDiagArr *diags,
@@ -760,11 +832,29 @@ static void expand_list(TokList *input, MacroTable *mt,
                     strcmp(pptok_spell(&sn->tok), name) == 0)
                     sn->tok.hide = true;
             }
+
+            /* Phase C2: Check expansion depth limit before recursing */
+            CppLoc expand_loc = def->def_loc;
+            if (!expand_limits_check_depth(diags, name, expand_loc)) {
+                /* Depth limit reached — pass macro name through unexpanded */
+                tl_free(&subst);
+                PPTok passthrough = *t;
+                passthrough.spell = (StrBuf){0};
+                sb_push_cstr(&passthrough.spell, name);
+                tl_append(output, passthrough);
+                for (int i = 0; i < nargs; i++) tl_free(&args[i]);
+                free(args);
+                continue;
+            }
+
             TokList expanded = {0};
             expand_list(&subst, mt, interns, diags, &expanded);
             tl_free(&subst);
 
+            /* Phase C2: Enforce token limit for expanded output */
             for (TokNode *en = expanded.head; en; en = en->next) {
+                if (!expand_limits_check_tokens(diags, expand_loc)) break;
+                expand_count_token();
                 PPTok copy = en->tok;
                 copy.spell = (StrBuf){0};
                 sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
@@ -791,11 +881,27 @@ static void expand_list(TokList *input, MacroTable *mt,
                     strcmp(pptok_spell(&bc->tok), name) == 0)
                     bc->tok.hide = true;
             }
+
+            /* Phase C2: Check expansion depth limit before recursing */
+            CppLoc expand_loc = def->def_loc;
+            if (!expand_limits_check_depth(diags, name, expand_loc)) {
+                /* Depth limit reached — pass macro name through unexpanded */
+                tl_free(&body_copy);
+                PPTok passthrough = *t;
+                passthrough.spell = (StrBuf){0};
+                sb_push_cstr(&passthrough.spell, name);
+                tl_append(output, passthrough);
+                continue;
+            }
+
             TokList expanded = {0};
             expand_list(&body_copy, mt, interns, diags, &expanded);
             tl_free(&body_copy);
 
+            /* Phase C2: Enforce token limit for expanded output */
             for (TokNode *en = expanded.head; en; en = en->next) {
+                if (!expand_limits_check_tokens(diags, expand_loc)) break;
+                expand_count_token();
                 PPTok copy = en->tok;
                 copy.spell = (StrBuf){0};
                 sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
@@ -810,6 +916,8 @@ static void expand_list(TokList *input, MacroTable *mt,
 void macro_expand(TokList *input, MacroTable *mt,
                   InternTable *interns, CppDiagArr *diags,
                   TokList *output) {
+    /* Phase C2: Reset expansion limits for each file */
+    expand_limits_reset();
     expand_list(input, mt, interns, diags, output);
 }
 

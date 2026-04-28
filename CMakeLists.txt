@@ -94,6 +94,19 @@ target_include_directories(sharpc PRIVATE
     ${TCC_DIR}/libtcc
 )
 
+# Windows: increase stack size to 8MB (default is 1MB) to handle complex
+# C header files (e.g. P99 library) with deep parse trees and nested blocks.
+# Use both modern and legacy approaches for maximum compatibility.
+if(WIN32)
+    if(MSVC)
+        # MSVC: use LINK_FLAGS property (reliable across all CMake versions)
+        set_target_properties(sharpc PROPERTIES LINK_FLAGS "/STACK:8388608")
+    elseif(MINGW OR CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        # MinGW/GCC/Clang with GNU ld: use --stack linker flag
+        target_link_options(sharpc PRIVATE -Wl,--stack,8388608)
+    endif()
+endif()
+
 # Copy libtcc.dll and tcc.exe to build output directory so sharpc can find them at runtime
 if(WIN32)
     add_custom_command(TARGET sharpc POST_BUILD
