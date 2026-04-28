@@ -389,6 +389,12 @@ static void handle_include(CppState *st, TokList *line, CppLoc loc,
     const char *found_interned = intern_cstr(st->interns, found);
     free(found);
 
+    /* Second guard check with the resolved absolute path.
+     * The first check (above) uses the raw #include name; this one uses the
+     * canonical path so that #pragma once guards stored under the absolute
+     * path are honoured even when included via a relative name. */
+    if (guard_already_included(st, found_interned)) return;
+
     st->include_depth++;
     emit_linemarker(st, 1, found_interned);
     process_file(st, found_interned, lang);

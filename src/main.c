@@ -376,6 +376,58 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         cpp_define(cpp, "__builtin_va_start(ap,x)",  "");
         cpp_define(cpp, "__builtin_va_end(ap)",      "");
         cpp_define(cpp, "__builtin_va_arg(ap,t)",    "(t)0");
+
+        /* SAL internal macros — prevent syntax errors in sal.h */
+        cpp_define(cpp, "_SA_annotes0(n)",           "");
+        cpp_define(cpp, "_SA_annotes1(n,pp)",        "");
+        cpp_define(cpp, "_SA_annotes2(n,pp1,pp2)",   "");
+        cpp_define(cpp, "_SA_annotes3(n,pp1,pp2,pp3)","");
+        cpp_define(cpp, "_SA_SPECSTRIZE(x)",         "#x");
+        cpp_define(cpp, "_SAL_nop_impl_",            "");
+        cpp_define(cpp, "_Group_(annotes)",          "");
+        cpp_define(cpp, "_GrouP_(annotes)",          "");
+        cpp_define(cpp, "_Group_impl_(annos)",       "");
+        cpp_define(cpp, "_GrouP_impl_(annos)",       "");
+        cpp_define(cpp, "_SAL1_Source_(Name,args,annotes)","");
+        cpp_define(cpp, "_SAL1_1_Source_(Name,args,annotes)","");
+        cpp_define(cpp, "_SAL1_2_Source_(Name,args,annotes)","");
+        cpp_define(cpp, "_SAL2_Source_(Name,args,annotes)","");
+        cpp_define(cpp, "_SAL_L_Source_(Name,args,annotes)","");
+
+        /* VC runtime internal macros */
+        cpp_define(cpp, "_VCRT_ALIGN(x)",            "");
+        cpp_define(cpp, "_VCRT_NOALIAS",             "");
+        cpp_define(cpp, "_VCRT_NONALIAS",            "");
+        cpp_define(cpp, "_VCRT_ALLOCATOR",           "");
+        cpp_define(cpp, "_VCRT_RESTRICT",            "");
+        cpp_define(cpp, "_VCRT_IMP_ALTERNATIVE",     "");
+        cpp_define(cpp, "_VCRT_RDONLY",              "");
+        cpp_define(cpp, "_VCRT_NOVTABLE",            "");
+
+        /* SAL attribute macros from sal.h */
+        cpp_define(cpp, "_SAL2_Source_(Name,args,annotes)","");
+        cpp_define(cpp, "_SAL_L_Source_(Name,args,annotes)","");
+        cpp_define(cpp, "_Field_size_(x)",           "");
+        cpp_define(cpp, "_Field_size_opt_(x)",       "");
+        cpp_define(cpp, "_Field_range_(x,y)",        "");
+        cpp_define(cpp, "_Struct_size_bytes_(x)",    "");
+        cpp_define(cpp, "_ACRTIMP_NOALIAS",          "");
+        cpp_define(cpp, "_ACRTIMP_NONALIAS_RET",     "");
+        cpp_define(cpp, "_CRTRESTRICT",              "");
+        cpp_define(cpp, "_CRT_HYBRIDPATCHABLE__",    "");
+        cpp_define(cpp, "_SECURECRT_FILL_BUFFER",    "");
+        cpp_define(cpp, "_CRT_JIT_ENTRY",            "");
+        cpp_define(cpp, "__MINGW_ATTRIB_NONNULL(x)", "");
+        cpp_define(cpp, "__MINGW_ATTRIB_NORETURN",   "");
+        cpp_define(cpp, "__MINGW_NOTHROW",           "");
+        cpp_define(cpp, "__MINGW_NOTHROW_NONNULL(x)","");
+        cpp_define(cpp, "__MINGW_ATTRIB_PURE",       "");
+        cpp_define(cpp, "__MINGW_ATTRIB_CONST",      "");
+        cpp_define(cpp, "__MINGW_ATTRIB_MALLOC",     "");
+        cpp_define(cpp, "__CRTCONST",                "");
+        cpp_define(cpp, "__CRT_INLINE",              "inline");
+        cpp_define(cpp, "_CRT_INLINE",               "inline");
+        cpp_define(cpp, "__MINGW_LSTR(x,y)",         "");
     }
 }
 
@@ -585,12 +637,13 @@ int main(int argc, char** argv) {
      * 1. User -I paths (added above)
      * 2. TCC headers (default — parser-friendly)
      * 3. MinGW fallback (Windows)
-     * 4. /usr/include (Linux/macOS)
+     * 4. Windows SDK UCRT fallback (Windows, for headers not in TCC)
+     * 5. /usr/include (Linux/macOS)
      *
-     * Note: UCRT/MSVC paths are disabled by default because UCRT headers
-     * contain complex SAL annotation patterns that our parser cannot fully
-     * handle yet. The SAL macros are defined as empty in apply_target_macros()
-     * for compatibility when users explicitly #include UCRT headers via -I. */
+     * Note: UCRT/MSVC paths are added as fallback after TCC because UCRT
+     * headers contain complex SAL annotations. TCC headers are simpler and
+     * proven to work. Windows SDK paths are only used for headers that
+     * don't exist in TCC (complex.h, corecrt*.h, crtdbg.h, etc.). */
 
     /* TCC headers (parser-friendly, proven to work) */
     char tcc_inc[512];
@@ -602,6 +655,42 @@ int main(int argc, char** argv) {
     cpp_add_sys_include(cpp_ctx, "C:/msys64/mingw64/include");
     cpp_add_sys_include(cpp_ctx, "C:/msys64/ucrt64/include");
     cpp_add_sys_include(cpp_ctx, "C:/mingw64/include");
+
+    /* Windows SDK UCRT fallback — for headers not in TCC (complex.h, etc.)
+     * Order matters: VC include must be before UCRT because corecrt.h
+     * includes <vcruntime.h> which is in the VC include directory. */
+    {
+        const char* vc_paths[] = {
+            "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include",
+            "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/14.43.34808/include",
+            "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/14.43.34808/include",
+            "C:/Program Files/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.29.30133/include",
+            NULL
+        };
+        for (int i = 0; vc_paths[i]; i++) {
+            DWORD attr = GetFileAttributesA(vc_paths[i]);
+            if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                cpp_add_sys_include(cpp_ctx, vc_paths[i]);
+                break;
+            }
+        }
+    }
+    {
+        const char* sdk_ucrt_paths[] = {
+            "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt",
+            "C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/ucrt",
+            "C:/Program Files/Windows Kits/10/Include/10.0.22621.0/ucrt",
+            "C:/Program Files/Windows Kits/10/Include/10.0.18362.0/ucrt",
+            NULL
+        };
+        for (int i = 0; sdk_ucrt_paths[i]; i++) {
+            DWORD attr = GetFileAttributesA(sdk_ucrt_paths[i]);
+            if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                cpp_add_sys_include(cpp_ctx, sdk_ucrt_paths[i]);
+                break;
+            }
+        }
+    }
 #else
     cpp_add_sys_include(cpp_ctx, "/usr/include");
     cpp_add_sys_include(cpp_ctx, "/usr/local/include");

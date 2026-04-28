@@ -543,6 +543,15 @@ static Type* parse_type(P* p) {
     /* Apply leading const to the base type. */
     if (leading_const) base = type_const(p->arena, base);
 
+    /* Trailing qualifiers between base type and '*': `wchar_t const *`, `void const volatile *`
+     * These are equivalent to putting the qualifier before the type. */
+    for (;;) {
+        if (accept(p, TK_CONST)) { base = type_const(p->arena, base); }
+        else if (lex_peek(p->lex).kind == TK_IDENT && lex_ident_is(lex_peek(p->lex), "volatile")) {
+            lex_next(p->lex); /* consume volatile — dropped, not modeled */
+        } else { break; }
+    }
+
     /* pointer suffix: 'T*' [const] [restrict] ('*' ... repeated)
      * Each `*` creates a new pointer type; an optional trailing `const`
      * or `restrict` applies to that pointer itself (e.g. `u8* const`). */
@@ -2964,7 +2973,10 @@ type_start_path:
                      * WINAPI, APIENTRY, CALLBACK, NTAPI, etc.
                      * Also skip Windows API decoration macros: _CRTIMP, __MINGW_NOTHROW, etc. */
                     Tok ident = lex_peek(p->lex);
-                    if (lex_ident_is(ident, "WINAPI") || lex_ident_is(ident, "APIENTRY") ||
+                    if (lex_ident_is(ident, "__forceinline")) {
+                        saw_inline = true;
+                        lex_next(p->lex);
+                    } else if (lex_ident_is(ident, "WINAPI") || lex_ident_is(ident, "APIENTRY") ||
                         lex_ident_is(ident, "CALLBACK") || lex_ident_is(ident, "NTAPI") ||
                         lex_ident_is(ident, "PASCAL") || lex_ident_is(ident, "CDECL") ||
                         lex_ident_is(ident, "STDCALL") || lex_ident_is(ident, "FASTCALL") ||
@@ -3202,8 +3214,13 @@ type_start_path:
                          * we only need the declaration. For user code, parse the full definition. */
                         const char* cur_file = p->lex->filename;
                         bool is_system_header = (cur_file && (strstr(cur_file, "tcc/include") != NULL ||
-                                                               strstr(cur_file, "third_party\\tcc\\include") != NULL));
-                        if (saw_extern_top && saw_inline && is_system_header) {
+                                                               strstr(cur_file, "third_party\\tcc\\include") != NULL ||
+                                                               strstr(cur_file, "Windows Kits") != NULL ||
+                                                               strstr(cur_file, "Microsoft Visual Studio") != NULL ||
+                                                               strstr(cur_file, "mingw") != NULL ||
+                                                               strstr(cur_file, "msys64") != NULL ||
+                                                               strstr(cur_file, "/usr/include") != NULL));
+                        if (saw_inline && is_system_header) {
                             /* C header extern __inline__ — skip body */
                             lex_next(p->lex); /* consume '{' */
                             int depth = 1;
@@ -3289,19 +3306,33 @@ type_start_path:
                     nd->declspec = declspec;
                     nv_push(&decls, nd);
                 } else {
-                    /* Global variable without init: `Type name;`
+                    /* Global variable without init: `Type name;` or `Type a, b, c;`
                      * If __declspec(dllimport) or `extern` was seen, treat as extern var.
                      * __declspec(thread) is a storage modifier, not extern. */
                     bool is_extern_decl = saw_extern_top ||
                         (declspec && strcmp(declspec, "dllimport") == 0);
                     /* Skip trailing __attribute__ */
                     skip_attribute(p);
+                    /* Emit first variable */
+                    {
+                        Node* nd = mk(p, is_extern_decl ? ND_EXTERN_VAR : ND_VARDECL, line);
+                        nd->declared_type = ret;
+                        nd->name = vname;
+                        nd->declspec = declspec;
+                        nv_push(&decls, nd);
+                    }
+                    /* Handle comma-separated multi-variable declarations: `Type a, b, c;` */
+                    while (accept(p, TK_COMMA)) {
+                        const char* extra_name = NULL;
+                        Type* extra_ty = parse_declarator(p, ret, &extra_name);
+                        if (!extra_name) break;
+                        Node* nd2 = mk(p, is_extern_decl ? ND_EXTERN_VAR : ND_VARDECL, line);
+                        nd2->declared_type = extra_ty;
+                        nd2->name = extra_name;
+                        nd2->declspec = declspec;
+                        nv_push(&decls, nd2);
+                    }
                     expect(p, TK_SEMI, "expected ';' after variable declaration");
-                    Node* nd = mk(p, is_extern_decl ? ND_EXTERN_VAR : ND_VARDECL, line);
-                    nd->declared_type = ret;
-                    nd->name = vname;
-                    nd->declspec = declspec;
-                    nv_push(&decls, nd);
                 }
                 continue;
             } else if (!fname && has_paren) {
@@ -3516,6 +3547,28 @@ type_start_path:
             g_error_count = saved_err;
             g_silent = false;
             nv_push(&decls, parse_func(p));
+        } else if (t.kind == TK_LPAREN) {
+            /* Skip MSVC pragma pack syntax: (pack(push, N)) or (pack(pop))
+             * These appear when __pragma(pack(...)) is macro-expanded to empty.
+             * The preprocessor leaves "(pack(push, 8))" which we need to skip. */
+            lex_next(p->lex); /* consume the leading '(' */
+            Tok next = lex_peek(p->lex);
+            if (next.kind == TK_IDENT && lex_ident_is(next, "pack")) {
+                /* Skip: pack(push, N) or pack(pop) */
+                lex_next(p->lex); /* consume 'pack' */
+                if (lex_peek(p->lex).kind == TK_LPAREN) {
+                    lex_next(p->lex); /* consume '(' */
+                    while (lex_peek(p->lex).kind != TK_RPAREN && lex_peek(p->lex).kind != TK_EOF)
+                        lex_next(p->lex);
+                    if (lex_peek(p->lex).kind == TK_RPAREN)
+                        lex_next(p->lex); /* consume ')' */
+                }
+                if (lex_peek(p->lex).kind == TK_RPAREN)
+                    lex_next(p->lex); /* consume outer ')' */
+            } else {
+                errtok(p, &t, "expected top-level declaration");
+                lex_next(p->lex); /* skip to recover */
+            }
         } else {
             errtok(p, &t, "expected top-level declaration");
             lex_next(p->lex); /* skip to recover */
