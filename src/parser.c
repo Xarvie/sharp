@@ -859,6 +859,7 @@ static Node* parse_stmt(P* p);
 static Node* parse_block(P* p);
 static Node* parse_expr(P* p);
 static Node* parse_assign(P* p);
+static Node* parse_ternary(P* p);
 static Node* parse_logic_or(P* p);
 static Node* parse_logic_and(P* p);
 static Node* parse_equality(P* p);
@@ -875,7 +876,19 @@ static Node* parse_primary(P* p);
 static Node* parse_init_list(P* p);
 
 /* ---------- expression parsing ---------- */
-static Node* parse_expr(P* p) { return parse_assign(p); }
+static Node* parse_expr(P* p) {
+    Node* lhs = parse_assign(p);
+    /* Comma operator: `expr , expr` (lowest precedence) */
+    while (accept(p, TK_COMMA)) {
+        Node* rhs = parse_assign(p);
+        Node* n = mk(p, ND_BINOP, rhs->line);
+        n->op = OP_COMMA;
+        n->lhs = lhs;
+        n->rhs = rhs;
+        lhs = n;
+    }
+    return lhs;
+}
 
 static OpKind assign_op_for(TokKind k) {
     switch (k) {
@@ -890,7 +903,7 @@ static OpKind assign_op_for(TokKind k) {
 }
 
 static Node* parse_assign(P* p) {
-    Node* lhs = parse_logic_or(p);
+    Node* lhs = parse_ternary(p);
     Tok t = lex_peek(p->lex);
     switch (t.kind) {
         case TK_ASSIGN: case TK_PLUSEQ: case TK_MINUSEQ:
@@ -905,6 +918,21 @@ static Node* parse_assign(P* p) {
         }
         default: return lhs;
     }
+}
+
+static Node* parse_ternary(P* p) {
+    Node* cond = parse_logic_or(p);
+    if (accept(p, TK_QUESTION)) {
+        Node* t_val = parse_expr(p);  /* after ? parse full expression */
+        expect(p, TK_COLON, ":");
+        Node* f_val = parse_ternary(p); /* after : parse ternary (allows chaining) */
+        Node* n = mk(p, ND_TERNARY, cond->line);
+        n->cond = cond;
+        n->then_b = t_val;
+        n->else_b = f_val;
+        return n;
+    }
+    return cond;
 }
 
 static Node* bin(P* p, OpKind op, Node* l, Node* r, int line) {
@@ -1294,8 +1322,24 @@ static Node* parse_primary(P* p) {
             int saved_err    = g_error_count;
             g_silent         = true;
             Type* cast_ty    = parse_type(p);
+            /* After parsing the base type, check for pointer/reference modifiers */
+            while (cast_ty && g_error_count == saved_err && lex_peek(p->lex).kind == TK_STAR) {
+                lex_next(p->lex); /* consume '*' */
+                cast_ty = type_ptr(p->arena, cast_ty);
+            }
             g_silent         = false;
             bool type_ok     = (cast_ty && g_error_count == saved_err);
+
+            /* Additional validation: if the type is a simple named type
+             * from an identifier, verify it looks like a type not a variable.
+             * Variable-like identifiers (e.g., `_M`, `foo`) should be rejected.
+             * Type-like identifiers (e.g., `wchar_t`, `size_t`, `MyType`) should be accepted. */
+            if (type_ok && cast_ty->kind == TY_NAMED && cast_ty->base == NULL) {
+                const char* nm = cast_ty->name;
+                bool looks_like_type = (nm[0] != '_'); /* reject `_M`, `_S` etc. */
+                if (!looks_like_type) type_ok = false;
+            }
+
             TokKind next     = lex_peek(p->lex).kind;
 
             /* Compound literal: (Type){ init_list }
@@ -1336,6 +1380,11 @@ static Node* parse_primary(P* p) {
             g_error_count = saved_err;
             lex_next(p->lex); /* consume '(' */
             Type* ty = parse_type(p);
+            /* Consume pointer modifiers */
+            while (lex_peek(p->lex).kind == TK_STAR) {
+                lex_next(p->lex);
+                ty = type_ptr(p->arena, ty);
+            }
             expect(p, TK_RPAREN, "expected ')' after cast type");
             /* Parse the cast operand — can be another parenthesized expr */
             Node* operand = parse_unary(p);

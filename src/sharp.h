@@ -304,7 +304,7 @@ typedef enum {
     /* expressions */
     ND_INT, ND_FLOAT, ND_STR, ND_CHAR, ND_BOOL, ND_NULL,
     ND_IDENT,
-    ND_BINOP, ND_UNOP, ND_ASSIGN,
+    ND_BINOP, ND_UNOP, ND_ASSIGN, ND_TERNARY,
     ND_CALL, ND_MEMBER,
     ND_STRUCT_LIT, ND_FIELD_INIT,
     ND_INDEX,          /* a[i] — raw pointer subscript */
@@ -341,7 +341,9 @@ typedef enum {
     OP_ASSIGN, OP_ADDEQ, OP_SUBEQ, OP_MULEQ, OP_DIVEQ, OP_MODEQ,
     OP_DEREF, OP_ADDR,         /* phase 3: unary `*e` and `&e` */
     OP_POSTINC, OP_POSTDEC,    /* phase 4: postfix `e++` / `e--` */
-    OP_PREINC, OP_PREDEC       /* phase 5: prefix `++e` / `--e` */
+    OP_PREINC, OP_PREDEC,      /* phase 5: prefix `++e` / `--e` */
+    OP_COMMA,                  /* phase 6: comma operator `e1, e2` */
+    OP_TERNARY                 /* phase 7: ternary `cond ? t : f` */
 } OpKind;
 
 struct Node {
