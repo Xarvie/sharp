@@ -562,6 +562,11 @@ bool ty_assignable(const Type* to, const Type* from) {
     }
     if (from_r->kind == TY_INT && to_r->kind == TY_PTR) return true;
 
+    /* C void* compatibility: any pointer → void* or const void* */
+    if (to_r->kind == TY_PTR && to_r->base && to_r->base->kind == TY_VOID) {
+        if (from_r->kind == TY_PTR) return true;
+    }
+
     /* Const discard check: you cannot assign const T* to T*. */
     if (to_r->kind == TY_PTR && from_r->kind == TY_PTR) {
         /* Pointee: const T* → T* is not allowed (discard const). */

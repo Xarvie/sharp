@@ -363,6 +363,22 @@ SymTable* sema_build(Node* program, Arena** arena) {
         rec.decl     = NULL;
         vec_push(&tv, &rec);
     }
+    /* Register common C standard library typedefs that may not appear
+     * in preprocessed output (compiler built-in types). */
+    {
+        /* size_t -> unsigned long long (represented as TY_LONGLONG) */
+        SymTypedef rec;
+        rec.name     = "size_t";
+        rec.base     = type_prim(arena, TY_LONGLONG);
+        rec.decl     = NULL;
+        vec_push(&tv, &rec);
+        /* ssize_t -> long long (TY_LONGLONG) */
+        SymTypedef rec2;
+        rec2.name     = "ssize_t";
+        rec2.base     = type_prim(arena, TY_LONGLONG);
+        rec2.decl     = NULL;
+        vec_push(&tv, &rec2);
+    }
 
     /* Pass 5: phase-8 — collect user free functions (non-method,
      * non-extern). Methods are in mv; externs are in ev. Walking
@@ -840,9 +856,15 @@ static Type* tc_expr(TC* tc, Node* e) {
             Type*  lt  = tc_expr(tc, lhs);
             Type*  rt  = tc_expr(tc, rhs);
 
+            /* Resolve typedefs BEFORE checking for struct operators.
+             * This ensures typedef'd types like `size_t` are treated as their
+             * underlying types (e.g., `unsigned long long`) rather than structs. */
+            Type* lt_r = tc_resolve(tc, lt);
+            Type* rt_r = tc_resolve(tc, rt);
+
             /* If the LHS is a struct (named type that isn't a C primitive),
              * look for an operator overload and let its signature drive the result type. */
-            if (ty_is_named(lt) && ty_resolve_c_named(lt->name) == NULL) {
+            if (ty_is_named(lt_r) && ty_resolve_c_named(lt_r->name) == NULL) {
                 const char* mname = NULL;
                 switch (op) {
                     case OP_ADD: mname = "op_add"; break;
@@ -859,23 +881,23 @@ static Type* tc_expr(TC* tc, Node* e) {
                     default: break;
                 }
                 if (mname) {
-                    SymMethod* m = sema_find_method(tc->st, ty_name(lt), mname);
+                    SymMethod* m = sema_find_method(tc->st, ty_name(lt_r), mname);
                     if (m && m->decl && func_nparams(m->decl) == 2) {
                         Node* rparam = func_param(m->decl, 1);
                         Type* rparam_ty = param_type(rparam);
-                        if (rt && rparam_ty && !ty_assignable(rparam_ty, rt)) {
+                        if (rt_r && rparam_ty && !ty_assignable(rparam_ty, rt_r)) {
                             diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE,
                                       e->line, 0, 0,
                                       "operator '%s' on '%s' expects right operand '%s', got '%s'",
-                                      mname + 3, ty_name(lt),
-                                      type_str(tc, rparam_ty), type_str(tc, rt));
+                                      mname + 3, ty_name(lt_r),
+                                      type_str(tc, rparam_ty), type_str(tc, rt_r));
                         }
                         return func_ret_type(m->decl);
                     }
                     /* Struct operand with no matching overload — hard error. */
                     diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE, e->line, 0, 0,
                               "no operator '%s' defined on struct '%s'",
-                              mname + 3, ty_name(lt));
+                              mname + 3, ty_name(lt_r));
                     return NULL;
                 }
             }
@@ -884,33 +906,34 @@ static Type* tc_expr(TC* tc, Node* e) {
             switch (op) {
                 case OP_EQ: case OP_NEQ: case OP_LT: case OP_GT:
                 case OP_LE: case OP_GE:
-                    if (lt && rt && !ty_assignable(lt, rt) && !ty_assignable(rt, lt)) {
+                    if (lt_r && rt_r && !ty_assignable(lt_r, rt_r) && !ty_assignable(rt_r, lt_r)) {
                         diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE, e->line, 0, 0,
                                   "comparison between incompatible types '%s' and '%s'",
-                                  type_str(tc, lt), type_str(tc, rt));
+                                  type_str(tc, lt_r), type_str(tc, rt_r));
                     }
                     return tc_ty(tc, TY_BOOL);
                 case OP_AND: case OP_OR:
-                    if (lt && !ty_is_bool(lt))
+                    /* In C, `ptr && expr` is valid: non-null pointer -> true */
+                    if (lt_r && !ty_is_bool(lt_r) && !ty_is_pointer_like(lt_r) && !ty_is_integer(lt_r))
                         diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE, e->line, 0, 0,
                                   "logical operator requires bool, left operand is '%s'",
-                                  type_str(tc, lt));
-                    if (rt && !ty_is_bool(rt))
+                                  type_str(tc, lt_r));
+                    if (rt_r && !ty_is_bool(rt_r) && !ty_is_pointer_like(rt_r) && !ty_is_integer(rt_r))
                         diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE, e->line, 0, 0,
                                   "logical operator requires bool, right operand is '%s'",
-                                  type_str(tc, rt));
+                                  type_str(tc, rt_r));
                     return tc_ty(tc, TY_BOOL);
                 default: break;
             }
 
             /* Arithmetic / bitwise on primitives or pointers. */
-            if (lt && rt) {
-                Type* lt_r = tc_resolve(tc, lt);
-                Type* rt_r = tc_resolve(tc, rt);
+            if (lt_r && rt_r) {
                 bool lnum = ty_is_numeric(lt_r);
                 bool rnum = ty_is_numeric(rt_r);
                 bool lptr = ty_is_pointer_like(lt_r);
                 bool rptr = ty_is_pointer_like(rt_r);
+                /* Comma operator: discard left type, return right type */
+                if (op == OP_COMMA) return rt;
                 /* Pointer arithmetic: ptr ± int, ptr - ptr (yields long). */
                 if (lptr && ty_is_integer(rt_r)) return lt;
                 if (rptr && ty_is_integer(lt_r)) return rt;
@@ -919,7 +942,7 @@ static Type* tc_expr(TC* tc, Node* e) {
                     diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE, e->line, 0, 0,
                               "arithmetic operator requires numeric operands, "
                               "got '%s' and '%s'",
-                              type_str(tc, lt), type_str(tc, rt));
+                              type_str(tc, lt_r), type_str(tc, rt_r));
                     return NULL;
                 }
                 /* C usual arithmetic conversions — pick the wider type. */
@@ -953,57 +976,60 @@ static Type* tc_expr(TC* tc, Node* e) {
             OpKind op      = unop_op     (e);
             Type*  ot      = tc_expr(tc, operand);
             if (!ot) return NULL;
+            /* Resolve typedefs BEFORE checking for struct operators. */
+            Type* ot_r = tc_resolve(tc, ot);
             switch (op) {
                 case OP_NOT:
                     /* `!x` on a struct dispatches to op_not. */
-                    if (ty_is_named(ot) && ty_resolve_c_named(ty_name(ot)) == NULL) {
-                        SymMethod* m = sema_find_method(tc->st, ty_name(ot), "op_not");
+                    if (ty_is_named(ot_r) && ty_resolve_c_named(ty_name(ot_r)) == NULL) {
+                        SymMethod* m = sema_find_method(tc->st, ty_name(ot_r), "op_not");
                         if (m && m->decl && func_nparams(m->decl) == 1)
                             return func_ret_type(m->decl);
                     }
-                    if (!ty_is_bool(tc_resolve(tc, ot)))
+                    /* In C, `!ptr` is valid: non-null pointer -> false */
+                    if (!ty_is_bool(ot_r) && !ty_is_pointer_like(ot_r) && !ty_is_integer(ot_r))
                         diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE, e->line, 0, 0,
-                                  "'!' requires bool, got '%s'", type_str(tc, ot));
+                                  "'!' requires bool or pointer/integer, got '%s'", type_str(tc, ot_r));
                     return tc_ty(tc, TY_BOOL);
                 case OP_NEG:
                 case OP_POS:
                     /* Unary minus on a struct → op_sub(1-arity form). */
-                    if (ty_is_named(ot) && ty_resolve_c_named(ty_name(ot)) == NULL) {
-                        SymMethod* m = sema_find_method(tc->st, ty_name(ot), "op_sub");
+                    if (ty_is_named(ot_r) && ty_resolve_c_named(ty_name(ot_r)) == NULL) {
+                        SymMethod* m = sema_find_method(tc->st, ty_name(ot_r), "op_sub");
                         if (m && m->decl && func_nparams(m->decl) == 1)
                             return func_ret_type(m->decl);
                     }
-                    if (!ty_is_numeric(tc_resolve(tc, ot)))
+                    if (!ty_is_numeric(ot_r))
                         diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE, e->line, 0, 0,
                                   "unary arithmetic requires numeric, got '%s'",
-                                  type_str(tc, ot));
+                                  type_str(tc, ot_r));
                     return ot;
                 case OP_BNOT:
-                    if (ty_is_named(ot) && ty_resolve_c_named(ty_name(ot)) == NULL) {
-                        SymMethod* m = sema_find_method(tc->st, ty_name(ot), "op_bnot");
+                    if (ty_is_named(ot_r) && ty_resolve_c_named(ty_name(ot_r)) == NULL) {
+                        SymMethod* m = sema_find_method(tc->st, ty_name(ot_r), "op_bnot");
                         if (m && m->decl && func_nparams(m->decl) == 1)
                             return func_ret_type(m->decl);
                     }
-                    if (!ty_is_integer(tc_resolve(tc, ot)))
+                    if (!ty_is_integer(ot_r))
                         diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE, e->line, 0, 0,
-                                  "'~' requires integer, got '%s'", type_str(tc, ot));
+                                  "'~' requires integer, got '%s'", type_str(tc, ot_r));
                     return ot;
                 case OP_ADDR:
                     return ty_ptr(ot);
                 case OP_DEREF:
-                    if (!ty_is_pointer_like(tc_resolve(tc, ot))) {
+                    if (!ty_is_pointer_like(ot_r)) {
                         diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE, e->line, 0, 0,
                                   "cannot dereference non-pointer type '%s'",
-                                  type_str(tc, ot));
+                                  type_str(tc, ot_r));
                         return NULL;
                     }
                     return ty_base(ot);
                 case OP_POSTINC:
                 case OP_POSTDEC:
-                    if (!ty_is_integer(tc_resolve(tc, ot)) && !ty_is_pointer_like(tc_resolve(tc, ot)))
+                    if (!ty_is_integer(ot_r) && !ty_is_pointer_like(ot_r))
                         diag_emit(DIAG_ERROR, E_BIN_OPERAND_TYPE, e->line, 0, 0,
                                   "'++'/'--' requires integer or pointer, got '%s'",
-                                  type_str(tc, ot));
+                                  type_str(tc, ot_r));
                     return ot;
                 default:
                     return ot;
@@ -1340,9 +1366,10 @@ static void tc_stmt(TC* tc, Node* s) {
 
         case ND_IF: {
             Type* ct = tc_expr(tc, if_cond(s));
-            if (ct && !ty_is_bool(ct)) {
-                diag_emit(DIAG_ERROR, E_COND_NOT_BOOL, s->line, 0, 0,
-                          "'if' condition must be bool, got '%s'",
+            ct = tc_resolve(tc, ct);
+            if (ct && !ty_is_bool(ct) && !ty_is_pointer_like(ct) && !ty_is_integer(ct)) {
+                diag_emit(DIAG_WARNING, E_COND_NOT_BOOL, s->line, 0, 0,
+                          "'if' condition should be bool, got '%s'",
                           type_str(tc, ct));
             }
             tc_stmt(tc, if_then(s));
@@ -1352,9 +1379,10 @@ static void tc_stmt(TC* tc, Node* s) {
         }
         case ND_WHILE: {
             Type* ct = tc_expr(tc, while_cond(s));
-            if (ct && !ty_is_bool(ct))
-                diag_emit(DIAG_ERROR, E_COND_NOT_BOOL, s->line, 0, 0,
-                          "'while' condition must be bool, got '%s'",
+            ct = tc_resolve(tc, ct);
+            if (ct && !ty_is_bool(ct) && !ty_is_pointer_like(ct) && !ty_is_integer(ct))
+                diag_emit(DIAG_WARNING, E_COND_NOT_BOOL, s->line, 0, 0,
+                          "'while' condition should be bool, got '%s'",
                           type_str(tc, ct));
             tc_stmt(tc, while_body(s));
             return;
@@ -1368,9 +1396,10 @@ static void tc_stmt(TC* tc, Node* s) {
             if (init) tc_stmt(tc, init);
             if (cond) {
                 Type* ct = tc_expr(tc, cond);
-                if (ct && !ty_is_bool(ct))
-                    diag_emit(DIAG_ERROR, E_COND_NOT_BOOL, s->line, 0, 0,
-                              "'for' condition must be bool, got '%s'",
+                ct = tc_resolve(tc, ct);
+                if (ct && !ty_is_bool(ct) && !ty_is_pointer_like(ct) && !ty_is_integer(ct))
+                    diag_emit(DIAG_WARNING, E_COND_NOT_BOOL, s->line, 0, 0,
+                              "'for' condition should be bool, got '%s'",
                               type_str(tc, ct));
             }
             if (upd) (void)tc_expr(tc, upd);
