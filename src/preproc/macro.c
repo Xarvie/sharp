@@ -498,8 +498,9 @@ static TokList substitute(const MacroDef *def,
                 TokNode *nx = n->next;
                 while (nx && nx->tok.kind == CPPT_SPACE) nx = nx->next;
                 if (nx && nx->tok.kind == CPPT_PUNCT &&
-                    strcmp(pptok_spell(&nx->tok), "##") == 0)
+                    strcmp(pptok_spell(&nx->tok), "##") == 0) {
                     paste_right = true;
+                }
 
                 if (paste_right) {
                     /* Paste the unexpanded argument */
@@ -535,58 +536,94 @@ static TokList substitute(const MacroDef *def,
 
         /* --- Token paste: lhs ## rhs --- */
         if (t->kind == CPPT_PUNCT && strcmp(sp, "##") == 0) {
-            /* Remove trailing whitespace from result */
-            while (result.tail && result.tail->tok.kind == CPPT_SPACE) {
-                TokNode *rm = result.tail;
-                if (rm == result.head) result.head = NULL;
-                else {
+            /* Remove trailing whitespace from result (C99 6.10.3.3p2) */
+            TokNode *ws_before_paste = NULL;
+            if (result.tail && result.tail->tok.kind == CPPT_SPACE) {
+                ws_before_paste = result.tail;
+                if (ws_before_paste == result.head) {
+                    result.head = NULL;
+                    result.tail = NULL;
+                } else {
                     TokNode *prev = result.head;
-                    while (prev->next != rm) prev = prev->next;
-                    prev->next = NULL;
+                    while (prev && prev->next != ws_before_paste) prev = prev->next;
+                    if (prev) { prev->next = NULL; result.tail = prev; }
                 }
-                result.tail = (rm == result.head) ? NULL :
-                              (result.head ? result.tail : NULL);
                 result.len--;
-                pptok_free(&rm->tok); free(rm);
+                pptok_free(&ws_before_paste->tok); free(ws_before_paste);
             }
 
             TokNode *nx = n->next;
             while (nx && nx->tok.kind == CPPT_SPACE) nx = nx->next;
             if (nx && result.tail) {
                 PPTok lhs = result.tail->tok;
-                /* Resolve the rhs (might be a parameter) */
-                PPTok rhs;
+
+                /* Check if RHS is a macro parameter */
+                int param_idx = -1;
                 if (nx->tok.kind == CPPT_IDENT && def->is_func) {
-                    int idx = -1;
                     for (int i = 0; i < def->nparams; i++)
                         if (strcmp(def->param_names[i], pptok_spell(&nx->tok)) == 0)
-                            { idx = i; break; }
-                    if (idx < 0 && def->is_variadic &&
-                        strcmp(pptok_spell(&nx->tok), "__VA_ARGS__") == 0)
-                        idx = def->nparams;
-
-                    if (idx >= 0 && idx < nargs && args[idx].head) {
-                        PPTok copy = args[idx].head->tok;
-                        copy.spell = (StrBuf){0};
-                        sb_push_cstr(&copy.spell, pptok_spell(&args[idx].head->tok));
-                        rhs = copy;
-                    } else {
-                        rhs = nx->tok;
-                        rhs.spell = (StrBuf){0};
-                        sb_push_cstr(&rhs.spell, pptok_spell(&nx->tok));
+                            { param_idx = i; break; }
+                    if (param_idx < 0 && def->is_variadic &&
+                        strcmp(pptok_spell(&nx->tok), "__VA_ARGS__") == 0) {
+                        param_idx = def->nparams;
                     }
-                } else {
-                    rhs = nx->tok;
-                    rhs.spell = (StrBuf){0};
-                    sb_push_cstr(&rhs.spell, pptok_spell(&nx->tok));
                 }
 
-                PPTok pasted = token_paste(&lhs, &rhs, NULL, interns, diags);
-                pptok_free(&result.tail->tok);
-                result.tail->tok = pasted;
-                pptok_free(&rhs);
-                n = nx->next;  /* skip past the RHS token consumed by paste */
+                if (param_idx >= 0 && param_idx < nargs && args[param_idx].head) {
+                    /* RHS is a parameter with tokens.
+                     * Paste lhs with the FIRST token of the argument,
+                     * then append remaining argument tokens to result. */
+                    PPTok first = args[param_idx].head->tok;
+                    PPTok rhs_first = first;
+                    rhs_first.spell = (StrBuf){0};
+                    sb_push_cstr(&rhs_first.spell, pptok_spell(&first));
+
+                    PPTok pasted = token_paste(&lhs, &rhs_first, NULL, interns, diags);
+                    pptok_free(&result.tail->tok);
+                    result.tail->tok = pasted;
+                    pptok_free(&rhs_first);
+
+                    /* Append remaining argument tokens (skip the first one) */
+                    for (TokNode *an = args[param_idx].head->next; an; an = an->next) {
+                        PPTok copy = an->tok;
+                        copy.spell = (StrBuf){0};
+                        sb_push_cstr(&copy.spell, pptok_spell(&an->tok));
+                        tl_append(&result, copy);
+                    }
+                    /* Phase C3: After paste, ensure space separator exists between
+                 * the pasted token and any following tokens. C99 6.10.3.3p2
+                 * specifies that ## joins tokens without whitespace, but the
+                 * result must be separated from subsequent tokens. */
+                PPTok space = {0};
+                space.kind = CPPT_SPACE;
+                space.spell = (StrBuf){0};
+                sb_push_cstr(&space.spell, " ");
+                tl_append(&result, space);
+
+                /* Skip past the parameter name in the replacement list */
+                n = nx->next;
                 continue;
+                } else {
+                    /* RHS is not a parameter — use the token literally */
+                    PPTok rhs = nx->tok;
+                    rhs.spell = (StrBuf){0};
+                    sb_push_cstr(&rhs.spell, pptok_spell(&nx->tok));
+
+                    PPTok pasted = token_paste(&lhs, &rhs, NULL, interns, diags);
+                    pptok_free(&result.tail->tok);
+                    result.tail->tok = pasted;
+                    pptok_free(&rhs);
+
+                    /* Phase C3: Add space separator after paste */
+                    PPTok space = {0};
+                    space.kind = CPPT_SPACE;
+                    space.spell = (StrBuf){0};
+                    sb_push_cstr(&space.spell, " ");
+                    tl_append(&result, space);
+
+                    n = nx->next;
+                    continue;
+                }
             }
             n = n->next; continue; /* ## with nothing on left or right: skip */
         }

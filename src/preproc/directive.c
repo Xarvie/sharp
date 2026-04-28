@@ -1015,6 +1015,8 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
 
             /* Try macro expansion */
             if (!t.hide && macro_lookup(st->macros, name)) {
+                bool macro_had_leading_space = t.has_leading_space;
+
                 /* Build a small input list starting with this token, then
                  * accumulate more if needed for function-like macros.    */
                 TokList input = {0};
@@ -1062,6 +1064,10 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
                 TokList expanded = {0};
                 macro_expand(&input, st->macros, st->interns, st->diags, &expanded);
                 tl_free(&input);
+
+                /* Propagate leading space from macro invocation to first expanded token */
+                if (macro_had_leading_space && expanded.head)
+                    expanded.head->tok.has_leading_space = true;
 
                 for (TokNode *en = expanded.head; en; en = en->next)
                     emit_tok_text(st, &en->tok);
