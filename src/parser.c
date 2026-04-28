@@ -1150,8 +1150,8 @@ static Node* parse_postfix(P* p) {
             lex_next(p->lex);
             NodeVec args = {0};
             if (lex_peek(p->lex).kind != TK_RPAREN) {
-                nv_push(&args, parse_expr(p));
-                while (accept(p, TK_COMMA)) nv_push(&args, parse_expr(p));
+                nv_push(&args, parse_assign(p));
+                while (accept(p, TK_COMMA)) nv_push(&args, parse_assign(p));
             }
             expect(p, TK_RPAREN, "expected ')'");
             Node* n = mk(p, ND_CALL, t.line);
@@ -1520,7 +1520,7 @@ static Node* parse_init_list(P* p) {
             Tok field = expect(p, TK_IDENT, "expected field name after '.'");
             const char* fname = arena_strndup(p->arena, field.start, field.len);
             expect(p, TK_ASSIGN, "expected '=' after designated field name");
-            Node* val = parse_expr(p);
+            Node* val = parse_assign(p);
             Node* d = mk(p, ND_DESIG_INIT, iline);
             d->name = fname;
             d->rhs = val;
@@ -1529,10 +1529,10 @@ static Node* parse_init_list(P* p) {
         /* Array designated initializer: [index] = expr */
         else if (lex_peek(p->lex).kind == TK_LBRACKET) {
             lex_next(p->lex); /* consume '[' */
-            Node* idx = parse_expr(p);
+            Node* idx = parse_assign(p);
             expect(p, TK_RBRACKET, "expected ']'");
             expect(p, TK_ASSIGN, "expected '=' after array designator");
-            Node* val = parse_expr(p);
+            Node* val = parse_assign(p);
             Node* d = mk(p, ND_DESIG_INIT, iline);
             d->name = NULL; /* NULL name means array designator */
             d->lhs = idx;
