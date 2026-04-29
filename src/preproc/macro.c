@@ -902,6 +902,15 @@ static void expand_list(TokList *input, MacroTable *mt,
                 continue;
             }
 
+            /* Blue-paint: mark the macro's own name as hidden in the
+             * substitution list to prevent recursive re-expansion during
+             * rescan (C99 6.10.3.4p2). */
+            for (TokNode *sn = subst.head; sn; sn = sn->next) {
+                if (sn->tok.kind == CPPT_IDENT &&
+                    strcmp(pptok_spell(&sn->tok), name) == 0)
+                    sn->tok.hide = true;
+            }
+
             TokList expanded = {0};
             expand_list(&subst, mt, interns, diags, &expanded);
             tl_free(&subst);

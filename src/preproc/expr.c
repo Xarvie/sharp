@@ -392,6 +392,30 @@ static ival eval_logor(EvalCtx *ec) {
 }
 
 static ival eval_expr(EvalCtx *ec) {
+    /* Handle leading comma: treat as (0, rest_of_expression) */
+    ec_skip_ws(ec);
+    if (ec->cur && ec->cur->tok.kind == CPPT_PUNCT && 
+        pptok_spell(&ec->cur->tok) && strcmp(pptok_spell(&ec->cur->tok), ",") == 0) {
+        ec_get(ec);  /* consume comma */
+        ec_skip_ws(ec);
+        /* Left side is 0, evaluate right side */
+        ival cond = eval_logor(ec);
+        ec_skip_ws(ec);
+        /* Handle subsequent commas */
+        while (ec->cur && ec->cur->tok.kind == CPPT_PUNCT && 
+               pptok_spell(&ec->cur->tok) && strcmp(pptok_spell(&ec->cur->tok), ",") == 0) {
+            ec_get(ec);
+            ec_skip_ws(ec);
+            if (ec->cur && ec->cur->tok.kind != CPPT_NEWLINE && ec->cur->tok.kind != CPPT_EOF) {
+                cond = eval_logor(ec);
+                ec_skip_ws(ec);
+            } else {
+                break;
+            }
+        }
+        return cond;
+    }
+
     ival cond = eval_logor(ec);
     ec_skip_ws(ec);
     const PPTok *t = ec_peek(ec);
@@ -425,7 +449,6 @@ static ival eval_expr(EvalCtx *ec) {
             break;
         }
     }
-    fprintf(stderr, "[DEBUG eval_expr] returning cond=%lld\n", (long long)cond);
     return cond;
 }
 
