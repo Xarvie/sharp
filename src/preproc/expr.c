@@ -412,6 +412,19 @@ static ival eval_expr(EvalCtx *ec) {
             return eval_expr(ec);
         }
     }
+    /* Handle comma operator: return value after last comma.
+     * This is needed for P99's comma-detection trick in #if expressions. */
+    while (ec->cur && ec->cur->tok.kind == CPPT_PUNCT && 
+           pptok_spell(&ec->cur->tok) && strcmp(pptok_spell(&ec->cur->tok), ",") == 0) {
+        ec_get(ec);  /* consume comma */
+        ec_skip_ws(ec);
+        if (ec->cur && ec->cur->tok.kind != CPPT_NEWLINE && ec->cur->tok.kind != CPPT_EOF) {
+            cond = eval_logor(ec);
+            ec_skip_ws(ec);
+        } else {
+            break;
+        }
+    }
     return cond;
 }
 

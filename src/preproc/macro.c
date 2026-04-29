@@ -389,13 +389,18 @@ static PPTok token_paste(const PPTok *lhs, const PPTok *rhs,
     PPTok result = reader_next_tok(rd, false);
     /* Verify it was a single token. */
     PPTok check  = reader_next_tok(rd, false);
-    if (check.kind != CPPT_EOF && check.kind != CPPT_NEWLINE &&
-        check.kind != CPPT_SPACE) {
-        CppDiag d = { CPP_DIAG_ERROR, lhs->loc,
-                      cpp_xstrdup("token paste produces invalid token") };
-        da_push(diags, d);
-        pptok_free(&check);
-    } else pptok_free(&check);
+    bool valid = (check.kind == CPPT_EOF || check.kind == CPPT_NEWLINE ||
+                  check.kind == CPPT_SPACE);
+    if (!valid) {
+        /* C99 6.10.3.3p3: invalid paste → undefined behavior.
+         * Match clang: return lhs token unchanged (paste fails silently),
+         * allowing rescanning to expand nested macros. */
+        pptok_free(&result);
+        result = *lhs;
+        result.spell = (StrBuf){0};
+        sb_push_cstr(&result.spell, pptok_spell(lhs));
+    }
+    pptok_free(&check);
     reader_free(rd);
     sb_free(&sb);
     result.loc = lhs->loc;

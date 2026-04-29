@@ -4,8 +4,6 @@
 int main(void);
 
 int main(void) {
-    int AB = 1;
-    int CD = 2;
-    return (AB + CD);
+    return a;
 }
 
