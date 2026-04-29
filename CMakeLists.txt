@@ -107,7 +107,9 @@ if(WIN32)
     endif()
 endif()
 
-# Copy libtcc.dll and tcc.exe to build output directory so sharpc can find them at runtime
+# Copy TCC runtime files to build output directory
+# Windows: copy DLL and executable
+# Linux/macOS: copy shared library if available
 if(WIN32)
     add_custom_command(TARGET sharpc POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -123,16 +125,37 @@ if(WIN32)
             COMMENT "Copying tcc.exe to output directory"
         )
     endif()
-    # Also copy the entire tcc tree to build tree so libtcc can find headers
-    add_custom_command(TARGET sharpc POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${CMAKE_BINARY_DIR}/third_party/tcc"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${TCC_DIR}"
-            "${CMAKE_BINARY_DIR}/third_party/tcc"
-        COMMENT "Copying tcc runtime files to build tree"
-    )
+elseif(APPLE)
+    if(EXISTS "${TCC_DIR}/libtcc.dylib")
+        add_custom_command(TARGET sharpc POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${TCC_DIR}/libtcc.dylib"
+                $<TARGET_FILE_DIR:sharpc>
+            COMMENT "Copying libtcc.dylib to output directory"
+        )
+    endif()
+else()
+    # Linux: try to copy libtcc.so
+    if(EXISTS "${TCC_DIR}/libtcc.so")
+        add_custom_command(TARGET sharpc POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${TCC_DIR}/libtcc.so"
+                $<TARGET_FILE_DIR:sharpc>
+            COMMENT "Copying libtcc.so to output directory"
+        )
+    endif()
 endif()
+
+# Always copy the entire TCC tree to build tree so libtcc can find headers
+# This is needed on all platforms for system header support
+add_custom_command(TARGET sharpc POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_BINARY_DIR}/third_party/tcc"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${TCC_DIR}"
+        "${CMAKE_BINARY_DIR}/third_party/tcc"
+    COMMENT "Copying tcc runtime files to build tree"
+)
 
 install(TARGETS sharpc sharp-cpp
     RUNTIME DESTINATION bin

@@ -15,6 +15,7 @@ import re
 import glob
 import tempfile
 import shutil
+import platform
 from pathlib import Path
 from collections import Counter
 
@@ -37,11 +38,54 @@ def yellow(text): return color(text, Colors.YELLOW)
 def cyan(text): return color(text, Colors.CYAN)
 def bold(text): return color(text, Colors.BOLD)
 
+# Platform detection
+IS_WINDOWS = platform.system() == 'Windows'
+IS_LINUX = platform.system() == 'Linux'
+IS_MACOS = platform.system() == 'Darwin'
+
 # Configuration
 PROJECT_DIR = Path(__file__).resolve().parent
-SHARPC = PROJECT_DIR / "cmake-build-debug" / "sharpc.exe"
+
+# Cross-platform compiler detection
+def find_sharpc():
+    """Find sharpc executable across different build directories and platforms"""
+    # Possible build directories
+    build_dirs = [
+        PROJECT_DIR / "cmake-build-debug",
+        PROJECT_DIR / "cmake-build-release",
+        PROJECT_DIR / "build",
+        PROJECT_DIR / "build-debug",
+        PROJECT_DIR / "build-release",
+        PROJECT_DIR / "build-clean",
+    ]
+    
+    # Platform-specific executable names and extensions
+    exe_names = ["sharpc"]
+    if IS_WINDOWS:
+        exe_names.append("sharpc.exe")
+    
+    for build_dir in build_dirs:
+        if build_dir.exists():
+            for name in exe_names:
+                candidate = build_dir / name
+                if candidate.exists():
+                    return candidate
+    
+    return None
+
+SHARPC = find_sharpc()
 TESTS_DIR = PROJECT_DIR / "tests"
-UCRT_DIR = Path(r"C:\Program Files (x86)\Windows Kits\10\Include\10.0.18362.0\ucrt")
+
+# Platform-specific UCRT paths
+if IS_WINDOWS:
+    UCRT_DIR = Path(r"C:\Program Files (x86)\Windows Kits\10\Include\10.0.18362.0\ucrt")
+elif IS_LINUX:
+    # Linux typically uses glibc or musl
+    UCRT_DIR = None  # Windows-specific headers not applicable
+elif IS_MACOS:
+    UCRT_DIR = None  # macOS uses different system headers
+else:
+    UCRT_DIR = None
 
 # Known core test failures (pre-existing TCC header issues)
 KNOWN_FAILURES = {
@@ -113,15 +157,45 @@ def run_sharpc(input_file, output_file):
         return False, [f"error: {str(e)}"]
 
 def run_clang(input_file, output_file):
-    """Run clang compiler and return (success, errors)"""
+    """Run compiler (clang/gcc/cc) and return (success, errors)"""
+    # Cross-platform compiler selection
+    compilers = []
+    if IS_WINDOWS:
+        compilers = ["clang", "cl"]
+    else:
+        # On Unix systems, try gcc, cc, then clang
+        compilers = ["gcc", "cc", "clang"]
+    
+    # Find available compiler
+    compiler = None
+    for c in compilers:
+        try:
+            result = subprocess.run([c, "--version"], capture_output=True, text=True)
+            if result.returncode == 0:
+                compiler = c
+                break
+        except:
+            continue
+    
+    if not compiler:
+        return False, ["error: no C compiler found (tried: " + ", ".join(compilers) + ")"]
+    
     try:
+        # Platform-specific compiler flags
+        if compiler == "cl":  # MSVC
+            cmd = [compiler, "/std:c11", "/w", "/Fo" + str(output_file.with_suffix('.obj')), str(input_file)]
+            if IS_WINDOWS and output_file.suffix == '.exe':
+                cmd.extend(["/Fe" + str(output_file)])
+        else:
+            cmd = [compiler, "-std=c11", "-w", "-o", str(output_file), str(input_file)]
+        
         result = subprocess.run(
-            ["clang", "-std=c11", "-w", "-o", str(output_file), str(input_file)],
+            cmd,
             capture_output=True, text=True, timeout=30
         )
         errors = []
         for line in (result.stdout + result.stderr).splitlines():
-            if "error:" in line:
+            if "error:" in line or "错误:" in line:
                 errors.append(line.strip())
         return result.returncode == 0, errors
     except Exception as e:
@@ -136,6 +210,12 @@ def test_core(verbose=False):
         print(yellow("No test files found in tests/"))
         return 0, 0, 0
     
+    # Windows-specific test patterns (skip on non-Windows)
+    WINDOWS_ONLY_PATTERNS = {'d_windef', 'd_winnt', 'd_winuser', 'd_windows', 
+                             'd_winbase', 'd_conio', 'd_excpt', 'd_locking',
+                             'd_mbstring', 'd_search', 'd_stat', 'd_stdlib',
+                             'd_stralign', 'd_timeb', 'd_utime', 'd_varargs'}
+    
     pass_count = 0
     fail_count = 0
     skip_count = 0
@@ -143,11 +223,22 @@ def test_core(verbose=False):
     for sp_file in test_files:
         name = sp_file.stem
         c_file = sp_file.with_suffix('.c')
-        exe_file = sp_file.with_suffix('.exe')
+        
+        # Platform-specific executable extension
+        if IS_WINDOWS:
+            exe_file = sp_file.with_suffix('.exe')
+        else:
+            exe_file = sp_file  # Linux/Mac no extension
         
         # Skip known failures
         if name in KNOWN_FAILURES:
             print(f"{yellow('SKIP:')}      {name} (known failure)")
+            skip_count += 1
+            continue
+        
+        # Skip Windows-specific tests on non-Windows platforms
+        if not IS_WINDOWS and name in WINDOWS_ONLY_PATTERNS:
+            print(f"{yellow('SKIP:')}      {name} (Windows-specific)")
             skip_count += 1
             continue
         
@@ -161,7 +252,7 @@ def test_core(verbose=False):
             fail_count += 1
             continue
         
-        # Step 2: clang .c -> .exe
+        # Step 2: clang .c -> executable
         success, errors = run_clang(c_file, exe_file)
         if not success:
             print(f"{red('FAIL clang:')}  {name}")
@@ -268,15 +359,35 @@ def main():
     if "--verbose" in args or "-v" in args:
         verbose = True
     
-    # Verify sharpc exists
-    if not SHARPC.exists():
-        print(red(f"Error: sharpc.exe not found at {SHARPC}"))
-        print("Build it first: cmake --build cmake-build-debug --target sharpc")
-        sys.exit(1)
+    # Detect platform
+    current_platform = platform.system()
+    print(bold(f"\n{'=' * 60}"))
+    print(bold(f"  Sharp Compiler - Regression Test Runner"))
+    print(bold(f"  Platform: {current_platform} ({platform.machine()})"))
+    print(bold(f"{'=' * 60}"))
     
-    print(bold("\n" + "=" * 60))
-    print(bold("  Sharp Compiler - Regression Test Runner"))
-    print(bold("=" * 60))
+    # Verify sharpc exists
+    if SHARPC is None:
+        print(red("Error: sharpc executable not found"))
+        print("Please build it first. Options:")
+        if IS_WINDOWS:
+            print("  - cmake --build cmake-build-debug --target sharpc")
+            print("  - Or run: cmake --build . --target sharpc")
+        else:
+            print("  - cmake --build build-debug --target sharpc")
+            print("  - Or run: make")
+        sys.exit(1)
+    else:
+        print(green(f"Found compiler: {SHARPC}"))
+    
+    # Skip UCRT tests on non-Windows platforms
+    if run_ucrt and not IS_WINDOWS:
+        print(yellow("Note: UCRT header tests are Windows-specific and will be skipped"))
+        if run_core:
+            run_ucrt = False
+        else:
+            print(red("Error: --ucrt flag only works on Windows"))
+            sys.exit(1)
     
     total_pass = 0
     total_fail = 0

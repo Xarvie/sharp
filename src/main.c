@@ -18,7 +18,12 @@
   #include <libtcc.h>
 #else
   #include <dlfcn.h>
-  #include "libtcc.h"
+  #include <unistd.h>
+  #ifdef __has_include
+    #if __has_include(<libtcc.h>)
+      #include <libtcc.h>
+    #endif
+  #endif
 #endif
 
 /* ------------------------------------------------------------------ *
@@ -89,8 +94,25 @@ static void unload_libtcc(TccLib* lib) { if (lib->dll) FreeLibrary(lib->dll); }
 #else
 static int load_libtcc(TccLib* lib, const char* tcc_dir) {
     (void)tcc_dir;
-    lib->dl = dlopen("libtcc.so", RTLD_NOW);
-    if (!lib->dl) { fprintf(stderr, "sharpc: cannot load libtcc.so: %s\n", dlerror()); return -1; }
+    /* Try multiple library paths on Unix systems */
+    const char* lib_paths[] = {
+        "libtcc.so",
+        "libtcc.so.1",
+        "./libtcc.so",
+        "../libtcc.so",
+        NULL
+    };
+    
+    lib->dl = NULL;
+    for (int i = 0; lib_paths[i] && !lib->dl; i++) {
+        lib->dl = dlopen(lib_paths[i], RTLD_NOW);
+    }
+    
+    if (!lib->dl) { 
+        fprintf(stderr, "sharpc: cannot load libtcc.so: %s\n", dlerror()); 
+        fprintf(stderr, "sharpc: Please install tcc or set SHARPC_TCC_DIR\n");
+        return -1; 
+    }
     lib->tcc_new              = (tcc_new_fn)              dlsym(lib->dl, "tcc_new");
     lib->tcc_delete           = (tcc_delete_fn)           dlsym(lib->dl, "tcc_delete");
     lib->tcc_set_output_type  = (tcc_set_output_type_fn)  dlsym(lib->dl, "tcc_set_output_type");
@@ -433,9 +455,33 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
 
 static char* read_file(const char* path);
 
-/* Compile a C source file to an executable using libtcc. Returns 0 on success. */
-static int compile_with_tcc(const char* c_file, const char* exe_file, const char* tcc_dir) {
+/* Compile a C source file to an executable.
+ * Windows: uses libtcc (dynamic loading)
+ * Unix: uses clang/gcc via subprocess
+ * Returns 0 on success.
+ */
+static int compile_c_to_exe(const char* c_file, const char* exe_file) {
+#ifdef _WIN32
+    /* On Windows, use libtcc for compilation */
     TccLib lib = {0};
+    
+    /* Compute TCC directory */
+    const char* tcc_dir_env = getenv("SHARPC_TCC_DIR");
+    char tcc_dir_buf[512];
+    const char* tcc_dir;
+    if (tcc_dir_env) {
+        tcc_dir = tcc_dir_env;
+    } else {
+        char exe_dir[512];
+        GetModuleFileNameA(NULL, exe_dir, sizeof(exe_dir));
+        char* last_slash = strrchr(exe_dir, '\\');
+        if (last_slash) *last_slash = 0;
+        last_slash = strrchr(exe_dir, '\\');
+        if (last_slash) *last_slash = 0;
+        snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s\\third_party\\tcc", exe_dir);
+        tcc_dir = tcc_dir_buf;
+    }
+    
     if (load_libtcc(&lib, tcc_dir) != 0) return -1;
 
     TCCState* s = lib.tcc_new();
@@ -448,17 +494,13 @@ static int compile_with_tcc(const char* c_file, const char* exe_file, const char
         return -1;
     }
 
-    /* Add TCC's own include and library paths */
-    lib.tcc_add_include_path(s, tcc_dir);
     lib.tcc_add_include_path(s, tcc_dir);
     lib.tcc_add_sysinclude_path(s, tcc_dir);
 
-    /* Add library path for linking */
     char lib_dir[512];
     snprintf(lib_dir, sizeof(lib_dir), "%s/lib", tcc_dir);
     lib.tcc_add_library_path(s, lib_dir);
 
-    /* Compile the C source */
     char* c_src = read_file(c_file);
     if (!c_src) {
         lib.tcc_delete(s);
@@ -475,11 +517,38 @@ static int compile_with_tcc(const char* c_file, const char* exe_file, const char
         return -1;
     }
 
-    /* Output executable */
     rc = lib.tcc_output_file(s, exe_file);
     lib.tcc_delete(s);
     unload_libtcc(&lib);
     return rc;
+#else
+    /* On Unix, use clang/gcc via system() */
+    const char* compilers[] = {"clang", "gcc", "cc", NULL};
+    char cmd[1024];
+    int rc = -1;
+    
+    for (int i = 0; compilers[i]; i++) {
+        /* Check if compiler exists */
+        char check_cmd[256];
+        snprintf(check_cmd, sizeof(check_cmd), "which %s > /dev/null 2>&1", compilers[i]);
+        if (system(check_cmd) != 0) {
+            continue;
+        }
+        
+        /* Try to compile */
+        snprintf(cmd, sizeof(cmd), "%s -std=c11 -O2 -Wall -o '%s' '%s'", 
+                 compilers[i], exe_file, c_file);
+        fprintf(stderr, "sharpc: compiling with %s...\n", compilers[i]);
+        rc = system(cmd);
+        if (rc == 0) {
+            return 0;
+        }
+        fprintf(stderr, "sharpc: %s failed, trying next compiler...\n", compilers[i]);
+    }
+    
+    fprintf(stderr, "sharpc: no suitable C compiler found (tried clang, gcc, cc)\n");
+    return -1;
+#endif
 }
 
 static char* read_file(const char* path) {
@@ -599,8 +668,33 @@ int main(int argc, char** argv) {
         last_slash = strrchr(exe_dir, '\\');
         if (last_slash) *last_slash = 0;
         snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s\\third_party\\tcc", exe_dir);
+#elif __APPLE__
+        /* macOS: try build directory first, then system paths */
+        snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s/../third_party/tcc", 
+                 getenv("SHARPC_BUILD_DIR") ? : ".");
+        if (access(tcc_dir_buf, F_OK) != 0) {
+            snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "/usr/lib/tcc");
+        }
 #else
-        snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "/usr/lib/tcc");
+        /* Linux: try multiple locations */
+        const char* linux_paths[] = {
+            "./third_party/tcc",
+            "../third_party/tcc", 
+            "../../third_party/tcc",
+            "/usr/lib/tcc",
+            "/usr/local/lib/tcc",
+            NULL
+        };
+        tcc_dir_buf[0] = '\0';
+        for (int i = 0; linux_paths[i]; i++) {
+            snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s", linux_paths[i]);
+            if (access(tcc_dir_buf, F_OK) == 0) {
+                break;
+            }
+        }
+        if (tcc_dir_buf[0] == '\0') {
+            snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "/usr/lib/tcc");
+        }
 #endif
         tcc_dir = tcc_dir_buf;
     }
@@ -822,26 +916,20 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        /* Determine TCC directory */
-        const char* env_tcc = getenv("SHARP_TCC_DIR");
-        char tcc_dir_buf[512];
-        const char* tcc_dir;
-        if (env_tcc) {
-            tcc_dir = env_tcc;
-        } else {
-#ifdef _WIN32
-            char exe_dir[512];
-            GetModuleFileNameA(NULL, exe_dir, sizeof(exe_dir));
-            char* last_slash = strrchr(exe_dir, '\\');
-            if (last_slash) *last_slash = 0;
-            char* last_slash2 = strrchr(exe_dir, '\\');
-            if (last_slash2) *last_slash2 = 0;
-            snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s\\third_party\\tcc", exe_dir);
-#else
-            snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "/usr/lib/tcc");
-#endif
-            tcc_dir = tcc_dir_buf;
+        /* Write C source to a temporary file */
+        const char* c_temp_path = out_path;
+        FILE* c_out = fopen(c_temp_path, "wb");
+        if (!c_out) {
+            sb_free(&cbuf);
+            fprintf(stderr, "sharpc: cannot write '%s'\n", c_temp_path);
+            if (out_alloced) free((char*)out_path);
+            free(orig_src);
+            arena_free_all(&arena);
+            return 1;
         }
+        fwrite(cbuf.data, 1, cbuf.len, c_out);
+        fclose(c_out);
+        sb_free(&cbuf);
 
         /* Determine output executable name */
         const char* exe_path = NULL;
@@ -859,47 +947,10 @@ int main(int argc, char** argv) {
             exe_alloced = true;
         }
 
-        /* Compile from memory to binary */
-        // fprintf(stderr, "sharpc: %s -> %s via libtcc (zero disk I/O)\n", in_path, exe_path);
-
-        /* Use libtcc to compile C code from memory */
-        TccLib lib = {0};
-        if (load_libtcc(&lib, tcc_dir) != 0) {
-            sb_free(&cbuf);
-            fprintf(stderr, "sharpc: cannot load libtcc\n");
-            if (exe_alloced) free((char*)exe_path);
-            if (out_alloced) free((char*)out_path);
-            free(orig_src);
-            arena_free_all(&arena);
-            return 1;
-        }
-
-        TCCState* s = lib.tcc_new();
-        lib.tcc_set_error_func(s, NULL, tcc_error_cb);
-        lib.tcc_set_lib_path(s, tcc_dir);
-        lib.tcc_set_output_type(s, TCC_OUTPUT_EXE);
-        char tcc_inc[512];
-        snprintf(tcc_inc, sizeof(tcc_inc), "%s/include", tcc_dir);
-        lib.tcc_add_include_path(s, tcc_inc);
-        lib.tcc_add_sysinclude_path(s, tcc_inc);
-        char lib_dir_path[512];
-        snprintf(lib_dir_path, sizeof(lib_dir_path), "%s/lib", tcc_dir);
-        lib.tcc_add_library_path(s, lib_dir_path);
-
-        /* Debug: write cbuf to temp file for inspection */
-        {
-            FILE* dbg = fopen("debug_tcc_input.c", "wb");
-            if (dbg) { fwrite(cbuf.data, 1, cbuf.len, dbg); fclose(dbg); }
-        }
-
-        int tcc_rc = lib.tcc_compile_string(s, cbuf.data);
-        sb_free(&cbuf);
-
-        if (tcc_rc != 0) {
-            fprintf(stderr, "sharpc: libtcc compilation failed\n");
-            lib.tcc_delete(s);
-            unload_libtcc(&lib);
-            remove(exe_path);
+        /* Compile C to executable using platform-specific backend */
+        if (compile_c_to_exe(c_temp_path, exe_path) != 0) {
+            fprintf(stderr, "sharpc: C compilation failed\n");
+            remove(c_temp_path);
             if (exe_alloced) free((char*)exe_path);
             if (out_alloced) free((char*)out_path);
             free(orig_src);
@@ -908,22 +959,7 @@ int main(int argc, char** argv) {
             cpp_ctx_free(cpp_ctx);
             return 1;
         }
-
-        tcc_rc = lib.tcc_output_file(s, exe_path);
-        lib.tcc_delete(s);
-        unload_libtcc(&lib);
-
-        if (tcc_rc != 0) {
-            fprintf(stderr, "sharpc: libtcc link failed\n");
-            remove(exe_path);
-            if (exe_alloced) free((char*)exe_path);
-            if (out_alloced) free((char*)out_path);
-            free(orig_src);
-            arena_free_all(&arena);
-            cpp_result_free(&pp);
-            cpp_ctx_free(cpp_ctx);
-            return 1;
-        }
+        
         fprintf(stderr, "sharpc: %s built successfully\n", exe_path);
         if (exe_alloced) free((char*)exe_path);
     }

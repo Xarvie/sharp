@@ -3,11 +3,40 @@
 import subprocess
 import sys
 import time
+import platform
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent
 P99_DIR = PROJECT_DIR / "p99-master" / "p99"
-SHARPC = PROJECT_DIR / "cmake-build-debug" / "Debug" / "sharpc.exe"
+
+# Cross-platform sharpc detection
+def find_sharpc():
+    """Find sharpc executable across different build directories and platforms"""
+    is_windows = platform.system() == 'Windows'
+    build_dirs = [
+        PROJECT_DIR / "cmake-build-debug" / "Debug",
+        PROJECT_DIR / "cmake-build-debug",
+        PROJECT_DIR / "build-debug",
+        PROJECT_DIR / "build",
+    ]
+    exe_names = ["sharpc.exe", "sharpc"] if is_windows else ["sharpc"]
+    
+    for build_dir in build_dirs:
+        for name in exe_names:
+            candidate = build_dir / name
+            if candidate.exists():
+                return candidate
+    return None
+
+SHARPC = find_sharpc()
+if SHARPC is None:
+    print("Error: sharpc not found. Please build the project first.")
+    sys.exit(1)
+
+print(f"Platform: {platform.system()} ({platform.machine()})")
+print(f"Compiler: {SHARPC}")
+print(f"P99 dir: {P99_DIR}")
+print(f"\nTesting {len([f.name for f in P99_DIR.glob('p99*.h') if f.name.endswith('.h') and not f.name.startswith('p99_compat')])} P99 headers...\n")
 
 HEADERS = sorted([f.name for f in P99_DIR.glob("p99*.h") if f.name.endswith(".h") and not f.name.startswith("p99_compat")])
 
