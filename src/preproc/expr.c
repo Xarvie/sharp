@@ -425,6 +425,7 @@ static ival eval_expr(EvalCtx *ec) {
             break;
         }
     }
+    fprintf(stderr, "[DEBUG eval_expr] returning cond=%lld\n", (long long)cond);
     return cond;
 }
 
