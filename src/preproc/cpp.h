@@ -126,7 +126,7 @@ typedef struct {
 
 typedef struct {
     /* Flat token array (heap-allocated).  Count does NOT include trailing
-     * CPPT_EOF sentinel.                                                  */
+     * CPPT_EOF sentinel.  token.text pointers are valid until cpp_result_free(). */
     CppTok  *tokens;
     size_t   ntokens;
 
@@ -142,6 +142,10 @@ typedef struct {
 
     /* Non-NULL on fatal error: brief description (also appears in diags). */
     const char *error;
+
+    /* Raw pre-phase-6 text buffer.  CppTok.text pointers point into here.
+     * Kept alive until cpp_result_free() so that token text is accessible. */
+    char    *_raw_text;
 } CppResult;
 
 /* -------------------------------------------------------------------------

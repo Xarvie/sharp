@@ -306,6 +306,21 @@ struct CppState {
 
     /* __COUNTER__ value — incremented each time the macro is expanded */
     int          counter;
+
+    /* Lazy linemarker state ------------------------------------------------
+     * A marker is "pending" after each directive so that consecutive directives
+     * don't flood the output with redundant markers.  The pending marker fires
+     * only when actual (non-whitespace) content is about to be emitted, and
+     * only if the expected output line doesn't already match the source line.
+     * -------------------------------------------------------------------- */
+    bool         pending_lm;          /* a marker is queued                  */
+    int          pending_lm_line;     /* source line of pending marker        */
+    const char  *pending_lm_file;     /* source file of pending marker        */
+
+    int          last_lm_src_line;    /* source line declared in last marker  */
+    const char  *last_lm_src_file;   /* source file declared in last marker  */
+    int          out_newlines;        /* '\n' emitted to out_text since last
+                                       * marker (used for redundancy check)   */
 };
 
 #endif /* SHARP_CPP_INTERNAL_H */

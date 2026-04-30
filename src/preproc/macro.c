@@ -48,6 +48,10 @@ typedef struct MacroDef {
 struct MacroTable {
     MacroDef    *buckets[MACRO_BUCKETS];
     InternTable *interns;
+    /* Per-run expansion limits (replaces unsafe file-static globals) */
+    int          expand_depth;
+    int          expand_tokens;
+    bool         limits_breached;
 };
 
 MacroTable *macro_table_new(InternTable *interns) {
@@ -590,7 +594,33 @@ static TokList substitute(const MacroDef *def,
                     }
                 }
 
-                if (param_idx >= 0 && param_idx < nargs && args[param_idx].head) {
+                /* Determine whether the VA-args slot is empty (not supplied or
+                 * supplied as zero tokens).  Used for GNU comma-deletion.    */
+                bool va_empty = (param_idx == def->nparams) &&
+                                (nargs <= def->nparams ||
+                                 !args[def->nparams].head);
+
+                if (va_empty) {
+                    /* GNU extension: `lhs, ## __VA_ARGS__` with empty VA →
+                     * delete ## and __VA_ARGS__, AND delete a preceding ','
+                     * from lhs so MACRO(fmt) expands cleanly.               */
+                    if (pptok_spell(&lhs)[0] == ',') {
+                        /* Remove the trailing comma from result */
+                        TokNode *comma_node = result.tail;
+                        if (comma_node == result.head) {
+                            result.head = result.tail = NULL;
+                        } else {
+                            TokNode *prev = result.head;
+                            while (prev && prev->next != comma_node) prev = prev->next;
+                            if (prev) { prev->next = NULL; result.tail = prev; }
+                        }
+                        result.len--;
+                        pptok_free(&comma_node->tok);
+                        free(comma_node);
+                    }
+                    n = nx->next;
+                    continue;
+                } else if (param_idx >= 0 && param_idx < nargs && args[param_idx].head) {
                     /* RHS is a parameter with tokens.
                      * Paste lhs with the FIRST token of the argument,
                      * then append remaining argument tokens to result. */
@@ -611,21 +641,14 @@ static TokList substitute(const MacroDef *def,
                         sb_push_cstr(&copy.spell, pptok_spell(&an->tok));
                         tl_append(&result, copy);
                     }
-                    /* Phase C3: After paste, ensure space separator exists between
-                 * the pasted token and any following tokens. C99 6.10.3.3p2
-                 * specifies that ## joins tokens without whitespace, but the
-                 * result must be separated from subsequent tokens. */
-                PPTok space = {0};
-                space.kind = CPPT_SPACE;
-                space.spell = (StrBuf){0};
-                sb_push_cstr(&space.spell, " ");
-                tl_append(&result, space);
-
-                /* Skip past the parameter name in the replacement list */
-                n = nx->next;
-                continue;
+                    n = nx->next;
+                    continue;
+                } else if (param_idx >= 0 && param_idx < nargs) {
+                    /* RHS is an empty named parameter (zero tokens): lhs wins. */
+                    n = nx->next;
+                    continue;
                 } else {
-                    /* RHS is not a parameter — use the token literally */
+                    /* RHS is not a parameter — paste tokens literally */
                     PPTok rhs = nx->tok;
                     rhs.spell = (StrBuf){0};
                     sb_push_cstr(&rhs.spell, pptok_spell(&nx->tok));
@@ -634,13 +657,6 @@ static TokList substitute(const MacroDef *def,
                     pptok_free(&result.tail->tok);
                     result.tail->tok = pasted;
                     pptok_free(&rhs);
-
-                    /* Phase C3: Add space separator after paste */
-                    PPTok space = {0};
-                    space.kind = CPPT_SPACE;
-                    space.spell = (StrBuf){0};
-                    sb_push_cstr(&space.spell, " ");
-                    tl_append(&result, space);
 
                     n = nx->next;
                     continue;
@@ -723,24 +739,20 @@ static TokList substitute(const MacroDef *def,
 #define MAX_EXPAND_DEPTH   20000   /* max recursive macro expansion calls      */
 #define MAX_EXPAND_TOKENS  50000   /* max tokens produced per file             */
 
-static int g_expand_depth   = 0;
-static int g_expand_tokens  = 0;
-static bool g_limits_breached = false;  /* once set, skip ALL further expansion */
-
-static void expand_limits_reset(void) {
-    g_expand_depth  = 0;
-    g_expand_tokens = 0;
-    g_limits_breached = false;
+static void expand_limits_reset(MacroTable *mt) {
+    mt->expand_depth    = 0;
+    mt->expand_tokens   = 0;
+    mt->limits_breached = false;
 }
 
-static bool expand_limits_check_depth(CppDiagArr *diags, const char *name, CppLoc loc) {
-    if (++g_expand_depth > MAX_EXPAND_DEPTH) {
-        g_limits_breached = true;
+static bool expand_limits_check_depth(MacroTable *mt, CppDiagArr *diags,
+                                       const char *name, CppLoc loc) {
+    if (++mt->expand_depth > MAX_EXPAND_DEPTH) {
+        mt->limits_breached = true;
         if (diags) {
             CppDiag d = {0};
             d.level = CPP_DIAG_WARNING;
             d.loc = loc;
-            /* Format warning message */
             char buf[512];
             int n = snprintf(buf, sizeof(buf),
                 "macro expansion depth limit reached (%d) — %s passed through unexpanded",
@@ -759,9 +771,9 @@ static bool expand_limits_check_depth(CppDiagArr *diags, const char *name, CppLo
     return true;
 }
 
-static bool expand_limits_check_tokens(CppDiagArr *diags, CppLoc loc) {
-    if (g_expand_tokens > MAX_EXPAND_TOKENS) {
-        g_limits_breached = true;
+static bool expand_limits_check_tokens(MacroTable *mt, CppDiagArr *diags, CppLoc loc) {
+    if (mt->expand_tokens > MAX_EXPAND_TOKENS) {
+        mt->limits_breached = true;
         if (diags) {
             CppDiag d = {0};
             d.level = CPP_DIAG_WARNING;
@@ -782,9 +794,8 @@ static bool expand_limits_check_tokens(CppDiagArr *diags, CppLoc loc) {
     return true;
 }
 
-/* Bump token counter for each token appended to output */
-static void expand_count_token(void) {
-    g_expand_tokens++;
+static void expand_count_token(MacroTable *mt) {
+    mt->expand_tokens++;
 }
 
 /* Expand a token list recursively. */
@@ -806,7 +817,7 @@ static void expand_list(TokList *input, MacroTable *mt,
         const char *name = intern_cstr(interns, pptok_spell(t));
 
         /* Limits breached? Skip ALL further expansion, pass through as-is. */
-        if (g_limits_breached) {
+        if (mt->limits_breached) {
             PPTok copy = *t;
             copy.spell = (StrBuf){0};
             sb_push_cstr(&copy.spell, pptok_spell(t));
@@ -906,7 +917,7 @@ static void expand_list(TokList *input, MacroTable *mt,
 
             /* Phase C2: Check expansion depth limit before recursing */
             CppLoc expand_loc = def->def_loc;
-            if (!expand_limits_check_depth(diags, name, expand_loc)) {
+            if (!expand_limits_check_depth(mt, diags, name, expand_loc)) {
                 /* Depth limit reached — pass macro name through unexpanded */
                 tl_free(&subst);
                 PPTok passthrough = *t;
@@ -933,8 +944,8 @@ static void expand_list(TokList *input, MacroTable *mt,
 
             /* Phase C2: Enforce token limit for expanded output */
             for (TokNode *en = expanded.head; en; en = en->next) {
-                if (!expand_limits_check_tokens(diags, expand_loc)) break;
-                expand_count_token();
+                if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
+                expand_count_token(mt);
                 PPTok copy = en->tok;
                 copy.spell = (StrBuf){0};
                 sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
@@ -964,7 +975,7 @@ static void expand_list(TokList *input, MacroTable *mt,
 
             /* Phase C2: Check expansion depth limit before recursing */
             CppLoc expand_loc = def->def_loc;
-            if (!expand_limits_check_depth(diags, name, expand_loc)) {
+            if (!expand_limits_check_depth(mt, diags, name, expand_loc)) {
                 /* Depth limit reached — pass macro name through unexpanded */
                 tl_free(&body_copy);
                 PPTok passthrough = *t;
@@ -980,8 +991,8 @@ static void expand_list(TokList *input, MacroTable *mt,
 
             /* Phase C2: Enforce token limit for expanded output */
             for (TokNode *en = expanded.head; en; en = en->next) {
-                if (!expand_limits_check_tokens(diags, expand_loc)) break;
-                expand_count_token();
+                if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
+                expand_count_token(mt);
                 PPTok copy = en->tok;
                 copy.spell = (StrBuf){0};
                 sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
@@ -996,16 +1007,16 @@ static void expand_list(TokList *input, MacroTable *mt,
 void macro_expand(TokList *input, MacroTable *mt,
                   InternTable *interns, CppDiagArr *diags,
                   TokList *output) {
-    /* Phase C2: Don't reset limits if they've already been breached.
-     * This ensures limits are global across the entire preprocessing run,
-     * not per-macro-invocation. */
-    if (!g_limits_breached)
-        expand_limits_reset();
+    /* Reset per-call limits so each top-level expansion starts fresh.
+     * Limits are still cumulative within a single macro_expand() call
+     * because expand_list() is recursive and checks mt->limits_breached. */
+    if (!mt->limits_breached)
+        expand_limits_reset(mt);
     expand_list(input, mt, interns, diags, output);
 }
 
-bool macro_limits_breached(void) {
-    return g_limits_breached;
+bool macro_limits_breached(MacroTable *mt) {
+    return mt->limits_breached;
 }
 
 /* =========================================================================

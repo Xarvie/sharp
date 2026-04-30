@@ -270,13 +270,19 @@ static char *phase6_apply_text(const char *text, size_t len, size_t *out_len) {
 static CppResult build_result(CppState *st, CppCtx *ctx, CppDiagArr *diags) {
     CppResult res = {0};
 
-    /* Output text: copy from state, then apply phase 6 (string concatenation). */
+    /* Phase 6: apply adjacent string literal concatenation to a new buffer.
+     * We read from the raw output text BEFORE transferring its ownership.  */
     const char *raw_text = cpp_state_text(st);
     size_t      raw_len  = cpp_state_text_len(st);
     size_t      ph6_len  = 0;
     char       *ph6_text = phase6_apply_text(raw_text, raw_len, &ph6_len);
     res.text     = ph6_text;
     res.text_len = ph6_len;
+
+    /* Transfer ownership of the raw text buffer to CppResult so that
+     * CppTok.text pointers (which index into it) remain valid after
+     * cpp_state_free().  cpp_state_free() skips freeing a NULL buf.      */
+    res._raw_text = cpp_state_take_text(st);
 
     /* Token array: copy without whitespace (phase 6 is reflected in text only). */
     size_t  ntok  = cpp_state_ntokens(st);
@@ -337,13 +343,14 @@ CppResult cpp_run_buf(CppCtx *ctx, const char *buf, size_t len,
 
 void cpp_result_free(CppResult *res) {
     if (!res) return;
-    /* token texts that came from phase6_concat are heap-allocated */
+    /* Token texts with concat_done were separately heap-allocated by phase6_concat */
     for (size_t i = 0; i < res->ntokens; i++) {
         if (res->tokens[i].concat_done)
             free((char *)res->tokens[i].text);
     }
     free(res->tokens);
     free(res->text);
+    free(res->_raw_text);   /* raw buffer that token.text pointers index into */
     for (size_t i = 0; i < res->ndiags; i++)
         free(res->diags[i].msg);
     free(res->diags);

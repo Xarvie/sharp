@@ -55,9 +55,9 @@ void macro_define_object(MacroTable *t, InternTable *interns,
                          CppLoc loc);
 
 /**
- * Return true if macro expansion limits have been breached.
+ * Return true if macro expansion limits have been breached for this table.
  * When true, callers should skip all further macro expansion.
  */
-bool macro_limits_breached(void);
+bool macro_limits_breached(MacroTable *mt);
 
 #endif /* SHARP_CPP_MACRO_H */

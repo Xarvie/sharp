@@ -30,6 +30,9 @@ void cpp_state_run_buf(CppState *st, const char *buf, size_t len,
 const char *cpp_state_text(const CppState *st);
 size_t      cpp_state_text_len(const CppState *st);
 
+/** Transfer ownership of the raw output text buffer to caller (sb_take). */
+char       *cpp_state_take_text(CppState *st);
+
 /** Access output token array. */
 CppTok     *cpp_state_tokens(const CppState *st);
 size_t      cpp_state_ntokens(const CppState *st);
