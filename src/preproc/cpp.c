@@ -228,6 +228,15 @@ static bool p6_read_body(const char **p, const char *end, StrBuf *body) {
     if (*p >= end || **p != '"') return false;
     (*p)++;
     while (*p < end && **p != '"') {
+        /* String literals cannot contain unescaped newlines.
+         * If we hit a newline without a preceding backslash, stop —
+         * this means we likely opened on a closing quote.          */
+        if (**p == '\n') {
+            /* Back up: the '"' we consumed was a closing quote, not opening */
+            (*p)--;
+            body->len = 0;  /* discard partial body */
+            return false;
+        }
         if (**p == '\\' && *p + 1 < end) { sb_push_ch(body, '\\'); (*p)++; }
         sb_push_ch(body, **p); (*p)++;
     }
@@ -235,34 +244,106 @@ static bool p6_read_body(const char **p, const char *end, StrBuf *body) {
     return true;
 }
 
+/* Skip whitespace in phase-6 adjacency scanning, but stop before any line
+ * that begins with '#' (linemarker or #pragma).  Returns true if stopped
+ * at a linemarker boundary; in that case *p is left pointing at the '\n'
+ * that precedes the '#' line so the caller can back up cleanly.           */
+static bool p6_skip_ws_no_lm(const char **p, const char *end) {
+    const char *s = *p;
+    while (s < end) {
+        if (*s == ' ' || *s == '\t' || *s == '\r') { s++; continue; }
+        if (*s == '\n') {
+            const char *nl = s;
+            s++;
+            while (s < end && (*s == ' ' || *s == '\t')) s++;
+            if (s < end && *s == '#') { *p = nl; return true; }
+            /* Not a linemarker — stop here, don't skip the whole line */
+            break;
+        }
+        /* Non-whitespace, non-newline character — stop here */
+        break;
+    }
+    *p = s;
+    return false;
+}
+
 static char *phase6_apply_text(const char *text, size_t len, size_t *out_len) {
     StrBuf out = {0};
     const char *p = text, *end = text + len;
+    bool line_start = true;   /* true at text start and after every '\n' */
+
     while (p < end) {
+
+        /* ── Linemarker fast-path ───────────────────────────────────────────
+         * At the start of a line, if (after optional spaces/tabs) we see '#',
+         * copy the ENTIRE line verbatim.  This prevents the filename string
+         * inside "# 123 \"file.c\"" from ever entering string-merge logic.  */
+        if (line_start) {
+            line_start = false;
+            const char *ls = p;
+            while (ls < end && (*ls == ' ' || *ls == '\t')) ls++;
+            if (ls < end && *ls == '#') {
+                while (p < end && *p != '\n') sb_push_ch(&out, *p++);
+                if (p < end) sb_push_ch(&out, *p++);   /* consume '\n' */
+                line_start = true;
+                continue;
+            }
+        }
+
+        /* ── Non-string / non-char-literal character ────────────────────── */
         const char *tok_start = p;
+
+        /* First check for character literal: '...'
+         * Must be handled before string detection to avoid confusing a '"'
+         * inside a char literal with a string opening.                      */
+        if (*p == '\'') {
+            sb_push_ch(&out, *p++);   /* opening ' */
+            while (p < end && *p != '\'') {
+                if (*p == '\\' && p + 1 < end) { sb_push_ch(&out, *p++); }
+                sb_push_ch(&out, *p++);
+            }
+            if (p < end) sb_push_ch(&out, *p++);   /* closing ' */
+            /* char literal done; don't set line_start, loop continues       */
+            continue;
+        }
+
         char prefix[4] = {0};
         bool is_str = p6_read_prefix(&p, end, prefix);
-        if (!is_str || p >= end || *p != '"') { p = tok_start; sb_push_ch(&out, *p++); continue; }
+        if (!is_str || p >= end || *p != '"') {
+            p = tok_start;
+            if (*p == '\n') line_start = true;
+            sb_push_ch(&out, *p++);
+            continue;
+        }
+
+        /* ── String literal (possibly with encoding prefix) ─────────────── */
         StrBuf body = {0};
         p6_read_body(&p, end, &body);
-        /* Collect adjacent string literals */
+
+        /* Collect adjacent string literals; stop at linemarkers.            */
         for (;;) {
             const char *ws = p;
-            p6_skip_ws(&p, end);
+            bool hit_lm = p6_skip_ws_no_lm(&p, end);
+            if (hit_lm) { p = ws; break; }
+
             const char *peek = p; char np[4] = {0};
-            if (!p6_read_prefix(&peek, end, np) || peek >= end || *peek != '"') { p = ws; break; }
-            /* Merge prefixes */
+            if (!p6_read_prefix(&peek, end, np) || peek >= end || *peek != '"')
+                { p = ws; break; }
             if (*prefix && *np && strcmp(prefix, np) != 0) { p = ws; break; }
             if (*np) { memcpy(prefix, np, 3); prefix[3] = '\0'; }
             p = peek;
             p6_read_body(&p, end, &body);
         }
+
         sb_push_cstr(&out, prefix);
         sb_push_ch(&out, '"');
         if (body.buf) sb_push(&out, body.buf, body.len);
         sb_push_ch(&out, '"');
         sb_free(&body);
+        /* p now sits just after the last merged string.  The outer loop will
+         * process the next character; if it's '\n' line_start is set there.  */
     }
+
     *out_len = out.len;
     return sb_take(&out);
 }
@@ -274,8 +355,10 @@ static CppResult build_result(CppState *st, CppCtx *ctx, CppDiagArr *diags) {
      * We read from the raw output text BEFORE transferring its ownership.  */
     const char *raw_text = cpp_state_text(st);
     size_t      raw_len  = cpp_state_text_len(st);
+
     size_t      ph6_len  = 0;
     char       *ph6_text = phase6_apply_text(raw_text, raw_len, &ph6_len);
+
     res.text     = ph6_text;
     res.text_len = ph6_len;
 
