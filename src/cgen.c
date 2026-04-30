@@ -617,6 +617,11 @@ static const char* assign_op_c(OpKind op) {
         case OP_MULEQ:  return "*=";
         case OP_DIVEQ:  return "/=";
         case OP_MODEQ:  return "%=";
+        case OP_ANDEQ:  return "&=";
+        case OP_OREQ:   return "|=";
+        case OP_XOREQ:  return "^=";
+        case OP_SHLEQ:  return "<<=";
+        case OP_SHREQ:  return ">>=";
         default:        return "=";
     }
 }
@@ -1573,6 +1578,37 @@ static bool emit_stmt_core(G* g, Node* s) {
                 pad(g);
                 sb_puts(&g->out, "}\n");
             }
+            return false;
+        }
+
+        case ND_SWITCH: {
+            pad(g);
+            sb_puts(&g->out, "switch (");
+            emit_expr(g, s->lhs);
+            sb_puts(&g->out, ") {\n");
+            g->indent++;
+            for (int i = 0; i < s->nchildren; i++) {
+                Node* c = s->children[i];
+                if (c->kind == ND_CASE) {
+                    pad(g);
+                    sb_puts(&g->out, "case ");
+                    emit_expr(g, c->lhs);
+                    sb_puts(&g->out, ":\n");
+                } else if (c->kind == ND_DEFAULT_CASE) {
+                    pad(g);
+                    sb_puts(&g->out, "default:\n");
+                } else {
+                    continue;
+                }
+                g->indent++;
+                for (int j = 0; j < c->nchildren; j++) {
+                    emit_stmt(g, c->children[j]);
+                }
+                g->indent--;
+            }
+            g->indent--;
+            pad(g);
+            sb_puts(&g->out, "}\n");
             return false;
         }
 

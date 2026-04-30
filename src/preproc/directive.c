@@ -110,6 +110,37 @@ static bool guard_already_included(CppState *st, const char *filename) {
 }
 
 /* =========================================================================
+ * Apply command-line -D / -U operations to the macro table.
+ * Called AFTER install_builtins so that -U can suppress built-in macros and
+ * -D can override them.  Processes ops in left-to-right order (POSIX cc
+ * convention: later -D/-U wins).
+ * ====================================================================== */
+
+static void apply_cmdline_macros(CppState *st) {
+    CppCtx      *ctx    = st->ctx;
+    MacroTable  *mt     = st->macros;
+    InternTable *interns = st->interns;
+    CppLoc       cloc   = {intern_cstr(interns, "<command-line>"), 0, 0};
+    for (size_t i = 0; i < ctx->cmdline_ops.len; i++) {
+        const char *op = ctx->cmdline_ops.data[i];
+        if (op[0] == 'U' && op[1] == ':') {
+            macro_undef(mt, op + 2);
+        } else if (op[0] == 'D' && op[1] == ':') {
+            const char *body = op + 2;
+            const char *eq   = strchr(body, '=');
+            if (eq) {
+                size_t nlen = (size_t)(eq - body);
+                char  *name = cpp_xstrndup(body, nlen);
+                macro_define_object(mt, interns, name, eq + 1, cloc);
+                free(name);
+            } else {
+                macro_define_object(mt, interns, body, "1", cloc);
+            }
+        }
+    }
+}
+
+/* =========================================================================
  * Built-in macros
  * ====================================================================== */
 
@@ -131,27 +162,23 @@ static void install_builtins(CppState *st, CppLang lang) {
     MacroTable  *mt = st->macros;
     InternTable *it = st->interns;
 
-    install_builtin_num(mt, it, "__STDC__",           1);
-    install_builtin_num(mt, it, "__STDC_HOSTED__",    1);
-    install_builtin_num(mt, it, "__STDC_VERSION__",   201112L);
+    /* Standard C defaults — overridden by apply_cmdline_macros() for targets
+     * that need different values (freestanding → __STDC_HOSTED__=0, etc.). */
+    install_builtin_num(mt, it, "__STDC__",         1);
+    install_builtin_num(mt, it, "__STDC_HOSTED__",  1);
+    install_builtin_num(mt, it, "__STDC_VERSION__", 201112L);
 
-    /* GCC compatibility macros — allows MinGW headers to work.
-     * Sharp aims for C11 compatibility, so we expose GCC-like builtins. */
-    install_builtin_num(mt, it, "__GNUC__",           4);
-    install_builtin_num(mt, it, "__GNUC_MINOR__",     9);
-    install_builtin_num(mt, it, "__GNUC_PATCHLEVEL__", 0);
-
-    /* __DATE__ and __TIME__ */
+    /* __DATE__ / __TIME__ — dynamic at compile time, not target-dependent. */
     time_t now = time(NULL);
-    struct tm *tm = localtime(&now);
+    struct tm *tm_now = localtime(&now);
     char date_buf[32], time_buf[32];
-    strftime(date_buf, sizeof date_buf, "\"%b %e %Y\"", tm);
-    strftime(time_buf, sizeof time_buf, "\"%H:%M:%S\"", tm);
+    strftime(date_buf, sizeof date_buf, "\"%b %e %Y\"", tm_now);
+    strftime(time_buf, sizeof time_buf, "\"%H:%M:%S\"", tm_now);
     install_builtin_str(mt, it, "__DATE__", date_buf);
     install_builtin_str(mt, it, "__TIME__", time_buf);
 
-    /* Compiler identification */
-    install_builtin_num(mt, it, "__SHARP_CPP__", 1);
+    /* Compiler identity — not target-dependent. */
+    install_builtin_num(mt, it, "__SHARP_CPP__",       1);
     install_builtin_num(mt, it, "__SHARP_CPP_MAJOR__", 1);
     install_builtin_num(mt, it, "__SHARP_CPP_MINOR__", 0);
 
@@ -160,16 +187,15 @@ static void install_builtins(CppState *st, CppLang lang) {
         install_builtin_str(mt, it, "__SHARP_VERSION__", "\"0.4\"");
     }
 
-    /* Platform target macros (Windows) */
-#ifdef _WIN32
-    install_builtin_num(mt, it, "_WIN32", 1);
-#endif
-#ifdef _WIN64
-    install_builtin_num(mt, it, "_WIN64", 1);
-#endif
-
-    /* Pseudo-macros __FILE__ and __LINE__ are handled dynamically
-     * in the token-emission path. */
+    /* NOTE: __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__, _WIN32, _WIN64,
+     * __linux__, __APPLE__, __STDC_HOSTED__, and all target/ABI macros are
+     * installed by apply_cmdline_macros() which runs immediately after this
+     * function (see cpp_state_run_file / cpp_state_run_buf).  Do NOT add
+     * host-conditional (#ifdef _WIN32 etc.) macros here — they must come
+     * from the target triple, not the build host.
+     *
+     * __FILE__, __LINE__, __COUNTER__, __TIMESTAMP__ are handled dynamically
+     * in the token-emission path (process_buf) and must NOT appear here. */
 }
 
 /* =========================================================================
@@ -318,41 +344,38 @@ static bool cpp_has_include(CppState *st, const char *name, bool is_system) {
 static void handle_include(CppState *st, TokList *line, CppLoc loc,
                             const char *current_file, CppLang lang,
                             const char *skip_until) {
-    /* After macro expansion the argument should be a header-name or
-     * a string literal.  We accept both forms:
-     *   #include <stdio.h>
-     *   #include "my.h"
-     *   #include MACRO_EXPANDING_TO_ONE_OF_THOSE
-     */
-    /* First: macro-expand the line */
-    TokList expanded = {0};
-    macro_expand(line, st->macros, st->interns, st->diags, &expanded);
+    /* C99 6.10.2: If a #include directive already uses the <...> or "..."
+     * syntax directly (not via a macro), the content between delimiters
+     * must NOT be macro-expanded.  Only #include MACRO (where MACRO
+     * expands to a header name) requires expansion.
+     *
+     * Strategy: check the first non-whitespace token BEFORE expansion.
+     *   - If it's '<' or '"': parse header name from raw tokens (no expansion)
+     *   - Otherwise: macro-expand the line, then parse the result */
 
-    /* Skip whitespace */
-    TokNode *n = expanded.head;
-    while (n && n->tok.kind == CPPT_SPACE) n = n->next;
-    if (!n) {
-        emit_diag(st, CPP_DIAG_ERROR, loc, "#include expects a filename");
-        tl_free(&expanded);
-        return;
-    }
+    /* Find first non-whitespace token */
+    TokNode *first = line->head;
+    while (first && first->tok.kind == CPPT_SPACE) first = first->next;
 
     char name[4096];
     bool is_sys = false;
+    bool used_expansion = false;
 
-    const char *sp = pptok_spell(&n->tok);
-    if (n->tok.kind == CPPT_STRING_LIT) {
-        /* "name.h" */
+    if (first && first->tok.kind == CPPT_STRING_LIT) {
+        /* "name.h" — raw, no expansion */
+        const char *sp = pptok_spell(&first->tok);
         size_t len = strlen(sp);
         if (len >= 2 && sp[0] == '"' && sp[len-1] == '"')
             snprintf(name, sizeof name, "%.*s", (int)(len-2), sp+1);
         else snprintf(name, sizeof name, "%s", sp);
         is_sys = false;
-    } else if (n->tok.kind == CPPT_PUNCT && strcmp(sp, "<") == 0) {
-        /* <name.h> */
+    } else if (first && first->tok.kind == CPPT_PUNCT &&
+               strcmp(pptok_spell(&first->tok), "<") == 0) {
+        /* <name.h> — raw, no expansion */
         StrBuf sb = {0};
-        n = n->next;
-        while (n && !(n->tok.kind == CPPT_PUNCT && strcmp(pptok_spell(&n->tok), ">") == 0)) {
+        TokNode *n = first->next;
+        while (n && !(n->tok.kind == CPPT_PUNCT &&
+                      strcmp(pptok_spell(&n->tok), ">") == 0)) {
             sb_push_cstr(&sb, pptok_spell(&n->tok));
             n = n->next;
         }
@@ -360,11 +383,44 @@ static void handle_include(CppState *st, TokList *line, CppLoc loc,
         sb_free(&sb);
         is_sys = true;
     } else {
-        emit_diag(st, CPP_DIAG_ERROR, loc, "invalid #include argument");
+        /* Not a direct header name — macro-expand and re-parse */
+        TokList expanded = {0};
+        macro_expand(line, st->macros, st->interns, st->diags, &expanded);
+        used_expansion = true;
+
+        TokNode *n = expanded.head;
+        while (n && n->tok.kind == CPPT_SPACE) n = n->next;
+        if (!n) {
+            emit_diag(st, CPP_DIAG_ERROR, loc, "#include expects a filename");
+            tl_free(&expanded);
+            return;
+        }
+
+        const char *sp = pptok_spell(&n->tok);
+        if (n->tok.kind == CPPT_STRING_LIT) {
+            size_t len = strlen(sp);
+            if (len >= 2 && sp[0] == '"' && sp[len-1] == '"')
+                snprintf(name, sizeof name, "%.*s", (int)(len-2), sp+1);
+            else snprintf(name, sizeof name, "%s", sp);
+            is_sys = false;
+        } else if (n->tok.kind == CPPT_PUNCT && strcmp(sp, "<") == 0) {
+            StrBuf sb = {0};
+            n = n->next;
+            while (n && !(n->tok.kind == CPPT_PUNCT &&
+                          strcmp(pptok_spell(&n->tok), ">") == 0)) {
+                sb_push_cstr(&sb, pptok_spell(&n->tok));
+                n = n->next;
+            }
+            snprintf(name, sizeof name, "%s", sb.buf ? sb.buf : "");
+            sb_free(&sb);
+            is_sys = true;
+        } else {
+            emit_diag(st, CPP_DIAG_ERROR, loc, "invalid #include argument");
+            tl_free(&expanded);
+            return;
+        }
         tl_free(&expanded);
-        return;
     }
-    tl_free(&expanded);
 
     if (st->include_depth >= st->max_include_depth) {
         emit_diag(st, CPP_DIAG_FATAL, loc, "#include nesting too deep (max %d)",
@@ -779,8 +835,20 @@ static void handle_pragma(CppState *st, TokList *line, CppLoc loc,
         return;  /* do not emit #pragma once to output */
     }
 
-    for (TokNode *n = line->head; n; n = n->next)
+    /* Macro-expand the pragma body so that #pragma pack(push, _CRT_PACKING)
+     * with _CRT_PACKING=8 becomes "#pragma pack(push, 8)" instead of the raw
+     * token string that would have a literal _CRT_PACKING identifier.      */
+    TokList expanded = {0};
+    macro_expand(line, st->macros, st->interns, st->diags, &expanded);
+
+    bool pragma_first = true;
+    for (TokNode *n = expanded.head; n; n = n->next) {
+        if (!pragma_first) sb_push_ch(&sb, ' ');
         sb_push_cstr(&sb, pptok_spell(&n->tok));
+        pragma_first = false;
+    }
+
+    tl_free(&expanded);
 
     bool suppress = false;
     if (st->pragma_cb)
@@ -1013,6 +1081,88 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
                 continue;
             }
 
+            /* __attribute__((...)) — GCC extension.  Consume the double-parenthesized
+             * argument and discard it entirely.  MSVC does not use this syntax.     */
+            if (strcmp(name, "__attribute__") == 0) {
+                pptok_free(&t);
+                /* Skip whitespace to find first '(' */
+                PPTok nx = reader_next_tok(rd, false);
+                while (nx.kind == CPPT_SPACE || nx.kind == CPPT_NEWLINE) {
+                    if (nx.kind == CPPT_NEWLINE && in_live_branch(st))
+                        sb_push_ch(&st->out_text, '\n');
+                    pptok_free(&nx);
+                    nx = reader_next_tok(rd, false);
+                }
+                if (nx.kind == CPPT_PUNCT && strcmp(pptok_spell(&nx), "(") == 0) {
+                    pptok_free(&nx);
+                    /* Collect tokens until matching ')' of outer parens.
+                     * __attribute__((...)) has nested parens.             */
+                    int depth = 1;
+                    while (depth > 0) {
+                        PPTok at = reader_next_tok(rd, false);
+                        if (at.kind == CPPT_EOF) { pptok_free(&at); break; }
+                        if (at.kind == CPPT_PUNCT) {
+                            const char *sp = pptok_spell(&at);
+                            if (strcmp(sp, "(") == 0) depth++;
+                            else if (strcmp(sp, ")") == 0) { depth--; pptok_free(&at); if (depth == 0) break; }
+                        }
+                        pptok_free(&at);
+                    }
+                    /* __attribute__ is discarded — output nothing */
+                } else {
+                    /* Not followed by '(' — pass through as identifier */
+                    emit_tok_text(st, &t);
+                    pptok_free(&nx);
+                }
+                continue;
+            }
+
+            /* __pragma(expr) — MSVC keyword.  Consume the parenthesized
+             * argument and re-emit it verbatim so that cl.exe can handle
+             * it natively.  Do NOT treat it as a #pragma directive —
+             * __pragma is an inline form that must remain inline.      */
+            if (strcmp(name, "__pragma") == 0) {
+                /* Skip whitespace to find '(' */
+                PPTok nx = reader_next_tok(rd, false);
+                while (nx.kind == CPPT_SPACE || nx.kind == CPPT_NEWLINE) {
+                    if (nx.kind == CPPT_NEWLINE && in_live_branch(st))
+                        sb_push_ch(&st->out_text, '\n');
+                    pptok_free(&nx);
+                    nx = reader_next_tok(rd, false);
+                }
+                if (nx.kind == CPPT_PUNCT && strcmp(pptok_spell(&nx), "(") == 0) {
+                    pptok_free(&nx);
+                    /* Output: __pragma( */
+                    if (in_live_branch(st)) {
+                        if (t.has_leading_space) sb_push_ch(&st->out_text, ' ');
+                        sb_push_cstr(&st->out_text, "__pragma(");
+                    }
+                    /* Collect and output tokens until matching ')' */
+                    int depth = 1;
+                    while (depth > 0) {
+                        PPTok at = reader_next_tok(rd, false);
+                        if (at.kind == CPPT_EOF) { pptok_free(&at); break; }
+                        if (at.kind == CPPT_PUNCT) {
+                            const char *sp = pptok_spell(&at);
+                            if (strcmp(sp, "(") == 0) depth++;
+                            else if (strcmp(sp, ")") == 0) { depth--; pptok_free(&at); if (depth == 0) break; }
+                        }
+                        if (in_live_branch(st)) {
+                            if (at.has_leading_space) sb_push_ch(&st->out_text, ' ');
+                            sb_push_cstr(&st->out_text, pptok_spell(&at));
+                        }
+                        pptok_free(&at);
+                    }
+                    if (in_live_branch(st)) sb_push_ch(&st->out_text, ')');
+                    pptok_free(&t);
+                } else {
+                    /* Not followed by '(' — pass through as identifier */
+                    emit_tok_text(st, &t);
+                    pptok_free(&nx);
+                }
+                continue;
+            }
+
             /* Try macro expansion */
             if (!t.hide && macro_lookup(st->macros, name)) {
                 /* Expansion limits breached? Pass through unexpanded */
@@ -1114,6 +1264,7 @@ CppState *cpp_state_new(CppCtx *ctx, CppDiagArr *diags) {
     CppState *st = cpp_xmalloc(sizeof *st);
     memset(st, 0, sizeof *st);
 
+    st->ctx               = ctx;
     st->interns           = &ctx->interns;
     st->diags             = diags;
     st->emit_linemarkers  = ctx->emit_linemarkers;
@@ -1151,10 +1302,10 @@ void cpp_state_free(CppState *st) {
 
 void cpp_state_run_file(CppState *st, const char *filename, CppLang lang) {
     install_builtins(st, lang);
-
-    /* Apply command-line -D / -U */
-    /* (Done in cpp.c before calling us) */
-
+    /* Apply command-line -D/-U AFTER builtins so -U can suppress them and
+     * target-triple macros (from apply_target_macros in main.c) can override
+     * the generic defaults set above.  This is the correct POSIX cc order. */
+    apply_cmdline_macros(st);
     process_file(st, filename, lang);
 
     if (st->cond_depth > 0) {
@@ -1166,7 +1317,7 @@ void cpp_state_run_file(CppState *st, const char *filename, CppLang lang) {
 void cpp_state_run_buf(CppState *st, const char *buf, size_t len,
                         const char *filename, CppLang lang) {
     install_builtins(st, lang);
-
+    apply_cmdline_macros(st);
     CppReader *rd = reader_new_from_buf(buf, len, filename,
                                          st->interns, st->diags);
     emit_linemarker(st, 1, filename);

@@ -567,6 +567,22 @@ bool ty_assignable(const Type* to, const Type* from) {
         if (from_r->kind == TY_PTR) return true;
     }
 
+    /* Compare named types by string, not pointer identity.
+     * This handles cases where "StackValue" and "union StackValue" refer to the same type,
+     * and also handles typedef alias equivalence. */
+    if (to_r->kind == TY_NAMED && from_r->kind == TY_NAMED && to_r->name && from_r->name) {
+        const char* a = to_r->name;
+        const char* b = from_r->name;
+        /* Strip "struct "/ "union " / "enum " prefix for comparison */
+        if (strncmp(a, "struct ", 7) == 0) a += 7;
+        else if (strncmp(a, "union ", 6) == 0) a += 6;
+        else if (strncmp(a, "enum ", 5) == 0) a += 5;
+        if (strncmp(b, "struct ", 7) == 0) b += 7;
+        else if (strncmp(b, "union ", 6) == 0) b += 6;
+        else if (strncmp(b, "enum ", 5) == 0) b += 5;
+        if (strcmp(a, b) == 0) return true;
+    }
+
     /* Const discard check: you cannot assign const T* to T*. */
     if (to_r->kind == TY_PTR && from_r->kind == TY_PTR) {
         /* Pointee: const T* → T* is not allowed (discard const). */
@@ -575,7 +591,19 @@ bool ty_assignable(const Type* to, const Type* from) {
                 return false;
             }
         }
-        /* If both pointees are compatible (same kind), allow T* → const T*. */
+        /* Compare pointer bases structurally (not just by pointer identity). */
+        if (from_r->base->kind == TY_NAMED && to_r->base->kind == TY_NAMED &&
+            from_r->base->name && to_r->base->name) {
+            const char* a = to_r->base->name;
+            const char* b = from_r->base->name;
+            if (strncmp(a, "struct ", 7) == 0) a += 7;
+            else if (strncmp(a, "union ", 6) == 0) a += 6;
+            else if (strncmp(a, "enum ", 5) == 0) a += 5;
+            if (strncmp(b, "struct ", 7) == 0) b += 7;
+            else if (strncmp(b, "union ", 6) == 0) b += 6;
+            else if (strncmp(b, "enum ", 5) == 0) b += 5;
+            if (strcmp(a, b) == 0) return true;
+        }
         if (ty_eq(from_r->base, to_r->base)) return true;
     }
 

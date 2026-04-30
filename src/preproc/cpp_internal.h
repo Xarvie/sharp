@@ -268,6 +268,7 @@ typedef struct {
 #define COND_STACK_MAX 256
 
 struct CppState {
+    CppCtx       *ctx;       /* owning context — needed for ordered cmdline apply */
     MacroTable   *macros;
     InternTable  *interns;
     CppDiagArr *diags;

@@ -255,7 +255,8 @@ SymTable* sema_build(Node* program, Arena** arena) {
     /* Pass 1: structs */
     for (int i = 0; i < program->nchildren; i++) {
         Node* d = program->children[i];
-        if (d->kind == ND_STRUCT_DECL) add_struct(st, &sv, arena, d);
+        if (d->kind == ND_STRUCT_DECL || d->kind == ND_UNION_DECL)
+            add_struct(st, &sv, arena, d);
     }
 
     /* Pass 2: impl blocks -> methods. Non-generic impls have their methods
@@ -652,11 +653,13 @@ static bool tc_mk_subst(TC* tc, Type* t,
 static Type* tc_expr(TC* tc, Node* e);
 static void  tc_stmt(TC* tc, Node* s);
 
+static SymTypedef* sema_find_typedef(SymTable* st, const char* name);
+
 static Type* tc_ty(TC* tc, TypeKind k) { (void)tc; return ty_prim(k); }
 
-/* Struct lookup that handles both plain names and generic instantiations
- * (for the purpose of field/method resolution, the template struct is
- * what sema knows about). */
+/* Struct/union lookup that handles both plain names, generic instantiations,
+ * and typedef aliases (for the purpose of field/method resolution, the
+ * template struct is what sema knows about). */
 static SymStruct* tc_struct_of(TC* tc, Type* t) {
     if (!t) return NULL;
     if (t->kind == TY_NAMED) {
@@ -664,8 +667,18 @@ static SymStruct* tc_struct_of(TC* tc, Type* t) {
         if (s) return s;
         /* C-style "struct Tag" / "union Tag" — try without prefix */
         const char* n = t->name;
-        if (strncmp(n, "struct ", 7) == 0) return sema_find_struct(tc->st, n + 7);
-        if (strncmp(n, "union ", 6) == 0)  return sema_find_struct(tc->st, n + 6);
+        if (strncmp(n, "struct ", 7) == 0) {
+            s = sema_find_struct(tc->st, n + 7);
+            if (s) return s;
+        }
+        if (strncmp(n, "union ", 6) == 0) {
+            s = sema_find_struct(tc->st, n + 6);
+            if (s) return s;
+        }
+        /* Typedef alias: follow the chain to the underlying type.
+         * e.g. `typedef union { ... } StkIdRel;` — StkIdRel → __anon_union_N */
+        SymTypedef* td = sema_find_typedef(tc->st, t->name);
+        if (td && td->base) return tc_struct_of(tc, td->base);
         return NULL;
     }
     if (t->kind == TY_PTR &&
@@ -1283,10 +1296,11 @@ static void tc_stmt(TC* tc, Node* s) {
     if (!s) return;
     switch (s->kind) {
         case ND_BLOCK: {
-            tc_scope_push(tc);
+            /* Don't create a new scope for ND_BLOCK from variable declarations.
+             * C allows multiple variables in a single declaration but they all
+             * belong to the current scope, not a nested one. */
             for (int i = 0; i < block_count(s); i++)
                 tc_stmt(tc, block_stmt(s, i));
-            tc_scope_pop(tc);
             return;
         }
 
@@ -1405,6 +1419,21 @@ static void tc_stmt(TC* tc, Node* s) {
             if (upd) (void)tc_expr(tc, upd);
             tc_stmt(tc, for_body(s));
             tc_scope_pop(tc);
+            return;
+        }
+        case ND_SWITCH: {
+            /* Type-check the switch expression */
+            (void)tc_expr(tc, s->lhs);
+            /* Type-check each case body */
+            for (int i = 0; i < s->nchildren; i++) {
+                Node* c = s->children[i];
+                if (c->kind == ND_CASE) {
+                    (void)tc_expr(tc, c->lhs);
+                }
+                for (int j = 0; j < c->nchildren; j++) {
+                    tc_stmt(tc, c->children[j]);
+                }
+            }
             return;
         }
 

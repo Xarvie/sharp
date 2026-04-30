@@ -128,7 +128,7 @@ void sb_printf(StrBuf* sb, const char* fmt, ...) {
 int  g_error_count   = 0;
 int  g_warning_count = 0;
 bool g_silent        = false;
-int  g_error_limit   = 25;
+int  g_error_limit   = 1000;  /* Very high limit - allow code generation even with many errors */
 
 static const char* s_diag_filename = NULL;
 static const char* s_diag_source   = NULL;

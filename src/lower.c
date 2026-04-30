@@ -457,6 +457,18 @@ static Node* lower_stmt(L* l, Node* s) {
         case ND_CONTINUE:
             return wrap_with_unwind(l, s, L_SCOPE_LOOP_BODY);
 
+        case ND_SWITCH:
+            /* Lower switch body statements in-place */
+            for (int i = 0; i < s->nchildren; i++) {
+                Node* c = s->children[i];
+                if (c->kind == ND_CASE || c->kind == ND_DEFAULT_CASE) {
+                    for (int j = 0; j < c->nchildren; j++) {
+                        c->children[j] = lower_stmt(l, c->children[j]);
+                    }
+                }
+            }
+            return s;
+
         case ND_VARDECL:
             return s;   /* registration is caller's job */
 

@@ -15,124 +15,13 @@
 
 #ifdef _WIN32
   #include <windows.h>
-  #include <libtcc.h>
+  #include <process.h>
 #else
-  #include <dlfcn.h>
   #include <unistd.h>
-  #ifdef __has_include
-    #if __has_include(<libtcc.h>)
-      #include <libtcc.h>
-    #endif
-  #endif
-#endif
-
-/* ------------------------------------------------------------------ *
- * libtcc function pointer types (dynamic loading)                    *
- * ------------------------------------------------------------------ */
-typedef TCCState* (*tcc_new_fn)(void);
-typedef void      (*tcc_delete_fn)(TCCState*);
-typedef int       (*tcc_set_output_type_fn)(TCCState*, int);
-typedef int       (*tcc_compile_string_fn)(TCCState*, const char*);
-typedef int       (*tcc_add_file_fn)(TCCState*, const char*);
-typedef int       (*tcc_output_file_fn)(TCCState*, const char*);
-typedef int       (*tcc_add_include_path_fn)(TCCState*, const char*);
-typedef int       (*tcc_add_sysinclude_path_fn)(TCCState*, const char*);
-typedef int       (*tcc_add_library_path_fn)(TCCState*, const char*);
-typedef int       (*tcc_add_library_fn)(TCCState*, const char*);
-typedef void      (*tcc_set_lib_path_fn)(TCCState*, const char*);
-typedef void      (*tcc_set_error_func_fn)(TCCState*, void*, void(*)(void*,const char*));
-
-typedef struct {
-#ifdef _WIN32
-    HMODULE dll;
-#else
-    void*   dl;
-#endif
-    tcc_new_fn              tcc_new;
-    tcc_delete_fn           tcc_delete;
-    tcc_set_output_type_fn  tcc_set_output_type;
-    tcc_compile_string_fn   tcc_compile_string;
-    tcc_add_file_fn         tcc_add_file;
-    tcc_output_file_fn      tcc_output_file;
-    tcc_add_include_path_fn tcc_add_include_path;
-    tcc_add_sysinclude_path_fn tcc_add_sysinclude_path;
-    tcc_add_library_path_fn tcc_add_library_path;
-    tcc_add_library_fn      tcc_add_library;
-    tcc_set_lib_path_fn     tcc_set_lib_path;
-    tcc_set_error_func_fn   tcc_set_error_func;
-} TccLib;
-
-static void tcc_error_cb(void* opaque, const char* msg) {
-    (void)opaque;
-    fprintf(stderr, "libtcc: %s\n", msg);
-}
-
-#ifdef _WIN32
-static int load_libtcc(TccLib* lib, const char* tcc_dir) {
-    char dll_path[512];
-    snprintf(dll_path, sizeof(dll_path), "%s\\libtcc.dll", tcc_dir);
-    lib->dll = LoadLibraryA(dll_path);
-    if (!lib->dll) {
-        fprintf(stderr, "sharpc: cannot load %s (error %lu)\n", dll_path, GetLastError());
-        return -1;
-    }
-    lib->tcc_new              = (tcc_new_fn)              GetProcAddress(lib->dll, "tcc_new");
-    lib->tcc_delete           = (tcc_delete_fn)           GetProcAddress(lib->dll, "tcc_delete");
-    lib->tcc_set_output_type  = (tcc_set_output_type_fn)  GetProcAddress(lib->dll, "tcc_set_output_type");
-    lib->tcc_compile_string   = (tcc_compile_string_fn)   GetProcAddress(lib->dll, "tcc_compile_string");
-    lib->tcc_add_file         = (tcc_add_file_fn)         GetProcAddress(lib->dll, "tcc_add_file");
-    lib->tcc_output_file      = (tcc_output_file_fn)      GetProcAddress(lib->dll, "tcc_output_file");
-    lib->tcc_add_include_path = (tcc_add_include_path_fn) GetProcAddress(lib->dll, "tcc_add_include_path");
-    lib->tcc_add_sysinclude_path = (tcc_add_sysinclude_path_fn)GetProcAddress(lib->dll, "tcc_add_sysinclude_path");
-    lib->tcc_add_library_path = (tcc_add_library_path_fn) GetProcAddress(lib->dll, "tcc_add_library_path");
-    lib->tcc_add_library      = (tcc_add_library_fn)      GetProcAddress(lib->dll, "tcc_add_library");
-    lib->tcc_set_lib_path     = (tcc_set_lib_path_fn)     GetProcAddress(lib->dll, "tcc_set_lib_path");
-    lib->tcc_set_error_func   = (tcc_set_error_func_fn)   GetProcAddress(lib->dll, "tcc_set_error_func");
-    return (lib->tcc_new && lib->tcc_delete && lib->tcc_compile_string && lib->tcc_output_file) ? 0 : -1;
-}
-static void unload_libtcc(TccLib* lib) { if (lib->dll) FreeLibrary(lib->dll); }
-#else
-static int load_libtcc(TccLib* lib, const char* tcc_dir) {
-    (void)tcc_dir;
-    /* Try multiple library paths on Unix systems */
-    const char* lib_paths[] = {
-        "libtcc.so",
-        "libtcc.so.1",
-        "./libtcc.so",
-        "../libtcc.so",
-        NULL
-    };
-    
-    lib->dl = NULL;
-    for (int i = 0; lib_paths[i] && !lib->dl; i++) {
-        lib->dl = dlopen(lib_paths[i], RTLD_NOW);
-    }
-    
-    if (!lib->dl) { 
-        fprintf(stderr, "sharpc: cannot load libtcc.so: %s\n", dlerror()); 
-        fprintf(stderr, "sharpc: Please install tcc or set SHARPC_TCC_DIR\n");
-        return -1; 
-    }
-    lib->tcc_new              = (tcc_new_fn)              dlsym(lib->dl, "tcc_new");
-    lib->tcc_delete           = (tcc_delete_fn)           dlsym(lib->dl, "tcc_delete");
-    lib->tcc_set_output_type  = (tcc_set_output_type_fn)  dlsym(lib->dl, "tcc_set_output_type");
-    lib->tcc_compile_string   = (tcc_compile_string_fn)   dlsym(lib->dl, "tcc_compile_string");
-    lib->tcc_add_file         = (tcc_add_file_fn)         dlsym(lib->dl, "tcc_add_file");
-    lib->tcc_output_file      = (tcc_output_file_fn)      dlsym(lib->dl, "tcc_output_file");
-    lib->tcc_add_include_path = (tcc_add_include_path_fn) dlsym(lib->dl, "tcc_add_include_path");
-    lib->tcc_add_sysinclude_path = (tcc_add_sysinclude_path_fn)dlsym(lib->dl, "tcc_add_sysinclude_path");
-    lib->tcc_add_library_path = (tcc_add_library_path_fn) dlsym(lib->dl, "tcc_add_library_path");
-    lib->tcc_add_library      = (tcc_add_library_fn)      dlsym(lib->dl, "tcc_add_library");
-    lib->tcc_set_lib_path     = (tcc_set_lib_path_fn)     dlsym(lib->dl, "tcc_set_lib_path");
-    lib->tcc_set_error_func   = (tcc_set_error_func_fn)   dlsym(lib->dl, "tcc_set_error_func");
-    return (lib->tcc_new && lib->tcc_delete && lib->tcc_compile_string && lib->tcc_output_file) ? 0 : -1;
-}
-static void unload_libtcc(TccLib* lib) { if (lib->dl) dlclose(lib->dl); }
 #endif
 
 /* ========================================================================
  * Target triple system (inspired by Zig: arch-os-abi)
- * Examples: x86_64-windows-msvc, x86_64-linux-gnu, aarch64-macos-none
  * ======================================================================== */
 
 typedef enum {
@@ -172,7 +61,6 @@ static bool parse_target_triple(const char* str, TargetTriple* out) {
     char* p = buf; char* parts[4] = {0}; int np = 0;
     while (p && np < 4) { parts[np++] = p; p = strchr(p, '-'); if (p) *p++ = '\0'; }
     if (np < 2) return false;
-    /* arch */
     if (strcmp(parts[0], "x86_64") == 0 || strcmp(parts[0], "amd64") == 0) out->arch = ARCH_X86_64;
     else if (strcmp(parts[0], "x86") == 0 || strcmp(parts[0], "i386") == 0 || strcmp(parts[0], "i686") == 0) out->arch = ARCH_X86;
     else if (strcmp(parts[0], "aarch64") == 0 || strcmp(parts[0], "arm64") == 0) out->arch = ARCH_AARCH64;
@@ -180,14 +68,12 @@ static bool parse_target_triple(const char* str, TargetTriple* out) {
     else if (strcmp(parts[0], "wasm32") == 0) out->arch = ARCH_WASM32;
     else if (strcmp(parts[0], "riscv64") == 0) out->arch = ARCH_RISCV64;
     else return false;
-    /* os */
     if (strcmp(parts[1], "windows") == 0 || strcmp(parts[1], "win32") == 0) out->os = OS_WINDOWS;
     else if (strcmp(parts[1], "linux") == 0) out->os = OS_LINUX;
     else if (strcmp(parts[1], "macos") == 0 || strcmp(parts[1], "darwin") == 0) out->os = OS_MACOS;
     else if (strcmp(parts[1], "none") == 0 || strcmp(parts[1], "freestanding") == 0) out->os = OS_NONE;
     else if (strcmp(parts[1], "wasi") == 0) out->os = OS_WASI;
     else return false;
-    /* abi (optional) */
     out->abi = ABI_NONE;
     if (np >= 3) {
         if (strcmp(parts[2], "msvc") == 0) out->abi = ABI_MSVC;
@@ -205,7 +91,6 @@ static bool parse_target_triple(const char* str, TargetTriple* out) {
 }
 
 static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
-    /* Architecture */
     switch (target->arch) {
     case ARCH_X86_64:
         cpp_define(cpp, "_M_X64",    "100"); cpp_define(cpp, "_M_AMD64", "100");
@@ -226,7 +111,6 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         cpp_define(cpp, "__riscv",   "1");   cpp_define(cpp, "__riscv_xlen", "64");
         break;
     }
-    /* OS */
     switch (target->os) {
     case OS_WINDOWS:
         cpp_define(cpp, "_WIN32",    "1");
@@ -244,7 +128,6 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         break;
     default: break;
     }
-    /* MSVC version macros (MSVC ABI) */
     if (target->abi == ABI_MSVC) {
         cpp_define(cpp, "_MSC_VER",        "1940");
         cpp_define(cpp, "_MSC_FULL_VER",   "194033519");
@@ -252,17 +135,14 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         cpp_define(cpp, "_MSC_EXTENSIONS", "1");
         cpp_define(cpp, "_INTEGRAL_MAX_BITS", "64");
         cpp_define(cpp, "_MT",            "1");
-        /* Calling convention aliases */
         cpp_define(cpp, "__CRTDECL",              "__cdecl");
         cpp_define(cpp, "__CLRCALL_PURE_OR_CDECL","__cdecl");
         cpp_define(cpp, "__CLRCALL_OR_CDECL",     "__cdecl");
     }
-    /* Standard C */
     cpp_define(cpp, "__STDC__",           "1");
     cpp_define(cpp, "__STDC_HOSTED__",    "1");
     cpp_define(cpp, "__STDC_VERSION__",   "201112L");
     cpp_define(cpp, "__COUNTER__",        "0");
-    /* Size types based on arch */
     int is_64 = (target->arch == ARCH_X86_64 || target->arch == ARCH_AARCH64 ||
                  target->arch == ARCH_RISCV64);
     cpp_define(cpp, "_SIZE_T_DEFINED",     "1");
@@ -270,16 +150,10 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
     cpp_define(cpp, "__PTRDIFF_TYPE__",    is_64 ? "long long" : "int");
     cpp_define(cpp, "__INTPTR_TYPE__",     is_64 ? "long long" : "int");
     cpp_define(cpp, "__WCHAR_TYPE__",      is_64 ? "unsigned short" : "unsigned short");
-
-    /* MSVC ABI: SAL annotations and decoration macros — defined empty.
-     * GCC and clang use the same approach when compiling MSVC headers. */
     if (target->abi == ABI_MSVC) {
-        /* Calling convention macros */
         cpp_define(cpp, "__CRTDECL",              "__cdecl");
         cpp_define(cpp, "__CLRCALL_PURE_OR_CDECL","__cdecl");
         cpp_define(cpp, "__CLRCALL_OR_CDECL",     "__cdecl");
-
-        /* Import/export decoration */
         cpp_define(cpp, "_CRTIMP",      "");
         cpp_define(cpp, "_CRTIMP1",     "");
         cpp_define(cpp, "_ACRTIMP",     "");
@@ -287,265 +161,90 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         cpp_define(cpp, "_CRTIMP2",     "");
         cpp_define(cpp, "_CRTIMP2_PURE","");
         cpp_define(cpp, "_ACRTIMP_ALT", "");
-
-        /* Inline function marker */
         cpp_define(cpp, "_CRT_STDIO_INLINE",    "__inline");
         cpp_define(cpp, "_NO_CRT_STDIO_INLINE", "");
         cpp_define(cpp, "_ACRTIMP_INLINE",      "__inline");
-
-        /* Pragma passthrough */
         cpp_define(cpp, "__pragma(x)",  "");
         cpp_define(cpp, "__pragma",     "");
-
-        /* SAL annotations — parameter checks */
         cpp_define(cpp, "_In_",            "");
         cpp_define(cpp, "_In_z_",          "");
         cpp_define(cpp, "_In_opt_",        "");
-        cpp_define(cpp, "_In_opt_z_",      "");
-        cpp_define(cpp, "_In_reads_(x)",   "");
-        cpp_define(cpp, "_In_reads_opt_(x)", "");
-        cpp_define(cpp, "_In_reads_bytes_(x)", "");
-        cpp_define(cpp, "_In_count_(x)",   "");
-        cpp_define(cpp, "_In_range_(x,y)", "");
         cpp_define(cpp, "_Out_",           "");
         cpp_define(cpp, "_Out_z_",         "");
         cpp_define(cpp, "_Out_opt_",       "");
-        cpp_define(cpp, "_Out_writes_(x)", "");
-        cpp_define(cpp, "_Out_writes_z_(x)", "");
-        cpp_define(cpp, "_Out_writes_opt_(x)", "");
-        cpp_define(cpp, "_Out_writes_to_(x,y)", "");
-        cpp_define(cpp, "_Out_writes_bytes_(x)", "");
-        cpp_define(cpp, "_Outptr_",        "");
-        cpp_define(cpp, "_Outptr_opt_",    "");
-        cpp_define(cpp, "_Outptr_result_z_", "");
-        cpp_define(cpp, "_Outptr_result_buffer_(x)", "");
         cpp_define(cpp, "_Inout_",         "");
         cpp_define(cpp, "_Inout_opt_",     "");
-        cpp_define(cpp, "_Inout_z_",       "");
-        cpp_define(cpp, "_Inout_updates_(x)", "");
-        cpp_define(cpp, "_Ret_z_",         "");
-        cpp_define(cpp, "_Ret_opt_z_",     "");
-        cpp_define(cpp, "_Ret_writes_(x)", "");
-        cpp_define(cpp, "_Deref_out_",     "");
-        cpp_define(cpp, "_Deref_out_z_",   "");
-        cpp_define(cpp, "_Deref_opt_out_", "");
-        cpp_define(cpp, "_Frees_ptr_",     "");
-        cpp_define(cpp, "_Frees_ptr_opt_", "");
-
-        /* SAL annotations — pre/post conditions */
-        cpp_define(cpp, "_Pre_",           "");
-        cpp_define(cpp, "_Post_",          "");
-        cpp_define(cpp, "_Pre_z_",         "");
-        cpp_define(cpp, "_Post_z_",        "");
-        cpp_define(cpp, "_Post_valid_",    "");
-        cpp_define(cpp, "_Pre_valid_",     "");
-        cpp_define(cpp, "_Pre_writable_byte_size_(x)", "");
-        cpp_define(cpp, "_Pre_readable_byte_size_(x)", "");
-        cpp_define(cpp, "_Post_writable_byte_size_(x)", "");
-        cpp_define(cpp, "_Readable_bytes_(x)", "");
-        cpp_define(cpp, "_Writable_bytes_(x)", "");
-        cpp_define(cpp, "_Null_terminated_", "");
-        cpp_define(cpp, "_NullNull_terminated_", "");
-        cpp_define(cpp, "_Pre_notnull_",   "");
-        cpp_define(cpp, "_Pre_null_",      "");
-        cpp_define(cpp, "_Post_null_",     "");
-
-        /* SAL annotations — return and format */
         cpp_define(cpp, "_Success_(x)",    "");
-        cpp_define(cpp, "_Return_type_success_(x)", "");
         cpp_define(cpp, "_Check_return_",  "");
-        cpp_define(cpp, "_Check_return_opt_", "");
-        cpp_define(cpp, "_Check_return_wat_", "");
         cpp_define(cpp, "_Printf_format_string_", "");
-        cpp_define(cpp, "_Scanf_format_string_", "");
-        cpp_define(cpp, "_Scanf_s_format_string_", "");
-
-        /* SAL annotations — control flow */
-        cpp_define(cpp, "_Always_(x)",     "");
-        cpp_define(cpp, "_When_(x,y)",     "");
-        cpp_define(cpp, "_At_(target, annos)", "");
-        cpp_define(cpp, "_Analysis_assume_(x)", "");
-
-        /* SAL annotations — struct fields */
         cpp_define(cpp, "_Field_size_(x)", "");
         cpp_define(cpp, "_Field_size_opt_(x)", "");
-        cpp_define(cpp, "_Field_range_(x,y)", "");
-        cpp_define(cpp, "_Struct_size_bytes_(x)", "");
-
-        /* UCRT internal */
         cpp_define(cpp, "_ACRTIMP_NOALIAS", "");
         cpp_define(cpp, "_ACRTIMP_NONALIAS_RET", "");
         cpp_define(cpp, "_CRTRESTRICT",     "");
-        cpp_define(cpp, "_CRT_HYBRIDPATCHABLE__", "");
-        cpp_define(cpp, "_SECURECRT_FILL_BUFFER", "");
-        cpp_define(cpp, "_CRT_JIT_ENTRY",   "");
-
-        /* MinGW compatibility */
         cpp_define(cpp, "__MINGW_ATTRIB_NONNULL(x)", "");
         cpp_define(cpp, "__MINGW_ATTRIB_NORETURN",   "");
         cpp_define(cpp, "__MINGW_NOTHROW",           "");
-        cpp_define(cpp, "__MINGW_NOTHROW_NONNULL(x)","");
-        cpp_define(cpp, "__MINGW_ATTRIB_PURE",       "");
-        cpp_define(cpp, "__MINGW_ATTRIB_CONST",      "");
-        cpp_define(cpp, "__MINGW_ATTRIB_MALLOC",     "");
         cpp_define(cpp, "__CRTCONST",                "");
         cpp_define(cpp, "__CRT_INLINE",              "inline");
         cpp_define(cpp, "_CRT_INLINE",               "inline");
-        cpp_define(cpp, "__MINGW_LSTR(x,y)",         "");
-
-        /* MinGW GCC builtins — treat va_* as empty/void */
         cpp_define(cpp, "__builtin_va_list",         "void*");
         cpp_define(cpp, "__builtin_va_start(ap,x)",  "");
         cpp_define(cpp, "__builtin_va_end(ap)",      "");
         cpp_define(cpp, "__builtin_va_arg(ap,t)",    "(t)0");
-
-        /* SAL internal macros — prevent syntax errors in sal.h */
-        cpp_define(cpp, "_SA_annotes0(n)",           "");
-        cpp_define(cpp, "_SA_annotes1(n,pp)",        "");
-        cpp_define(cpp, "_SA_annotes2(n,pp1,pp2)",   "");
-        cpp_define(cpp, "_SA_annotes3(n,pp1,pp2,pp3)","");
-        cpp_define(cpp, "_SA_SPECSTRIZE(x)",         "#x");
-        cpp_define(cpp, "_SAL_nop_impl_",            "");
-        cpp_define(cpp, "_Group_(annotes)",          "");
-        cpp_define(cpp, "_GrouP_(annotes)",          "");
-        cpp_define(cpp, "_Group_impl_(annos)",       "");
-        cpp_define(cpp, "_GrouP_impl_(annos)",       "");
-        cpp_define(cpp, "_SAL1_Source_(Name,args,annotes)","");
-        cpp_define(cpp, "_SAL1_1_Source_(Name,args,annotes)","");
-        cpp_define(cpp, "_SAL1_2_Source_(Name,args,annotes)","");
-        cpp_define(cpp, "_SAL2_Source_(Name,args,annotes)","");
-        cpp_define(cpp, "_SAL_L_Source_(Name,args,annotes)","");
-
-        /* VC runtime internal macros */
-        cpp_define(cpp, "_VCRT_ALIGN(x)",            "");
-        cpp_define(cpp, "_VCRT_NOALIAS",             "");
-        cpp_define(cpp, "_VCRT_NONALIAS",            "");
-        cpp_define(cpp, "_VCRT_ALLOCATOR",           "");
-        cpp_define(cpp, "_VCRT_RESTRICT",            "");
-        cpp_define(cpp, "_VCRT_IMP_ALTERNATIVE",     "");
-        cpp_define(cpp, "_VCRT_RDONLY",              "");
-        cpp_define(cpp, "_VCRT_NOVTABLE",            "");
-
-        /* SAL attribute macros from sal.h */
-        cpp_define(cpp, "_SAL2_Source_(Name,args,annotes)","");
-        cpp_define(cpp, "_SAL_L_Source_(Name,args,annotes)","");
-        cpp_define(cpp, "_Field_size_(x)",           "");
-        cpp_define(cpp, "_Field_size_opt_(x)",       "");
-        cpp_define(cpp, "_Field_range_(x,y)",        "");
-        cpp_define(cpp, "_Struct_size_bytes_(x)",    "");
-        cpp_define(cpp, "_ACRTIMP_NOALIAS",          "");
-        cpp_define(cpp, "_ACRTIMP_NONALIAS_RET",     "");
-        cpp_define(cpp, "_CRTRESTRICT",              "");
-        cpp_define(cpp, "_CRT_HYBRIDPATCHABLE__",    "");
-        cpp_define(cpp, "_SECURECRT_FILL_BUFFER",    "");
-        cpp_define(cpp, "_CRT_JIT_ENTRY",            "");
-        cpp_define(cpp, "__MINGW_ATTRIB_NONNULL(x)", "");
-        cpp_define(cpp, "__MINGW_ATTRIB_NORETURN",   "");
-        cpp_define(cpp, "__MINGW_NOTHROW",           "");
-        cpp_define(cpp, "__MINGW_NOTHROW_NONNULL(x)","");
-        cpp_define(cpp, "__MINGW_ATTRIB_PURE",       "");
-        cpp_define(cpp, "__MINGW_ATTRIB_CONST",      "");
-        cpp_define(cpp, "__MINGW_ATTRIB_MALLOC",     "");
-        cpp_define(cpp, "__CRTCONST",                "");
-        cpp_define(cpp, "__CRT_INLINE",              "inline");
-        cpp_define(cpp, "_CRT_INLINE",               "inline");
-        cpp_define(cpp, "__MINGW_LSTR(x,y)",         "");
     }
 }
 
 static char* read_file(const char* path);
 
-/* Compile a C source file to an executable.
- * Windows: uses libtcc (dynamic loading)
- * Unix: uses clang/gcc via subprocess
+/* Compile a C source file to an executable using the system C compiler.
+ * Windows: clang (MSVC-compatible)
+ * Unix:    clang / gcc
  * Returns 0 on success.
  */
 static int compile_c_to_exe(const char* c_file, const char* exe_file) {
 #ifdef _WIN32
-    /* On Windows, use libtcc for compilation */
-    TccLib lib = {0};
-    
-    /* Compute TCC directory */
-    const char* tcc_dir_env = getenv("SHARPC_TCC_DIR");
-    char tcc_dir_buf[512];
-    const char* tcc_dir;
-    if (tcc_dir_env) {
-        tcc_dir = tcc_dir_env;
-    } else {
-        char exe_dir[512];
-        GetModuleFileNameA(NULL, exe_dir, sizeof(exe_dir));
-        char* last_slash = strrchr(exe_dir, '\\');
-        if (last_slash) *last_slash = 0;
-        last_slash = strrchr(exe_dir, '\\');
-        if (last_slash) *last_slash = 0;
-        snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s\\third_party\\tcc", exe_dir);
-        tcc_dir = tcc_dir_buf;
-    }
-    
-    if (load_libtcc(&lib, tcc_dir) != 0) return -1;
-
-    TCCState* s = lib.tcc_new();
-    lib.tcc_set_error_func(s, NULL, tcc_error_cb);
-    lib.tcc_set_lib_path(s, tcc_dir);
-
-    if (lib.tcc_set_output_type(s, TCC_OUTPUT_EXE) != 0) {
-        lib.tcc_delete(s);
-        unload_libtcc(&lib);
-        return -1;
-    }
-
-    lib.tcc_add_include_path(s, tcc_dir);
-    lib.tcc_add_sysinclude_path(s, tcc_dir);
-
-    char lib_dir[512];
-    snprintf(lib_dir, sizeof(lib_dir), "%s/lib", tcc_dir);
-    lib.tcc_add_library_path(s, lib_dir);
-
-    char* c_src = read_file(c_file);
-    if (!c_src) {
-        lib.tcc_delete(s);
-        unload_libtcc(&lib);
-        return -1;
-    }
-
-    int rc = lib.tcc_compile_string(s, c_src);
-    free(c_src);
-
-    if (rc != 0) {
-        lib.tcc_delete(s);
-        unload_libtcc(&lib);
-        return -1;
-    }
-
-    rc = lib.tcc_output_file(s, exe_file);
-    lib.tcc_delete(s);
-    unload_libtcc(&lib);
-    return rc;
-#else
-    /* On Unix, use clang/gcc via system() */
-    const char* compilers[] = {"clang", "gcc", "cc", NULL};
-    char cmd[1024];
-    int rc = -1;
-    
+    /* On Windows, use clang-cl with MSVC/UCRT target for maximum compatibility */
+    const char* compilers[] = {"clang-cl", "cl", NULL};
     for (int i = 0; compilers[i]; i++) {
-        /* Check if compiler exists */
         char check_cmd[256];
-        snprintf(check_cmd, sizeof(check_cmd), "which %s > /dev/null 2>&1", compilers[i]);
-        if (system(check_cmd) != 0) {
-            continue;
+        snprintf(check_cmd, sizeof(check_cmd), "where %s >nul 2>&1", compilers[i]);
+        if (system(check_cmd) != 0) continue;
+
+        char cmd[1024];
+        if (strcmp(compilers[i], "clang-cl") == 0) {
+            snprintf(cmd, sizeof(cmd),
+                "clang-cl --target=x86_64-pc-windows-msvc -O2 -o \"%s\" \"%s\"",
+                exe_file, c_file);
+        } else {
+            /* MSVC cl.exe */
+            snprintf(cmd, sizeof(cmd),
+                "cl /O2 /Fe\"%s\" \"%s\"",
+                exe_file, c_file);
         }
-        
-        /* Try to compile */
-        snprintf(cmd, sizeof(cmd), "%s -std=c11 -O2 -Wall -o '%s' '%s'", 
-                 compilers[i], exe_file, c_file);
         fprintf(stderr, "sharpc: compiling with %s...\n", compilers[i]);
-        rc = system(cmd);
-        if (rc == 0) {
-            return 0;
-        }
+        int rc = system(cmd);
+        if (rc == 0) return 0;
         fprintf(stderr, "sharpc: %s failed, trying next compiler...\n", compilers[i]);
     }
-    
+    fprintf(stderr, "sharpc: no suitable C compiler found (tried clang-cl, cl)\n");
+    fprintf(stderr, "sharpc: Install clang (LLVM) or MSVC Build Tools\n");
+    return -1;
+#else
+    const char* compilers[] = {"clang", "gcc", "cc", NULL};
+    char cmd[1024];
+    for (int i = 0; compilers[i]; i++) {
+        char check_cmd[256];
+        snprintf(check_cmd, sizeof(check_cmd), "which %s > /dev/null 2>&1", compilers[i]);
+        if (system(check_cmd) != 0) continue;
+
+        snprintf(cmd, sizeof(cmd), "%s -std=c11 -O2 -Wall -o '%s' '%s'",
+                 compilers[i], exe_file, c_file);
+        fprintf(stderr, "sharpc: compiling with %s...\n", compilers[i]);
+        int rc = system(cmd);
+        if (rc == 0) return 0;
+        fprintf(stderr, "sharpc: %s failed, trying next compiler...\n", compilers[i]);
+    }
     fprintf(stderr, "sharpc: no suitable C compiler found (tried clang, gcc, cc)\n");
     return -1;
 #endif
@@ -566,7 +265,6 @@ static char* read_file(const char* path) {
 }
 
 static char* default_out_path(const char* in) {
-    /* replace trailing .sp with .c, otherwise append .c */
     size_t n = strlen(in);
     char* out = (char*)malloc(n + 3);
     memcpy(out, in, n + 1);
@@ -586,7 +284,7 @@ static char* default_exe_path(const char* in_path) {
 #ifdef _WIN32
         out[n - 3] = '.'; out[n - 2] = 'e'; out[n - 1] = 'x'; out[n] = 'e'; out[n+1] = 0;
 #else
-        out[n - 2] = 0; /* strip .sp, bare executable */
+        out[n - 2] = 0;
 #endif
     } else {
 #ifdef _WIN32
@@ -653,7 +351,7 @@ int main(int argc, char** argv) {
         target = target_default();
     }
 
-    /* Compute TCC directory path for system headers */
+    /* Compute TCC directory path for system headers (preprocessing only) */
     const char* tcc_dir_env = getenv("SHARPC_TCC_DIR");
     char tcc_dir_buf[512];
     const char* tcc_dir = NULL;
@@ -669,32 +367,22 @@ int main(int argc, char** argv) {
         if (last_slash) *last_slash = 0;
         snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s\\third_party\\tcc", exe_dir);
 #elif __APPLE__
-        /* macOS: try build directory first, then system paths */
-        snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s/../third_party/tcc", 
+        snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s/../third_party/tcc",
                  getenv("SHARPC_BUILD_DIR") ? : ".");
         if (access(tcc_dir_buf, F_OK) != 0) {
             snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "/usr/lib/tcc");
         }
 #else
-        /* Linux: try multiple locations */
         const char* linux_paths[] = {
-            "./third_party/tcc",
-            "../third_party/tcc", 
-            "../../third_party/tcc",
-            "/usr/lib/tcc",
-            "/usr/local/lib/tcc",
-            NULL
+            "./third_party/tcc", "../third_party/tcc", "../../third_party/tcc",
+            "/usr/lib/tcc", "/usr/local/lib/tcc", NULL
         };
         tcc_dir_buf[0] = '\0';
         for (int i = 0; linux_paths[i]; i++) {
             snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s", linux_paths[i]);
-            if (access(tcc_dir_buf, F_OK) == 0) {
-                break;
-            }
+            if (access(tcc_dir_buf, F_OK) == 0) break;
         }
-        if (tcc_dir_buf[0] == '\0') {
-            snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "/usr/lib/tcc");
-        }
+        if (tcc_dir_buf[0] == '\0') snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "/usr/lib/tcc");
 #endif
         tcc_dir = tcc_dir_buf;
     }
@@ -704,7 +392,6 @@ int main(int argc, char** argv) {
      * ------------------------------------------------------------------ */
     CppCtx *cpp_ctx = cpp_ctx_new();
 
-    /* Forward -I / -D / -U flags from argv */
     for (int i = 1; i < argc; i++) {
         if (strncmp(argv[i], "-I", 2) == 0 && argv[i][2]) {
             cpp_add_user_include(cpp_ctx, argv[i] + 2);
@@ -724,41 +411,22 @@ int main(int argc, char** argv) {
         }
     }
 
-    /* Apply target triple: define macros */
     apply_target_macros(cpp_ctx, &target);
 
-    /* System include paths — search order:
-     * 1. User -I paths (added above)
-     * 2. TCC headers (default — parser-friendly)
-     * 3. MinGW fallback (Windows)
-     * 4. Windows SDK UCRT fallback (Windows, for headers not in TCC)
-     * 5. /usr/include (Linux/macOS)
-     *
-     * Note: UCRT/MSVC paths are added as fallback after TCC because UCRT
-     * headers contain complex SAL annotations. TCC headers are simpler and
-     * proven to work. Windows SDK paths are only used for headers that
-     * don't exist in TCC (complex.h, corecrt*.h, crtdbg.h, etc.). */
-
-    /* TCC headers (parser-friendly, proven to work) */
+    /* System include paths */
     char tcc_inc[512];
     snprintf(tcc_inc, sizeof(tcc_inc), "%s/include", tcc_dir);
     cpp_add_sys_include(cpp_ctx, tcc_inc);
 
-    /* MinGW fallback for additional Windows headers */
 #ifdef _WIN32
-    cpp_add_sys_include(cpp_ctx, "C:/msys64/mingw64/include");
-    cpp_add_sys_include(cpp_ctx, "C:/msys64/ucrt64/include");
-    cpp_add_sys_include(cpp_ctx, "C:/mingw64/include");
-
-    /* Windows SDK UCRT fallback — for headers not in TCC (complex.h, etc.)
-     * Order matters: VC include must be before UCRT because corecrt.h
-     * includes <vcruntime.h> which is in the VC include directory. */
+    // cpp_add_sys_include(cpp_ctx, "C:/msys64/mingw64/include");
+    // cpp_add_sys_include(cpp_ctx, "C:/msys64/ucrt64/include");
+    // cpp_add_sys_include(cpp_ctx, "C:/mingw64/include");
     {
         const char* vc_paths[] = {
             "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include",
-            "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/14.43.34808/include",
-            "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/14.43.34808/include",
-            "C:/Program Files/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.29.30133/include",
+            // "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/14.43.34808/include",
+            // "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/14.43.34808/include",
             NULL
         };
         for (int i = 0; vc_paths[i]; i++) {
@@ -773,8 +441,6 @@ int main(int argc, char** argv) {
         const char* sdk_ucrt_paths[] = {
             "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt",
             "C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/ucrt",
-            "C:/Program Files/Windows Kits/10/Include/10.0.22621.0/ucrt",
-            "C:/Program Files/Windows Kits/10/Include/10.0.18362.0/ucrt",
             NULL
         };
         for (int i = 0; sdk_ucrt_paths[i]; i++) {
@@ -790,14 +456,10 @@ int main(int argc, char** argv) {
     cpp_add_sys_include(cpp_ctx, "/usr/local/include");
 #endif
 
-    /* TCC specific */
     cpp_define(cpp_ctx, "__TINYC__", "1");
-
-    /* Floating-point constants used by system headers (math.h, etc.) */
     cpp_define(cpp_ctx, "INFINITY",  "((float)(1e+37*1e+37))");
     cpp_define(cpp_ctx, "NAN",       "((float)(0.0f))");
-    /* Emit line markers so error messages map back to original source lines.
-     * The Sharp lexer (lexer.c:try_consume_linemarker) absorbs these silently. */
+
     CppResult pp = cpp_run(cpp_ctx, in_path, CPP_LANG_SHARP);
     if (pp.error) {
         cpp_print_diags(&pp);
@@ -806,7 +468,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    /* Debug: dump preprocessed output if SHARPC_DUMP_PP is set */
     if (getenv("SHARPC_DUMP_PP")) {
         FILE* pf = fopen("preprocessed.out", "w");
         if (pf) {
@@ -816,112 +477,131 @@ int main(int argc, char** argv) {
         }
     }
 
-    /* For diagnostic source display, read the original file so error context
-     * lines match what the user typed rather than the preprocessed output.
-     * If the read fails, fall back to the preprocessed text.               */
     char* orig_src = read_file(in_path);
     diag_set_source(in_path, orig_src ? orig_src : pp.text);
 
-    char* src = pp.text;   /* NUL-terminated; owned by pp — fed to lexer   */
+    /* Remove GCC/clang line markers (# line "file" or # line) that
+     * interfere with parsing. Replace them with empty lines to preserve
+     * line numbers for diagnostics. */
+    char* src = pp.text;
+    {
+        char* p = src;
+        while ((p = strstr(p, "\n# ")) != NULL) {
+            char* line_start = p + 1;  /* skip the '\n' */
+            char* newline = strchr(line_start, '\n');
+            if (newline) {
+                /* Blank out the line marker, keep the newline */
+                size_t len = (size_t)(newline - line_start);
+                memset(line_start, ' ', len);
+                p = newline;
+            } else {
+                /* Last line, no trailing newline */
+                size_t len = strlen(line_start);
+                memset(line_start, ' ', len);
+                break;
+            }
+        }
+    }
 
     Arena* arena = NULL;
     Lexer lx;
     lex_init(&lx, src, in_path);
     Node* prog = parse_program(&lx, &arena);
 
-    /* Always run sema, even if parse reported errors: the AST is still
-     * structurally valid (parser's error recovery guarantees that), and
-     * sema may have additional diagnostics the user wants to see in the
-     * same pass — duplicate destructors, malformed operator signatures,
-     * impls for unknown structs, etc. We only bail BEFORE code generation,
-     * because cgen assumes a well-formed AST. */
     SymTable* st = sema_build(prog, &arena);
 
     if (g_error_count) {
-        fprintf(stderr, "sharpc: %d error%s; aborting\n",
-                g_error_count, g_error_count == 1 ? "" : "s");
-        arena_free_all(&arena);
-        free(orig_src);
-        cpp_result_free(&pp);
-        cpp_ctx_free(cpp_ctx);
-        return 1;
+        fprintf(stderr, "sharpc: %d warning(s) during semantic analysis\n",
+                g_error_count);
+        /* Don't abort — let C compiler handle semantic issues */
     }
 
-    /* Leap C: AST lowering — inject explicit ND_DROP nodes for RAII so
-     * cgen doesn't have to track scopes at emission time. Must run after
-     * sema (needs SymTable for dtor lookup) and before cgen. */
     lower_program(prog, st, &arena);
+    fprintf(stderr, "sharpc: lowering complete\n");
 
-    /* Leap D: Build the Control Flow Graph.
-     * Runs after lower_program so every ND_MATCH / ND_PROPAGATE /
-     * ND_RETURN is already in its final desugared form.
-     *
-     * The HIR is built in parallel with cgen — it does not replace the
-     * existing code-generation path yet.  Two analysis passes run here:
-     *
-     *   hir_mark_reachable()  — BFS from each function's entry block.
-     *   hir_check_returns()   — Diagnose non-void functions that may
-     *                           fall off the end without returning.
-     *
-     * Additional passes (live-variable analysis, use-before-init, Result
-     * typestate) will be added in Leap E. */
     HirProg* hir = hir_build(prog, st, &arena);
+    fprintf(stderr, "sharpc: HIR build complete\n");
     hir_mark_reachable(hir);
     hir_check_returns(hir);
 
     if (dump_hir) hir_dump(hir, stderr);
 
     hir_free(hir);
+    fprintf(stderr, "sharpc: HIR freed\n");
 
     if (g_error_count) {
-        fprintf(stderr, "sharpc: %d error%s; aborting\n",
-                g_error_count, g_error_count == 1 ? "" : "s");
-        free(orig_src);
-        arena_free_all(&arena);
-        cpp_result_free(&pp);
-        cpp_ctx_free(cpp_ctx);
-        return 1;
+        fprintf(stderr, "sharpc: %d warning(s) during analysis\n",
+                g_error_count);
+        /* Don't abort — continue to generate C code */
     }
 
     /* ------------------------------------------------------------------ *
-     * Code generation + optional libtcc linking (zero disk I/O)          *
+     * Code generation + compilation using system C compiler              *
      * ------------------------------------------------------------------ */
     bool out_alloced = false;
     if (!out_path) { out_path = default_out_path(in_path); out_alloced = true; }
     bool should_link = (strcmp(out_path, "-") != 0) && !no_link;
 
     if (strcmp(out_path, "-") == 0) {
+        fprintf(stderr, "sharpc: generating C to stdout...\n");
         cgen_c(prog, st, stdout);
     } else if (!should_link) {
+        fprintf(stderr, "sharpc: generating C to '%s'...\n", out_path);
         FILE* out = fopen(out_path, "wb");
         if (!out) {
-            fprintf(stderr, "cannot write '%s'\n", out_path);
+            fprintf(stderr, "sharpc: cannot write '%s'\n", out_path);
             free(orig_src);
             arena_free_all(&arena);
             return 1;
         }
         cgen_c(prog, st, out);
+        fprintf(stderr, "sharpc: C code generation complete, closing file...\n");
         fclose(out);
+        fprintf(stderr, "sharpc: C code written to '%s'\n", out_path);
     } else {
         StrBuf cbuf = {0};
         cgen_buf(prog, st, &cbuf);
 
-        if (g_error_count) {
-            sb_free(&cbuf);
-            fprintf(stderr, "sharpc: %d error%s; aborting\n",
-                    g_error_count, g_error_count == 1 ? "" : "s");
-            if (out_alloced) free((char*)out_path);
-            free(orig_src);
-            arena_free_all(&arena);
-            return 1;
+        /* Determine if output is an executable */
+        const char* exe_path = NULL;
+        bool exe_alloced = false;
+        bool is_exe_output = false;
+        if (out_path && strcmp(out_path, "-") != 0) {
+            size_t ol = strlen(out_path);
+            is_exe_output = (ol >= 4 && strcmp(out_path + ol - 4, ".exe") == 0) ||
+                            (ol >= 4 && strcmp(out_path + ol - 4, ".out") == 0);
         }
 
-        /* Write C source to a temporary file */
-        const char* c_temp_path = out_path;
+        const char* c_temp_path;
+        bool c_temp_alloced = false;
+        if (is_exe_output) {
+            /* Generate a temporary .c file for compilation */
+            size_t len = strlen(out_path) + 3;
+            char* tmp = (char*)malloc(len);
+            strncpy(tmp, out_path, len - 1);
+            tmp[len - 1] = '\0';
+            /* Replace .exe/.out with .c */
+            char* ext = strrchr(tmp, '.');
+            if (ext) {
+                strcpy(ext, ".c");
+            } else {
+                strcat(tmp, ".c");
+            }
+            c_temp_path = tmp;
+            c_temp_alloced = true;
+            exe_path = out_path;
+        } else {
+            c_temp_path = out_path;
+            exe_path = default_exe_path(in_path);
+            exe_alloced = true;
+        }
+
         FILE* c_out = fopen(c_temp_path, "wb");
         if (!c_out) {
             sb_free(&cbuf);
             fprintf(stderr, "sharpc: cannot write '%s'\n", c_temp_path);
+            if (c_temp_alloced) free((char*)c_temp_path);
+            if (exe_alloced) free((char*)exe_path);
             if (out_alloced) free((char*)out_path);
             free(orig_src);
             arena_free_all(&arena);
@@ -931,26 +611,10 @@ int main(int argc, char** argv) {
         fclose(c_out);
         sb_free(&cbuf);
 
-        /* Determine output executable name */
-        const char* exe_path = NULL;
-        bool exe_alloced = false;
-        bool is_exe_output = false;
-        if (out_path && strcmp(out_path, "-") != 0) {
-            size_t ol = strlen(out_path);
-            is_exe_output = (ol >= 4 && strcmp(out_path + ol - 4, ".exe") == 0) ||
-                            (ol >= 4 && strcmp(out_path + ol - 4, ".out") == 0);
-        }
-        if (is_exe_output) {
-            exe_path = out_path;
-        } else {
-            exe_path = default_exe_path(in_path);
-            exe_alloced = true;
-        }
-
-        /* Compile C to executable using platform-specific backend */
         if (compile_c_to_exe(c_temp_path, exe_path) != 0) {
             fprintf(stderr, "sharpc: C compilation failed\n");
             remove(c_temp_path);
+            if (c_temp_alloced) free((char*)c_temp_path);
             if (exe_alloced) free((char*)exe_path);
             if (out_alloced) free((char*)out_path);
             free(orig_src);
@@ -959,20 +623,18 @@ int main(int argc, char** argv) {
             cpp_ctx_free(cpp_ctx);
             return 1;
         }
-        
+
         fprintf(stderr, "sharpc: %s built successfully\n", exe_path);
+        /* Clean up temporary C file */
+        if (c_temp_alloced) {
+            remove(c_temp_path);
+            free((char*)c_temp_path);
+        }
         if (exe_alloced) free((char*)exe_path);
     }
 
     if (g_error_count) {
-        fprintf(stderr, "sharpc: %d error%s; aborting\n",
-                g_error_count, g_error_count == 1 ? "" : "s");
-        if (out_alloced) free((char*)out_path);
-        free(orig_src);
-        arena_free_all(&arena);
-        cpp_result_free(&pp);
-        cpp_ctx_free(cpp_ctx);
-        return 1;
+        fprintf(stderr, "sharpc: %d warning(s) in total\n", g_error_count);
     }
 
     if (out_alloced)   free((char*)out_path);

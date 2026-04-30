@@ -193,6 +193,9 @@ typedef enum {
     /* inline assembly */
     TK_ASM,
 
+    /* switch/case/default */
+    TK_SWITCH, TK_CASE, TK_DEFAULT,
+
     /* punctuation */
     TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE, TK_LBRACKET, TK_RBRACKET,
     TK_COMMA, TK_SEMI, TK_COLON, TK_DCOLON, TK_DOT, TK_ELLIPSIS, TK_ARROW,
@@ -203,6 +206,7 @@ typedef enum {
 
     /* assignment */
     TK_ASSIGN, TK_PLUSEQ, TK_MINUSEQ, TK_STAREQ, TK_SLASHEQ, TK_PERCENTEQ,
+    TK_ANDEQ, TK_OREQ, TK_XOREQ, TK_SHLEQ, TK_SHREQ,
 
     /* comparison */
     TK_EQ, TK_NEQ, TK_LT, TK_GT, TK_LE, TK_GE,
@@ -331,7 +335,11 @@ typedef enum {
     ND_ENUM_DECL,      /* enum Name { E1=0, E2, ... } — enum definition */
     ND_COMPOUND_LIT,   /* (Type){ init_list } — C99 compound literal */
     ND_INIT_LIST,      /* { expr, expr, ... } — initializer list */
-    ND_DESIG_INIT      /* .field = expr — designated initializer */
+    ND_DESIG_INIT,     /* .field = expr — designated initializer */
+    /* Switch/case/default */
+    ND_SWITCH,         /* switch(expr) { cases... } */
+    ND_CASE,           /* case const_expr: */
+    ND_DEFAULT_CASE    /* default: */
 } NodeKind;
 
 typedef enum {
@@ -340,6 +348,7 @@ typedef enum {
     OP_AND, OP_OR,  OP_NOT, OP_NEG, OP_POS,
     OP_BAND, OP_BOR, OP_BXOR, OP_BNOT, OP_SHL, OP_SHR,
     OP_ASSIGN, OP_ADDEQ, OP_SUBEQ, OP_MULEQ, OP_DIVEQ, OP_MODEQ,
+    OP_ANDEQ, OP_OREQ, OP_XOREQ, OP_SHLEQ, OP_SHREQ,
     OP_DEREF, OP_ADDR,         /* phase 3: unary `*e` and `&e` */
     OP_POSTINC, OP_POSTDEC,    /* phase 4: postfix `e++` / `e--` */
     OP_PREINC, OP_PREDEC,      /* phase 5: prefix `++e` / `--e` */

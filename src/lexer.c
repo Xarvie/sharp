@@ -17,6 +17,9 @@ static const Keyword kws[] = {
     {"continue", 8, TK_CONTINUE},{"sizeof",   6, TK_SIZEOF},
     {"as",       2, TK_AS},      {"operator",  8, TK_OPERATOR},
     {"extern",   6, TK_EXTERN},
+    {"switch",   6, TK_SWITCH},
+    {"case",     4, TK_CASE},
+    {"default",  7, TK_DEFAULT},
     {"print",    5, TK_PRINT},
     {"println",  7, TK_PRINTLN},
     {"void",     4, TK_VOID},    {"bool",     4, TK_BOOL},
@@ -184,6 +187,10 @@ static Tok read_number(Lexer* lx) {
     if (pc(lx, 0) == '0' && (pc(lx, 1) == 'x' || pc(lx, 1) == 'X')) {
         adv(lx); adv(lx);
         while (isxdigit(pc(lx, 0))) adv(lx);
+        /* Hex literals can have integer suffixes too */
+        if ((pc(lx, 0) == 'u' || pc(lx, 0) == 'U')) { adv(lx); }
+        if ((pc(lx, 0) == 'l' || pc(lx, 0) == 'L')) { adv(lx); if ((pc(lx, 0) == 'l' || pc(lx, 0) == 'L')) adv(lx); }
+        if ((pc(lx, 0) == 'u' || pc(lx, 0) == 'U')) { adv(lx); }
         t.len = (int)(lx->cur - t.start);
         char buf[64]; int n = t.len < 63 ? t.len : 63;
         memcpy(buf, t.start, (size_t)n); buf[n] = 0;
@@ -202,8 +209,18 @@ static Tok read_number(Lexer* lx) {
         if (pc(lx, 0) == '+' || pc(lx, 0) == '-') adv(lx);
         while (isdigit(pc(lx, 0))) adv(lx);
     }
+    if (!is_float) {
+        /* Integer suffixes: u/U, l/L, ll/LL, ul, ul, ull, llu, etc. */
+        bool has_u = false, has_l = false;
+        if (pc(lx, 0) == 'u' || pc(lx, 0) == 'U') { has_u = true; adv(lx); }
+        if (pc(lx, 0) == 'l' || pc(lx, 0) == 'L') {
+            has_l = true; adv(lx);
+            if (pc(lx, 0) == 'l' || pc(lx, 0) == 'L') adv(lx);
+        }
+        if (!has_u && (pc(lx, 0) == 'u' || pc(lx, 0) == 'U')) { adv(lx); }
+    }
     /* allow 1.0f etc. -> just consume */
-    if (pc(lx, 0) == 'f' || pc(lx, 0) == 'F') { is_float = true; adv(lx); }
+    else if (pc(lx, 0) == 'f' || pc(lx, 0) == 'F') { is_float = true; adv(lx); }
 
     t.len = (int)(lx->cur - t.start);
     char buf[64]; int n = t.len < 63 ? t.len : 63;
@@ -267,7 +284,7 @@ static Tok read_punct(Lexer* lx) {
             if (c2 == '.' && pc(lx, 1) == '.') { adv(lx); adv(lx); k = TK_ELLIPSIS; }
             else k = TK_DOT;
             break;
-        case '^': k = TK_CARET;    break;
+        case '^': if (c2 == '=') { adv(lx); k = TK_XOREQ; } else k = TK_CARET; break;
         case ':': if (c2 == ':') { adv(lx); k = TK_DCOLON; } else k = TK_COLON; break;
         case '+':
             if      (c2 == '=') { adv(lx); k = TK_PLUSEQ;   }
@@ -290,16 +307,32 @@ static Tok read_punct(Lexer* lx) {
         case '!': if (c2 == '=') { adv(lx); k = TK_NEQ; } else k = TK_NOT; break;
         case '<':
             if      (c2 == '=') { adv(lx); k = TK_LE;  }
-            else if (c2 == '<') { adv(lx); k = TK_SHL; }
+            else if (c2 == '<') { 
+                adv(lx); 
+                if (pc(lx, 0) == '=') { adv(lx); k = TK_SHLEQ; }
+                else { k = TK_SHL; }
+            }
             else                  k = TK_LT;
             break;
         case '>':
             if      (c2 == '=') { adv(lx); k = TK_GE;  }
-            else if (c2 == '>') { adv(lx); k = TK_SHR; }
+            else if (c2 == '>') { 
+                adv(lx);
+                if (pc(lx, 0) == '=') { adv(lx); k = TK_SHREQ; }
+                else { k = TK_SHR; }
+            }
             else                  k = TK_GT;
             break;
-        case '&': if (c2 == '&') { adv(lx); k = TK_AND_AND; } else k = TK_AMP;  break;
-        case '|': if (c2 == '|') { adv(lx); k = TK_OR_OR;   } else k = TK_PIPE; break;
+        case '&':
+            if (c2 == '&') { adv(lx); k = TK_AND_AND; }
+            else if (c2 == '=') { adv(lx); k = TK_ANDEQ; }
+            else k = TK_AMP;
+            break;
+        case '|':
+            if (c2 == '|') { adv(lx); k = TK_OR_OR; }
+            else if (c2 == '=') { adv(lx); k = TK_OREQ; }
+            else k = TK_PIPE;
+            break;
         case '?': k = TK_QUESTION; break;
         default:
             /* c was already consumed by adv(lx) at line 270, so no need to advance again */

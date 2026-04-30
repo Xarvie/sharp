@@ -509,10 +509,15 @@ static TokList substitute(const MacroDef *def,
 
                 if (paste_right) {
                     /* Paste the unexpanded argument */
+                    bool first_arg = true;
                     for (TokNode *an = args[idx].head; an; an = an->next) {
                         PPTok copy = an->tok;
                         copy.spell = (StrBuf){0};
                         sb_push_cstr(&copy.spell, pptok_spell(&an->tok));
+                        if (first_arg) {
+                            copy.has_leading_space = copy.has_leading_space || t->has_leading_space;
+                            first_arg = false;
+                        }
                         tl_append(&result, copy);
                     }
                 } else {
@@ -527,10 +532,21 @@ static TokList substitute(const MacroDef *def,
                     }
                     expand_list(&arg_copy, mt, interns, diags, &expanded);
                     tl_free(&arg_copy);
+                    /* C99 6.10.3.4: the first token of the expanded argument
+                     * inherits the leading-space flag from the parameter
+                     * reference in the macro body. This ensures that when a
+                     * macro body like "extern x" (where x is a parameter) is
+                     * expanded, the space before x is preserved as a leading
+                     * space on the first substituted token.              */
+                    bool first_arg = true;
                     for (TokNode *en = expanded.head; en; en = en->next) {
                         PPTok copy = en->tok;
                         copy.spell = (StrBuf){0};
                         sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
+                        if (first_arg) {
+                            copy.has_leading_space = copy.has_leading_space || t->has_leading_space;
+                            first_arg = false;
+                        }
                         tl_append(&result, copy);
                     }
                     tl_free(&expanded);

@@ -85,34 +85,6 @@ void cpp_set_pragma_handler(CppCtx *ctx, CppPragmaHandler fn, void *ud) {
 }
 
 /* =========================================================================
- * Apply command-line -D / -U to a CppState before processing starts.
- * ====================================================================== */
-
-static void apply_cmdline_macros(CppState *st, CppCtx *ctx) {
-    MacroTable  *mt      = macro_state_table(st);
-    InternTable *interns = &ctx->interns;
-    CppLoc       cloc    = {intern_cstr(interns, "<command-line>"), 0, 0};
-    /* Process in left-to-right command-line order */
-    for (size_t i = 0; i < ctx->cmdline_ops.len; i++) {
-        const char *op = ctx->cmdline_ops.data[i];
-        if (op[0] == 'U' && op[1] == ':') {
-            macro_undef(mt, op + 2);
-        } else if (op[0] == 'D' && op[1] == ':') {
-            const char *body = op + 2;
-            const char *eq   = strchr(body, '=');
-            if (eq) {
-                size_t nlen = (size_t)(eq - body);
-                char  *name = cpp_xstrndup(body, nlen);
-                macro_define_object(mt, interns, name, eq + 1, cloc);
-                free(name);
-            } else {
-                macro_define_object(mt, interns, body, "1", cloc);
-            }
-        }
-    }
-}
-
-/* =========================================================================
  * Phase 6: Adjacent string-literal concatenation (§6.4.5p4 / §6.10.3.2)
  *
  * Runs over the output token array after the directive phase.  Consecutive
@@ -342,7 +314,6 @@ static CppResult build_result(CppState *st, CppCtx *ctx, CppDiagArr *diags) {
 CppResult cpp_run(CppCtx *ctx, const char *filename, CppLang lang) {
     CppDiagArr diags = {0};
     CppState *st = cpp_state_new(ctx, &diags);
-    apply_cmdline_macros(st, ctx);
     cpp_state_run_file(st, filename, lang);
     CppResult res = build_result(st, ctx, &diags);
     /* diags ownership transferred to res */
@@ -354,7 +325,6 @@ CppResult cpp_run_buf(CppCtx *ctx, const char *buf, size_t len,
                        const char *filename, CppLang lang) {
     CppDiagArr diags = {0};
     CppState *st = cpp_state_new(ctx, &diags);
-    apply_cmdline_macros(st, ctx);
     cpp_state_run_buf(st, buf, len, filename, lang);
     CppResult res = build_result(st, ctx, &diags);
     cpp_state_free(st);
