@@ -720,24 +720,32 @@ static Type* parse_declarator_internal(P* p, Type* base, const char** out_name, 
 
     while (accept(p, TK_STAR)) {
         base = type_ptr(p->arena, base);
-        /* Optional const/volatile/restrict after each '*' */
+        /* Optional const/volatile/restrict/calling-conv after each '*' */
         for (;;) {
             TokKind k = lex_peek(p->lex).kind;
             if (k == TK_CONST) {
                 lex_next(p->lex);
                 base = type_const(p->arena, base);
             } else if (k == TK___RESTRICT || k == TK___RESTRICT__ || k == TK_RESTRICT) {
-                lex_next(p->lex); /* discard for now */
+                lex_next(p->lex);
             } else if (k == TK_IDENT && lex_ident_is(lex_peek(p->lex), "__restrict")) {
-                lex_next(p->lex); /* discard */
+                lex_next(p->lex);
+            } else if (k == TK___CDECL || k == TK___STDCALL ||
+                       k == TK___FASTCALL || k == TK___CRTDECL) {
+                lex_next(p->lex); /* calling convention after '*': int* __cdecl f(void) */
             } else { break; }
         }
     }
 
-    /* Skip __declspec that appears between type and declarator name.
-     * MSVC allows: `char* __declspec(nothrow) _base;` */
+    /* Skip __declspec / calling-conv between the last '*' and the declarator name.
+     * MSVC patterns: `char* __declspec(nothrow) _base;`
+     *                `int*  __cdecl _errno(void);`     */
     if (lex_peek(p->lex).kind == TK___DECLSPEC) {
         skip_declspec(p);
+    }
+    while (lex_peek(p->lex).kind == TK___CDECL || lex_peek(p->lex).kind == TK___STDCALL ||
+           lex_peek(p->lex).kind == TK___FASTCALL || lex_peek(p->lex).kind == TK___CRTDECL) {
+        lex_next(p->lex);
     }
 
     /* ----- direct declarator ----- */
@@ -2560,8 +2568,17 @@ static Node* parse_func_common(P* p, const char* parent, bool is_static) {
                 ret = type_const(p->arena, ret);
             } else if (k == TK___RESTRICT || k == TK___RESTRICT__ || k == TK_RESTRICT) {
                 lex_next(p->lex);
+            } else if (k == TK___CDECL || k == TK___STDCALL ||
+                       k == TK___FASTCALL || k == TK___CRTDECL) {
+                lex_next(p->lex); /* calling convention after '*': void* __cdecl f(void) */
             } else { break; }
         }
+    }
+    /* Skip calling convention between last '*' and function name:
+     * `int* __cdecl name(void)` */
+    while (lex_peek(p->lex).kind == TK___CDECL || lex_peek(p->lex).kind == TK___STDCALL ||
+           lex_peek(p->lex).kind == TK___FASTCALL || lex_peek(p->lex).kind == TK___CRTDECL) {
+        lex_next(p->lex);
     }
     /* Consume function name */
     Tok tname = lex_peek(p->lex);

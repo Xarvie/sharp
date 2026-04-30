@@ -165,7 +165,6 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         cpp_define(cpp, "_NO_CRT_STDIO_INLINE", "");
         cpp_define(cpp, "_ACRTIMP_INLINE",      "__inline");
         cpp_define(cpp, "__pragma(x)",  "");
-        cpp_define(cpp, "__pragma",     "");
         cpp_define(cpp, "_In_",            "");
         cpp_define(cpp, "_In_z_",          "");
         cpp_define(cpp, "_In_opt_",        "");
