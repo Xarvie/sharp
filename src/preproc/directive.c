@@ -1282,9 +1282,78 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
                 if (macro_had_leading_space && expanded.head)
                     expanded.head->tok.has_leading_space = true;
 
-                for (TokNode *en = expanded.head; en; en = en->next)
-                    emit_tok_text(st, &en->tok);
-                tl_free(&expanded);
+                /* Rescan: after expansion, if the result is a single IDENT that is
+                 * a function-like macro, peek at the reader to see if the next
+                 * non-whitespace token is `(`.  If so, collect the args, rescan,
+                 * and re-expand.  Handles: #define A B  →  B(args).
+                 * We peek by reading ahead and storing tokens, then using them
+                 * in the rescan input (they won't be read again by the main loop). */
+                {
+                    bool rescanned = false;
+                    if (expanded.head && expanded.head->next == NULL &&
+                        expanded.head->tok.kind == CPPT_IDENT &&
+                        !expanded.head->tok.hide &&
+                        macro_lookup_is_func(st->macros, pptok_spell(&expanded.head->tok))) {
+                        /* Peek ahead: read tokens until we find `(` or non-ws */
+                        TokList peek_ws = {0};
+                        PPTok first = reader_next_tok(rd, false);
+                        while (first.kind == CPPT_SPACE || first.kind == CPPT_NEWLINE) {
+                            tl_append_copy(&peek_ws, &first);
+                            pptok_free(&first);
+                            first = reader_next_tok(rd, false);
+                        }
+
+                        if (first.kind == CPPT_PUNCT &&
+                            strcmp(pptok_spell(&first), "(") == 0) {
+                            /* Build rescan input: expanded ident + peeked ws + ( + args + ) */
+                            TokList r_input = {0};
+                            {
+                                PPTok cpy = expanded.head->tok;
+                                cpy.spell = (StrBuf){0};
+                                sb_push_cstr(&cpy.spell, pptok_spell(&expanded.head->tok));
+                                cpy.has_leading_space = expanded.head->tok.has_leading_space;
+                                tl_append(&r_input, cpy);
+                            }
+                            for (TokNode *wn = peek_ws.head; wn; wn = wn->next)
+                                tl_append_copy(&r_input, &wn->tok);
+                            tl_append_copy(&r_input, &first);
+
+                            int depth = 1;
+                            while (depth > 0) {
+                                PPTok at = reader_next_tok(rd, false);
+                                if (at.kind == CPPT_EOF) { pptok_free(&at); break; }
+                                tl_append_copy(&r_input, &at);
+                                if (at.kind == CPPT_PUNCT) {
+                                    if (strcmp(pptok_spell(&at), "(") == 0) depth++;
+                                    else if (strcmp(pptok_spell(&at), ")") == 0) depth--;
+                                }
+                                pptok_free(&at);
+                            }
+                            pptok_free(&first);
+                            tl_free(&peek_ws);
+
+                            TokList r_expanded = {0};
+                            macro_expand(&r_input, st->macros, st->interns, st->diags, &r_expanded);
+                            tl_free(&r_input);
+
+                            for (TokNode *rn = r_expanded.head; rn; rn = rn->next)
+                                emit_tok_text(st, &rn->tok);
+                            tl_free(&r_expanded);
+                            tl_free(&expanded);
+                            rescanned = true;
+                        } else {
+                            /* Not `(` — emit the whitespace and first token back
+                             * by emitting them normally, then the expanded token. */
+                            pptok_free(&first);
+                        }
+                    }
+
+                    if (!rescanned) {
+                        for (TokNode *en = expanded.head; en; en = en->next)
+                            emit_tok_text(st, &en->tok);
+                    }
+                    tl_free(&expanded);
+                }
                 continue;
             }
         }

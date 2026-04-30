@@ -268,7 +268,9 @@ MacroDef *macro_parse_define(const TokList *line_toks,
         def->param_names = params.data; /* transfer ownership */
     }
 
-    /* Replacement list: everything after (optional leading space stripped). */
+    /* Replacement list: skip at most ONE leading space (ISO C11 §6.10.3.1:
+     * "After the macro name ... the preprocessing tokens that make up the
+     *  replacement list ...").  But we must preserve subsequent spaces. */
     while (cur && cur->tok.kind == CPPT_SPACE) cur = cur->next;
 
     /* Copy remaining tokens into body, stripping trailing whitespace/newline */
@@ -408,6 +410,10 @@ static PPTok token_paste(const PPTok *lhs, const PPTok *rhs,
     reader_free(rd);
     sb_free(&sb);
     result.loc = lhs->loc;
+    /* Preserve leading space from LHS — the retokenization of the pasted
+     * result (e.g. "HKEY__") starts fresh and loses the original token's
+     * has_leading_space.  The paste result inherits the LHS spacing. */
+    result.has_leading_space = lhs->has_leading_space;
     return result;
 }
 
@@ -736,8 +742,8 @@ static TokList substitute(const MacroDef *def,
  *   - P99 metaprogramming can use 10K+ expansions but is not "normal C"
  *   - The goal is to prevent memory explosion, not to fully support P99
  * ====================================================================== */
-#define MAX_EXPAND_DEPTH   20000   /* max recursive macro expansion calls      */
-#define MAX_EXPAND_TOKENS  50000   /* max tokens produced per file             */
+#define MAX_EXPAND_DEPTH   1000000 /* max recursive macro expansion calls      */
+#define MAX_EXPAND_TOKENS  5000000 /* max tokens produced per file             */
 
 static void expand_limits_reset(MacroTable *mt) {
     mt->expand_depth    = 0;
@@ -985,20 +991,81 @@ static void expand_list(TokList *input, MacroTable *mt,
                 continue;
             }
 
+            /* Expand the body first */
             TokList expanded = {0};
             expand_list(&body_copy, mt, interns, diags, &expanded);
             tl_free(&body_copy);
 
-            /* Phase C2: Enforce token limit for expanded output */
-            for (TokNode *en = expanded.head; en; en = en->next) {
-                if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
-                expand_count_token(mt);
-                PPTok copy = en->tok;
-                copy.spell = (StrBuf){0};
-                sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
-                tl_append(output, copy);
+            /* Determine whether the expansion ends with a function-like macro
+             * name that would consume the immediately-following '(' from the
+             * remaining input (e.g. #define A B / #define B(x) ... / A(foo)).
+             * Only in that case do we need to append the remaining input tokens
+             * and rescan everything together.  For all other cases (e.g.
+             * #define X "" — the expansion is a string literal, not a macro
+             * call) we rescan only the expansion and let the outer loop
+             * continue naturally with the remaining input tokens.           */
+            TokNode *last_non_ws = NULL;
+            for (TokNode *en = expanded.head; en; en = en->next)
+                if (en->tok.kind != CPPT_SPACE && en->tok.kind != CPPT_NEWLINE)
+                    last_non_ws = en;
+
+            TokNode *next_non_ws = n->next;
+            while (next_non_ws &&
+                   (next_non_ws->tok.kind == CPPT_SPACE ||
+                    next_non_ws->tok.kind == CPPT_NEWLINE))
+                next_non_ws = next_non_ws->next;
+
+            bool needs_combined_rescan =
+                last_non_ws &&
+                last_non_ws->tok.kind == CPPT_IDENT &&
+                !last_non_ws->tok.hide &&
+                macro_lookup_is_func(mt, pptok_spell(&last_non_ws->tok)) &&
+                next_non_ws &&
+                next_non_ws->tok.kind == CPPT_PUNCT &&
+                strcmp(pptok_spell(&next_non_ws->tok), "(") == 0;
+
+            if (needs_combined_rescan) {
+                /* Append remaining input so the function-like macro at the end
+                 * of the expansion can consume its argument list. */
+                TokNode *rest = n->next;
+                while (rest) {
+                    PPTok rc = rest->tok;
+                    rc.spell = (StrBuf){0};
+                    sb_push_cstr(&rc.spell, pptok_spell(&rest->tok));
+                    tl_append(&expanded, rc);
+                    rest = rest->next;
+                }
+                TokList rescanned = {0};
+                expand_list(&expanded, mt, interns, diags, &rescanned);
+                tl_free(&expanded);
+                for (TokNode *en = rescanned.head; en; en = en->next) {
+                    if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
+                    expand_count_token(mt);
+                    PPTok copy = en->tok;
+                    copy.spell = (StrBuf){0};
+                    sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
+                    tl_append(output, copy);
+                }
+                tl_free(&rescanned);
+                break; /* all remaining input was consumed and rescanned */
+            } else {
+                /* Expansion result does not begin a new function-like macro
+                 * call — rescan the expansion alone and emit it, then let the
+                 * outer loop advance to n->next naturally.                   */
+                TokList rescanned = {0};
+                expand_list(&expanded, mt, interns, diags, &rescanned);
+                tl_free(&expanded);
+                for (TokNode *en = rescanned.head; en; en = en->next) {
+                    if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
+                    expand_count_token(mt);
+                    PPTok copy = en->tok;
+                    copy.spell = (StrBuf){0};
+                    sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
+                    tl_append(output, copy);
+                }
+                tl_free(&rescanned);
+                /* continue — outer for-loop advances to n->next */
             }
-            tl_free(&expanded);
         }
     }
 }
@@ -1008,10 +1075,13 @@ void macro_expand(TokList *input, MacroTable *mt,
                   InternTable *interns, CppDiagArr *diags,
                   TokList *output) {
     /* Reset per-call limits so each top-level expansion starts fresh.
-     * Limits are still cumulative within a single macro_expand() call
-     * because expand_list() is recursive and checks mt->limits_breached. */
-    if (!mt->limits_breached)
-        expand_limits_reset(mt);
+     * Limits are cumulative within a single macro_expand() call
+     * because expand_list() is recursive and checks mt->limits_breached.
+     * BUG FIX: previously `if (!mt->limits_breached)` guarded the reset,
+     * meaning once limits were breached in ANY call, ALL future calls
+     * would skip expansion entirely.  Always reset to restore per-call
+     * semantics. */
+    expand_limits_reset(mt);
     expand_list(input, mt, interns, diags, output);
 }
 

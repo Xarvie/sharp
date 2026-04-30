@@ -268,10 +268,10 @@ static CppLoc current_loc(const CppReader *rd) {
 }
 
 static bool is_ident_start(int c) {
-    return isalpha(c) || c == '_';
+    return isalpha(c) || c == '_' || c == '$';
 }
 static bool is_ident_cont(int c) {
-    return isalnum(c) || c == '_';
+    return isalnum(c) || c == '_' || c == '$';
 }
 static bool is_pp_number_start(int c, int next) {
     /* A preprocessing number starts with an optional `.` followed by a digit
