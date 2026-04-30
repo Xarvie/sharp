@@ -182,16 +182,8 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
         cpp_define(cpp, "_ACRTIMP_NOALIAS", "");
         cpp_define(cpp, "_ACRTIMP_NONALIAS_RET", "");
         cpp_define(cpp, "_CRTRESTRICT",     "");
-        cpp_define(cpp, "__MINGW_ATTRIB_NONNULL(x)", "");
-        cpp_define(cpp, "__MINGW_ATTRIB_NORETURN",   "");
-        cpp_define(cpp, "__MINGW_NOTHROW",           "");
-        cpp_define(cpp, "__CRTCONST",                "");
-        cpp_define(cpp, "__CRT_INLINE",              "inline");
-        cpp_define(cpp, "_CRT_INLINE",               "inline");
-        cpp_define(cpp, "__builtin_va_list",         "void*");
-        cpp_define(cpp, "__builtin_va_start(ap,x)",  "");
-        cpp_define(cpp, "__builtin_va_end(ap)",      "");
-        cpp_define(cpp, "__builtin_va_arg(ap,t)",    "(t)0");
+        cpp_define(cpp, "__CRT_INLINE",  "inline");
+        cpp_define(cpp, "_CRT_INLINE",   "inline");
     }
 }
 
@@ -302,10 +294,13 @@ int main(int argc, char** argv) {
     const char* target_str = NULL;
     bool        dump_hir = false;
     bool        no_link  = false;
+    bool        preprocess_only = false;  /* -E flag */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             out_path = argv[++i];
+        } else if (strcmp(argv[i], "-E") == 0) {
+            preprocess_only = true;
         } else if (strcmp(argv[i], "-dump-hir") == 0) {
             dump_hir = true;
         } else if (strcmp(argv[i], "-no-link") == 0) {
@@ -335,7 +330,8 @@ int main(int argc, char** argv) {
         }
     }
     if (!in_path) {
-        fprintf(stderr, "usage: sharpc <file.sp> [-o out[.c|.exe]] [-dump-hir] [-no-link] [--target <triple>]\n");
+        fprintf(stderr, "usage: sharpc <file.[sp|c]> [-E] [-o out] [-dump-hir] [-no-link] [--target <triple>]\n");
+        fprintf(stderr, "  -E            preprocess only, write to stdout (or -o file)\n");
         fprintf(stderr, "  target examples: x86_64-windows-msvc, x86_64-linux-gnu, aarch64-macos-none\n");
         return 2;
     }
@@ -349,42 +345,6 @@ int main(int argc, char** argv) {
         }
     } else {
         target = target_default();
-    }
-
-    /* Compute TCC directory path for system headers (preprocessing only) */
-    const char* tcc_dir_env = getenv("SHARPC_TCC_DIR");
-    char tcc_dir_buf[512];
-    const char* tcc_dir = NULL;
-    if (tcc_dir_env) {
-        tcc_dir = tcc_dir_env;
-    } else {
-#ifdef _WIN32
-        char exe_dir[512];
-        GetModuleFileNameA(NULL, exe_dir, sizeof(exe_dir));
-        char* last_slash = strrchr(exe_dir, '\\');
-        if (last_slash) *last_slash = 0;
-        last_slash = strrchr(exe_dir, '\\');
-        if (last_slash) *last_slash = 0;
-        snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s\\third_party\\tcc", exe_dir);
-#elif __APPLE__
-        snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s/../third_party/tcc",
-                 getenv("SHARPC_BUILD_DIR") ? : ".");
-        if (access(tcc_dir_buf, F_OK) != 0) {
-            snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "/usr/lib/tcc");
-        }
-#else
-        const char* linux_paths[] = {
-            "./third_party/tcc", "../third_party/tcc", "../../third_party/tcc",
-            "/usr/lib/tcc", "/usr/local/lib/tcc", NULL
-        };
-        tcc_dir_buf[0] = '\0';
-        for (int i = 0; linux_paths[i]; i++) {
-            snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "%s", linux_paths[i]);
-            if (access(tcc_dir_buf, F_OK) == 0) break;
-        }
-        if (tcc_dir_buf[0] == '\0') snprintf(tcc_dir_buf, sizeof(tcc_dir_buf), "/usr/lib/tcc");
-#endif
-        tcc_dir = tcc_dir_buf;
     }
 
     /* ------------------------------------------------------------------ *
@@ -413,59 +373,157 @@ int main(int argc, char** argv) {
 
     apply_target_macros(cpp_ctx, &target);
 
-    /* System include paths */
-    char tcc_inc[512];
-    snprintf(tcc_inc, sizeof(tcc_inc), "%s/include", tcc_dir);
-    cpp_add_sys_include(cpp_ctx, tcc_inc);
-
+    /* ------------------------------------------------------------------ *
+     * System include paths
+     *
+     * Windows: MSVC + UCRT only.
+     *   Priority: INCLUDE env var (vcvarsall/Developer Prompt) → VCToolsInstallDir
+     *             → enumerate VS 2022 versioned dirs → Windows SDK dirs.
+     *
+     * Linux/macOS: system include dirs only.
+     * ------------------------------------------------------------------ */
 #ifdef _WIN32
-    // cpp_add_sys_include(cpp_ctx, "C:/msys64/mingw64/include");
-    // cpp_add_sys_include(cpp_ctx, "C:/msys64/ucrt64/include");
-    // cpp_add_sys_include(cpp_ctx, "C:/mingw64/include");
     {
-        const char* vc_paths[] = {
-            "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include",
-            // "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/14.43.34808/include",
-            // "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/14.43.34808/include",
-            NULL
-        };
-        for (int i = 0; vc_paths[i]; i++) {
-            DWORD attr = GetFileAttributesA(vc_paths[i]);
-            if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                cpp_add_sys_include(cpp_ctx, vc_paths[i]);
-                break;
+        const char *inc_env = getenv("INCLUDE");
+        if (inc_env && inc_env[0]) {
+            /* vcvarsall.bat already set INCLUDE — contains VC + SDK + UCRT. */
+            char buf[8192];
+            strncpy(buf, inc_env, sizeof(buf) - 1);
+            buf[sizeof(buf) - 1] = '\0';
+            char *p = buf;
+            while (*p) {
+                char *semi = strchr(p, ';');
+                if (semi) *semi = '\0';
+                if (*p) cpp_add_sys_include(cpp_ctx, p);
+                if (!semi) break;
+                p = semi + 1;
             }
-        }
-    }
-    {
-        const char* sdk_ucrt_paths[] = {
-            "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt",
-            "C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/ucrt",
-            NULL
-        };
-        for (int i = 0; sdk_ucrt_paths[i]; i++) {
-            DWORD attr = GetFileAttributesA(sdk_ucrt_paths[i]);
-            if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                cpp_add_sys_include(cpp_ctx, sdk_ucrt_paths[i]);
-                break;
+        } else {
+            /* No vcvarsall — discover VS install ourselves. */
+            bool found_vc = false;
+
+            /* VCToolsInstallDir is set by vcvarsall even without a full
+             * Developer Prompt (e.g. cmake --build invoked from VS).     */
+            const char *vc_tools = getenv("VCToolsInstallDir");
+            if (vc_tools && vc_tools[0]) {
+                char inc[512];
+                snprintf(inc, sizeof(inc), "%s\\include", vc_tools);
+                DWORD attr = GetFileAttributesA(inc);
+                if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    cpp_add_sys_include(cpp_ctx, inc);
+                    found_vc = true;
+                }
+            }
+
+            if (!found_vc) {
+                /* Enumerate versioned subdirs under known VS 2022 MSVC bases */
+                const char *vc_bases[] = {
+                    "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC",
+                    "C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional\\VC\\Tools\\MSVC",
+                    "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC",
+                    "C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC",
+                    NULL
+                };
+                for (int bi = 0; vc_bases[bi] && !found_vc; bi++) {
+                    char pattern[512];
+                    snprintf(pattern, sizeof(pattern), "%s\\*", vc_bases[bi]);
+                    WIN32_FIND_DATAA fd;
+                    HANDLE hf = FindFirstFileA(pattern, &fd);
+                    if (hf == INVALID_HANDLE_VALUE) continue;
+                    do {
+                        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                        if (fd.cFileName[0] == '.') continue;
+                        char inc[512];
+                        snprintf(inc, sizeof(inc), "%s\\%s\\include",
+                                 vc_bases[bi], fd.cFileName);
+                        DWORD attr = GetFileAttributesA(inc);
+                        if (attr != INVALID_FILE_ATTRIBUTES &&
+                            (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                            cpp_add_sys_include(cpp_ctx, inc);
+                            found_vc = true;
+                            break;
+                        }
+                    } while (FindNextFileA(hf, &fd));
+                    FindClose(hf);
+                }
+            }
+
+            /* Windows SDK: pick the newest installed version and add
+             * ucrt, shared, and um sub-directories.                  */
+            const char *sdk_base =
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include";
+            {
+                char sdk_pattern[512];
+                snprintf(sdk_pattern, sizeof(sdk_pattern), "%s\\*", sdk_base);
+                WIN32_FIND_DATAA sd;
+                HANDLE hs = FindFirstFileA(sdk_pattern, &sd);
+                char best_ver[64] = {0};
+                if (hs != INVALID_HANDLE_VALUE) {
+                    do {
+                        if (!(sd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                        if (sd.cFileName[0] == '.') continue;
+                        if (strcmp(sd.cFileName, best_ver) > 0)
+                            strncpy(best_ver, sd.cFileName, sizeof(best_ver) - 1);
+                    } while (FindNextFileA(hs, &sd));
+                    FindClose(hs);
+                }
+                if (best_ver[0]) {
+                    const char *subs[] = { "ucrt", "shared", "um", NULL };
+                    for (int si = 0; subs[si]; si++) {
+                        char p[512];
+                        snprintf(p, sizeof(p), "%s\\%s\\%s",
+                                 sdk_base, best_ver, subs[si]);
+                        DWORD attr = GetFileAttributesA(p);
+                        if (attr != INVALID_FILE_ATTRIBUTES &&
+                            (attr & FILE_ATTRIBUTE_DIRECTORY))
+                            cpp_add_sys_include(cpp_ctx, p);
+                    }
+                }
             }
         }
     }
 #else
+    /* Linux / macOS: system headers only. */
     cpp_add_sys_include(cpp_ctx, "/usr/include");
     cpp_add_sys_include(cpp_ctx, "/usr/local/include");
 #endif
 
-    cpp_define(cpp_ctx, "__TINYC__", "1");
-    cpp_define(cpp_ctx, "INFINITY",  "((float)(1e+37*1e+37))");
-    cpp_define(cpp_ctx, "NAN",       "((float)(0.0f))");
+    /* Use C language mode when the input file ends in .c */
+    CppLang lang = CPP_LANG_SHARP;
+    {
+        size_t plen = strlen(in_path);
+        if (plen >= 2 && strcmp(in_path + plen - 2, ".c") == 0)
+            lang = CPP_LANG_C;
+    }
 
-    CppResult pp = cpp_run(cpp_ctx, in_path, CPP_LANG_SHARP);
+    CppResult pp = cpp_run(cpp_ctx, in_path, lang);
+    cpp_print_diags(&pp);
     if (pp.error) {
-        cpp_print_diags(&pp);
         cpp_result_free(&pp);
         cpp_ctx_free(cpp_ctx);
         return 1;
+    }
+
+    /* -E: preprocess only — write text to stdout (or -o file) and exit. */
+    if (preprocess_only) {
+        FILE *out = stdout;
+        bool  close_out = false;
+        if (out_path && strcmp(out_path, "-") != 0) {
+            out = fopen(out_path, "wb");
+            if (!out) {
+                fprintf(stderr, "sharpc: cannot open '%s' for writing\n", out_path);
+                cpp_result_free(&pp);
+                cpp_ctx_free(cpp_ctx);
+                return 1;
+            }
+            close_out = true;
+        }
+        if (pp.text && pp.text_len)
+            fwrite(pp.text, 1, pp.text_len, out);
+        if (close_out) fclose(out);
+        cpp_result_free(&pp);
+        cpp_ctx_free(cpp_ctx);
+        return 0;
     }
 
     if (getenv("SHARPC_DUMP_PP")) {

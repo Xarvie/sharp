@@ -56,14 +56,48 @@ static void emit_diag(CppState *st, CppDiagLevel lvl, CppLoc loc, const char *fm
     if (lvl == CPP_DIAG_FATAL) st->fatal = true;
 }
 
-/* Emit a linemarker: `# <line> "<file>"\n` */
+/* Emit a linemarker: `# <line> "<file>"\n`
+ * Also resets the newline counter so the next flush_pending_lm() can detect
+ * whether a new marker is actually needed.                                  */
 static void emit_linemarker(CppState *st, int line, const char *file) {
     if (!st->emit_linemarkers) return;
     sb_printf(&st->out_text, "# %d \"%s\"\n", line, file);
+    st->last_lm_src_line = line;
+    st->last_lm_src_file = file;
+    st->out_newlines     = 0;
 }
 
-/* Emit a token's text to the output text buffer. */
+/* Queue a linemarker to fire lazily before the next real content token.
+ * Multiple consecutive directives will overwrite the same pending slot,
+ * so only one marker is ever emitted for a run of directives.               */
+static void queue_linemarker(CppState *st, int line, const char *file) {
+    st->pending_lm      = true;
+    st->pending_lm_line = line;
+    st->pending_lm_file = file;
+}
+
+/* Fire the pending linemarker if one is queued AND if the expected output
+ * line doesn't already match the pending source line.                       */
+static void flush_pending_lm(CppState *st) {
+    if (!st->pending_lm) return;
+    st->pending_lm = false;
+    if (!st->emit_linemarkers) return;
+    /* expected source line = line declared in last marker + newlines since */
+    int expected = st->last_lm_src_line + st->out_newlines;
+    if (expected == st->pending_lm_line &&
+        st->last_lm_src_file == st->pending_lm_file)
+        return; /* already in sync — no marker needed */
+    emit_linemarker(st, st->pending_lm_line, st->pending_lm_file);
+}
+
+/* Emit a token's text to the output text buffer.
+ * Flushes any pending linemarker before the first non-whitespace token so
+ * that runs of directives don't produce redundant markers.                  */
 static void emit_tok_text(CppState *st, const PPTok *t) {
+    /* Flush pending marker before any real (non-whitespace) content. */
+    if (t->kind != CPPT_SPACE && t->kind != CPPT_COMMENT)
+        flush_pending_lm(st);
+
     const char *sp = pptok_spell(t);
     if (t->has_leading_space) sb_push_ch(&st->out_text, ' ');
     sb_push(&st->out_text, sp, strlen(sp));
@@ -251,7 +285,7 @@ static char *find_include_ex(CppState *st, const char *name, bool is_system,
     /* For "..." and "<...>" first search relative to the including file's
      * directory (skipped when skip_until is active).
      * This handles cases where system headers use <> for same-directory
-     * includes (common in TCC/winapi headers). */
+     * includes. */
     if (current_file && !skipping) {
         const char *slash = strrchr(current_file, '/');
 #ifdef _WIN32
@@ -452,10 +486,10 @@ static void handle_include(CppState *st, TokList *line, CppLoc loc,
     if (guard_already_included(st, found_interned)) return;
 
     st->include_depth++;
-    emit_linemarker(st, 1, found_interned);
+    /* process_file itself emits the # 1 "file" marker — don't duplicate it. */
     process_file(st, found_interned, lang);
     st->include_depth--;
-    /* Resume linemarker for the including file */
+    /* Resume linemarker for the including file (immediate, not pending). */
     emit_linemarker(st, loc.line + 1, current_file);
 }
 
@@ -854,8 +888,11 @@ static void handle_pragma(CppState *st, TokList *line, CppLoc loc,
     if (st->pragma_cb)
         suppress = st->pragma_cb(NULL, sb.buf ? sb.buf : "", loc, st->pragma_ud);
 
-    if (!suppress && in_live_branch(st))
+    if (!suppress && in_live_branch(st)) {
+        flush_pending_lm(st);
         sb_printf(&st->out_text, "#pragma %s\n", sb.buf ? sb.buf : "");
+        st->out_newlines++;
+    }
     sb_free(&sb);
 }
 
@@ -919,8 +956,10 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
         /* Track beginning-of-line */
         if (t.kind == CPPT_NEWLINE) {
             at_bol = true;
-            if (in_live_branch(st))
+            if (in_live_branch(st)) {
                 sb_push_ch(&st->out_text, '\n');
+                st->out_newlines++;
+            }
             pptok_free(&t);
             continue;
         }
@@ -1021,12 +1060,11 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
 
             tl_free(&line);
 
-            /* Re-sync source location after consuming a directive.
-             * #define / #ifdef / etc. produce no output tokens, so the
-             * line counter in the output stream drifts from the original.
-             * Emit a fresh linemarker so the Sharp lexer stays accurate.  */
-            if (in_live_branch(st))
-                emit_linemarker(st, reader_current_line(rd), reader_filename(rd));
+            /* Queue a linemarker for after directives so that consecutive
+             * #define / #ifdef / etc. lines don't flood the output with
+             * back-to-back markers.  The marker fires lazily just before the
+             * next real content token (via flush_pending_lm).              */
+            queue_linemarker(st, reader_current_line(rd), reader_filename(rd));
 
             at_bol = true;
             continue;
@@ -1134,6 +1172,7 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
                     pptok_free(&nx);
                     /* Output: __pragma( */
                     if (in_live_branch(st)) {
+                        flush_pending_lm(st);
                         if (t.has_leading_space) sb_push_ch(&st->out_text, ' ');
                         sb_push_cstr(&st->out_text, "__pragma(");
                     }
@@ -1166,7 +1205,7 @@ static void process_buf(CppState *st, CppReader *rd, CppLang lang) {
             /* Try macro expansion */
             if (!t.hide && macro_lookup(st->macros, name)) {
                 /* Expansion limits breached? Pass through unexpanded */
-                if (macro_limits_breached()) {
+                if (macro_limits_breached(st->macros)) {
                     emit_tok_text(st, &t);
                     pptok_free(&t);
                     continue;
@@ -1334,6 +1373,10 @@ const char  *cpp_state_text(const CppState *st)    { return st->out_text.buf; }
 size_t       cpp_state_text_len(const CppState *st) { return st->out_text.len; }
 CppTok      *cpp_state_tokens(const CppState *st)   { return st->out_tokens.data; }
 size_t       cpp_state_ntokens(const CppState *st)  { return st->out_tokens.len;  }
+
+/* Transfer ownership of the raw output text buffer to the caller.
+ * After this call, st->out_text is empty (will not be double-freed).      */
+char *cpp_state_take_text(CppState *st) { return sb_take(&st->out_text); }
 
 /* Bridge used by cpp.c */
 MacroTable *macro_state_table(CppState *st) { return st->macros; }

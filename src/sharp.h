@@ -451,14 +451,11 @@ enum { SELF_NONE = 0, SELF_VALUE = 1, SELF_REF = 2 };
  * belongs to a system/SDK header. Single source of truth used by both
  * parser (inline function skip) and codegen (typedef filtering).
  *
- * Covers: Windows SDK, UCRT, MinGW/MSYS, TCC runtime headers.
+ * Covers: Windows SDK, UCRT, MinGW/MSYS runtime headers.
  * Add new path patterns here rather than duplicating across call sites. */
 static inline bool is_system_header_path(const char* path) {
     if (!path) return false;
-    /* TCC / MinGW / MSYS / Cygwin */
-    if (strstr(path, "tcc/include") != NULL) return true;
-    if (strstr(path, "third_party\\tcc\\include") != NULL) return true;
-    if (strstr(path, "third_party/tcc/include") != NULL) return true;
+    /* MinGW / MSYS / Cygwin */
     if (strstr(path, "mingw") != NULL) return true;
     if (strstr(path, "msys64") != NULL) return true;
     if (strstr(path, "/usr/include") != NULL) return true;
