@@ -486,7 +486,7 @@ static TokList substitute(const MacroDef *def,
                 if (idx >= 0 && idx < max_idx) {
                     PPTok s = stringify(&args[idx], t->loc);
                     tl_append(&result, s);
-                    n = nx;
+                    n = nx->next; /* skip past # AND the param name */
                     continue;
                 }
             }

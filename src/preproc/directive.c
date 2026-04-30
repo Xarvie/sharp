@@ -61,9 +61,26 @@ static void emit_diag(CppState *st, CppDiagLevel lvl, CppLoc loc, const char *fm
  * whether a new marker is actually needed.                                  */
 static void emit_linemarker(CppState *st, int line, const char *file) {
     if (!st->emit_linemarkers) return;
-    sb_printf(&st->out_text, "# %d \"%s\"\n", line, file);
+    /* Convert Windows backslashes to forward slashes in the file path.
+     * C string literals interpret \ as escape sequences, so paths like
+     * C:\Users become invalid (e.g. \U is an invalid hex escape). */
+    char path_buf[1024];
+    const char *out_file = file;
+    {
+        const char *s = file;
+        char *d = path_buf;
+        int need_convert = 0;
+        while (*s && (size_t)(d - path_buf) < sizeof(path_buf) - 1) {
+            if (*s == '\\') { *d++ = '/'; need_convert = 1; }
+            else            { *d++ = *s; }
+            s++;
+        }
+        *d = '\0';
+        if (need_convert) out_file = path_buf;
+    }
+    sb_printf(&st->out_text, "# %d \"%s\"\n", line, out_file);
     st->last_lm_src_line = line;
-    st->last_lm_src_file = file;
+    st->last_lm_src_file = file;  /* keep original for comparison */
     st->out_newlines     = 0;
 }
 
