@@ -590,7 +590,9 @@ int main(int argc, char** argv) {
             }
         }
 
-        /* Phase B: lex → parse → sema → lower → codegen */
+        /* Phase B: lex → parse → sema → lower → codegen
+         * ALL files (.sp/.c/.h) go through the SAME pipeline.
+         * .c files are treated as Sharp source files (Sharp is a C superset). */
         Arena* arena = NULL;
         Lexer lx;
         lex_init(&lx, pp.text, in_path);
@@ -633,6 +635,7 @@ int main(int argc, char** argv) {
         if (!out) {
             fprintf(stderr, "sharpc: cannot write '%s'\n", tmp_path);
             compile_errors = 1;
+            cpp_result_free(&pp);
             continue;
         }
         cgen_c(prog, st, out);

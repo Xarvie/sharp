@@ -1,5 +1,28 @@
-#line 1 "hello.sp"
-#line 1 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+#line 1 "src/lcorolib.c"
+
+
+
+#line 1 "src/lprefix.h"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 11 "src/lcorolib.c"
+
+
+#line 1 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
 
 
 
@@ -1217,7 +1240,2446 @@ typedef _Mbstatet mbstate_t;
 
 #line 2071 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt.h"
 #pragma warning ( pop ) 
-#line 13 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+#line 13 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#line 1 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_malloc.h"
+
+
+
+
+
+
+
+
+
+
+#line 12 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_malloc.h"
+#pragma warning ( push )
+#line 14 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_malloc.h"
+#pragma warning ( disable : 4324 4514 4574 4710 4793 4820 4995 4996 28719 28726 28727 )
+
+
+
+
+
+
+
+
+#line 56 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_malloc.h"
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _calloc_base(
+ size_t _Count,
+ size_t _Size
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl calloc(
+ size_t _Count,
+ size_t _Size
+ );
+
+
+ int __cdecl _callnewh(
+ size_t _Size
+ );
+
+
+ __declspec(allocator)
+void* __cdecl _expand(
+ void* _Block,
+ size_t _Size
+ );
+
+
+void __cdecl _free_base(
+ void* _Block
+ );
+
+
+void __cdecl free(
+ void* _Block
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _malloc_base(
+ size_t _Size
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl malloc(
+ size_t _Size
+ );
+
+
+
+size_t __cdecl _msize_base(
+ void* _Block
+ );
+
+
+
+size_t __cdecl _msize(
+ void* _Block
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _realloc_base(
+ void* _Block,
+ size_t _Size
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl realloc(
+ void* _Block,
+ size_t _Size
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _recalloc_base(
+ void* _Block,
+ size_t _Count,
+ size_t _Size
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _recalloc(
+ void* _Block,
+ size_t _Count,
+ size_t _Size
+ );
+
+
+void __cdecl _aligned_free(
+ void* _Block
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _aligned_malloc(
+ size_t _Size,
+ size_t _Alignment
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _aligned_offset_malloc(
+ size_t _Size,
+ size_t _Alignment,
+ size_t _Offset
+ );
+
+
+
+size_t __cdecl _aligned_msize(
+ void* _Block,
+ size_t _Alignment,
+ size_t _Offset
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _aligned_offset_realloc(
+ void* _Block,
+ size_t _Size,
+ size_t _Alignment,
+ size_t _Offset
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _aligned_offset_recalloc(
+ void* _Block,
+ size_t _Count,
+ size_t _Size,
+ size_t _Alignment,
+ size_t _Offset
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _aligned_realloc(
+ void* _Block,
+ size_t _Size,
+ size_t _Alignment
+ );
+
+
+ __declspec(allocator) __declspec(restrict)
+void* __cdecl _aligned_recalloc(
+ void* _Block,
+ size_t _Count,
+ size_t _Size,
+ size_t _Alignment
+ );
+
+
+
+
+
+
+#line 229 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_malloc.h"
+#pragma warning ( pop ) 
+#line 14 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#line 1 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_search.h"
+
+
+
+
+
+
+
+
+
+
+
+#line 1 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stddef.h"
+
+
+
+
+
+
+
+
+
+#line 13 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stddef.h"
+#pragma warning ( push )
+#line 15 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stddef.h"
+#pragma warning ( disable : 4324 4514 4574 4710 4793 4820 4995 4996 28719 28726 28727 )
+
+
+
+
+
+
+
+
+
+
+#line 34 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stddef.h"
+ int* __cdecl _errno(void);
+
+#line 37 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stddef.h"
+ errno_t __cdecl _set_errno( int _Value);
+ errno_t __cdecl _get_errno( int* _Value);
+
+
+
+
+
+#line 54 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stddef.h"
+ extern unsigned long __cdecl __threadid(void);
+#line 57 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stddef.h"
+ extern uintptr_t __cdecl __threadhandle(void);
+
+
+
+
+
+#pragma warning ( pop ) 
+#line 15 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_search.h"
+
+#line 15 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_search.h"
+#pragma warning ( push )
+#line 17 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_search.h"
+#pragma warning ( disable : 4324 4514 4574 4710 4793 4820 4995 4996 28719 28726 28727 )
+
+
+
+
+
+#line 18 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_search.h"
+ typedef int (__cdecl* _CoreCrtSecureSearchSortCompareFunction)(void*, void const*, void const*);
+ typedef int (__cdecl* _CoreCrtNonSecureSearchSortCompareFunction)(void const*, void const*);
+
+
+
+
+#line 28 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_search.h"
+ void* __cdecl bsearch_s(
+ void const* _Key,
+ void const* _Base,
+ rsize_t _NumOfElements,
+ rsize_t _SizeOfElements,
+ _CoreCrtSecureSearchSortCompareFunction _CompareFunction,
+ void* _Context
+ );
+
+ void __cdecl qsort_s(
+ void* _Base,
+ rsize_t _NumOfElements,
+ rsize_t _SizeOfElements,
+ _CoreCrtSecureSearchSortCompareFunction _CompareFunction,
+ void* _Context
+ );
+
+
+
+
+
+#line 48 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_search.h"
+ void* __cdecl bsearch(
+ void const* _Key,
+ void const* _Base,
+ size_t _NumOfElements,
+ size_t _SizeOfElements,
+ _CoreCrtNonSecureSearchSortCompareFunction _CompareFunction
+ );
+
+ void __cdecl qsort(
+ void* _Base,
+ size_t _NumOfElements,
+ size_t _SizeOfElements,
+ _CoreCrtNonSecureSearchSortCompareFunction _CompareFunction
+ );
+
+
+ void* __cdecl _lfind_s(
+ void const* _Key,
+ void const* _Base,
+ unsigned int* _NumOfElements,
+ size_t _SizeOfElements,
+ _CoreCrtSecureSearchSortCompareFunction _CompareFunction,
+ void* _Context
+ );
+
+
+ void* __cdecl _lfind(
+ void const* _Key,
+ void const* _Base,
+ unsigned int* _NumOfElements,
+ unsigned int _SizeOfElements,
+ _CoreCrtNonSecureSearchSortCompareFunction _CompareFunction
+ );
+
+
+ void* __cdecl _lsearch_s(
+ void const* _Key,
+ void* _Base,
+ unsigned int* _NumOfElements,
+ size_t _SizeOfElements,
+ _CoreCrtSecureSearchSortCompareFunction _CompareFunction,
+ void* _Context
+ );
+
+
+ void* __cdecl _lsearch(
+ void const* _Key,
+ void* _Base,
+ unsigned int* _NumOfElements,
+ unsigned int _SizeOfElements,
+ _CoreCrtNonSecureSearchSortCompareFunction _CompareFunction
+ );
+
+
+
+
+
+
+
+
+
+
+
+
+#line 213 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_search.h"
+#pragma warning ( pop ) 
+#line 15 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#line 1 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdlib.h"
+
+
+
+
+
+
+
+
+
+
+#line 12 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdlib.h"
+#pragma warning ( push )
+#line 14 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdlib.h"
+#pragma warning ( disable : 4324 4514 4574 4710 4793 4820 4995 4996 28719 28726 28727 )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 51 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdlib.h"
+ errno_t __cdecl _itow_s(
+ int _Value,
+ wchar_t* _Buffer,
+ size_t _BufferCount,
+ int _Radix
+ );
+
+
+
+ 
+ wchar_t* __cdecl _itow( 
+ int _Value, 
+ wchar_t * _Buffer, 
+ int _Radix 
+);
+
+
+
+ errno_t __cdecl _ltow_s(
+ long _Value,
+ wchar_t* _Buffer,
+ size_t _BufferCount,
+ int _Radix
+ );
+
+
+
+ 
+ wchar_t* __cdecl _ltow( 
+ long _Value, 
+ wchar_t * _Buffer, 
+ int _Radix 
+);
+
+
+ errno_t __cdecl _ultow_s(
+ unsigned long _Value,
+ wchar_t* _Buffer,
+ size_t _BufferCount,
+ int _Radix
+ );
+
+
+
+ 
+ wchar_t* __cdecl _ultow( 
+ unsigned long _Value, 
+ wchar_t * _Buffer, 
+ int _Radix 
+);
+
+
+ double __cdecl wcstod(
+ wchar_t const* _String,
+ wchar_t** _EndPtr
+ );
+
+
+ double __cdecl _wcstod_l(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ _locale_t _Locale
+ );
+
+
+ long __cdecl wcstol(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix
+ );
+
+
+ long __cdecl _wcstol_l(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+ long long __cdecl wcstoll(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix
+ );
+
+
+ long long __cdecl _wcstoll_l(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+ unsigned long __cdecl wcstoul(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix
+ );
+
+
+ unsigned long __cdecl _wcstoul_l(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+ unsigned long long __cdecl wcstoull(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix
+ );
+
+
+ unsigned long long __cdecl _wcstoull_l(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+ long double __cdecl wcstold(
+ wchar_t const* _String,
+ wchar_t** _EndPtr
+ );
+
+
+ long double __cdecl _wcstold_l(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ _locale_t _Locale
+ );
+
+
+ float __cdecl wcstof(
+ wchar_t const* _String,
+ wchar_t** _EndPtr
+ );
+
+
+ float __cdecl _wcstof_l(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ _locale_t _Locale
+ );
+
+
+ double __cdecl _wtof(
+ wchar_t const* _String
+ );
+
+
+ double __cdecl _wtof_l(
+ wchar_t const* _String,
+ _locale_t _Locale
+ );
+
+
+ int __cdecl _wtoi(
+ wchar_t const* _String
+ );
+
+
+ int __cdecl _wtoi_l(
+ wchar_t const* _String,
+ _locale_t _Locale
+ );
+
+
+ long __cdecl _wtol(
+ wchar_t const* _String
+ );
+
+
+ long __cdecl _wtol_l(
+ wchar_t const* _String,
+ _locale_t _Locale
+ );
+
+
+ long long __cdecl _wtoll(
+ wchar_t const* _String
+ );
+
+
+ long long __cdecl _wtoll_l(
+ wchar_t const* _String,
+ _locale_t _Locale
+ );
+
+
+ errno_t __cdecl _i64tow_s(
+ __int64 _Value,
+ wchar_t* _Buffer,
+ size_t _BufferCount,
+ int _Radix
+ );
+
+
+ wchar_t* __cdecl _i64tow(
+ __int64 _Value,
+ wchar_t* _Buffer,
+ int _Radix
+ );
+
+
+ errno_t __cdecl _ui64tow_s(
+ unsigned __int64 _Value,
+ wchar_t* _Buffer,
+ size_t _BufferCount,
+ int _Radix
+ );
+
+
+ wchar_t* __cdecl _ui64tow(
+ unsigned __int64 _Value,
+ wchar_t* _Buffer,
+ int _Radix
+ );
+
+
+ __int64 __cdecl _wtoi64(
+ wchar_t const* _String
+ );
+
+
+ __int64 __cdecl _wtoi64_l(
+ wchar_t const* _String,
+ _locale_t _Locale
+ );
+
+
+ __int64 __cdecl _wcstoi64(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix
+ );
+
+
+ __int64 __cdecl _wcstoi64_l(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+ unsigned __int64 __cdecl _wcstoui64(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix
+ );
+
+
+ unsigned __int64 __cdecl _wcstoui64_l(
+ wchar_t const* _String,
+ wchar_t** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+#pragma push_macro ( "_wfullpath" )
+
+
+
+#line 336 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdlib.h"
+ __declspec(allocator) wchar_t* __cdecl _wfullpath(
+ wchar_t* _Buffer,
+ wchar_t const* _Path,
+ size_t _BufferCount
+ );
+
+#pragma pop_macro ( "_wfullpath" )
+
+
+#line 346 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdlib.h"
+ errno_t __cdecl _wmakepath_s(
+ wchar_t* _Buffer,
+ size_t _BufferCount,
+ wchar_t const* _Drive,
+ wchar_t const* _Dir,
+ wchar_t const* _Filename,
+ wchar_t const* _Ext
+ );
+
+
+
+ 
+ void __cdecl _wmakepath( 
+ wchar_t * _Buffer, 
+ wchar_t const* _Drive, 
+ wchar_t const* _Dir, 
+ wchar_t const* _Filename, 
+ wchar_t const* _Ext 
+);
+
+ void __cdecl _wperror(
+ wchar_t const* _ErrorMessage
+ );
+
+
+ void __cdecl _wsplitpath(
+ wchar_t const* _FullPath,
+ wchar_t* _Drive,
+ wchar_t* _Dir,
+ wchar_t* _Filename,
+ wchar_t* _Ext
+ );
+
+ errno_t __cdecl _wsplitpath_s(
+ wchar_t const* _FullPath,
+ wchar_t* _Drive,
+ size_t _DriveCount,
+ wchar_t* _Dir,
+ size_t _DirCount,
+ wchar_t* _Filename,
+ size_t _FilenameCount,
+ wchar_t* _Ext,
+ size_t _ExtCount
+ );
+
+
+
+#pragma push_macro ( "_wdupenv_s" )
+
+
+#line 407 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdlib.h"
+ errno_t __cdecl _wdupenv_s(
+ wchar_t** _Buffer,
+ size_t* _BufferCount,
+ wchar_t const* _VarName
+ );
+
+#pragma pop_macro ( "_wdupenv_s" )
+
+
+ wchar_t* __cdecl _wgetenv(
+ wchar_t const* _VarName
+ );
+
+
+
+ errno_t __cdecl _wgetenv_s(
+ size_t* _RequiredCount,
+ wchar_t* _Buffer,
+ size_t _BufferCount,
+ wchar_t const* _VarName
+ );
+
+
+
+
+ int __cdecl _wputenv(
+ wchar_t const* _EnvString
+ );
+
+
+ errno_t __cdecl _wputenv_s(
+ wchar_t const* _Name,
+ wchar_t const* _Value
+ );
+
+ errno_t __cdecl _wsearchenv_s(
+ wchar_t const* _Filename,
+ wchar_t const* _VarName,
+ wchar_t* _Buffer,
+ size_t _BufferCount
+ );
+
+
+
+ 
+ void __cdecl _wsearchenv( 
+ wchar_t const* _Filename, 
+ wchar_t const* _VarName, 
+ wchar_t * _ResultPath 
+);
+
+ int __cdecl _wsystem(
+ wchar_t const* _Command
+ );
+
+
+
+
+
+
+#line 476 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdlib.h"
+#pragma warning ( pop ) 
+#line 16 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#line 1 "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include/limits.h"
+
+
+
+
+
+
+
+
+
+#line 12 "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include/limits.h"
+#pragma warning ( push )
+#line 14 "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include/limits.h"
+#pragma warning ( disable : 4514 4820 )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 73 "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include/limits.h"
+#pragma warning ( pop ) 
+#line 17 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+
+#line 17 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#pragma warning ( push )
+#line 19 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#pragma warning ( disable : 4324 4514 4574 4710 4793 4820 4995 4996 28719 28726 28727 )
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 35 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ void __cdecl _swab(
+ char* _Buf1,
+ char* _Buf2,
+ int _SizeInBytes
+ );
+
+
+
+
+
+
+
+
+
+
+#line 56 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ __declspec(noreturn) void __cdecl exit( int _Code);
+ __declspec(noreturn) void __cdecl _exit( int _Code);
+ __declspec(noreturn) void __cdecl _Exit( int _Code);
+ __declspec(noreturn) void __cdecl quick_exit( int _Code);
+ __declspec(noreturn) void __cdecl abort(void);
+
+
+
+#line 66 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ unsigned int __cdecl _set_abort_behavior(
+ unsigned int _Flags,
+ unsigned int _Mask
+ );
+
+
+
+
+#line 76 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ typedef int ( __cdecl* _onexit_t)(void);
+
+
+
+
+
+
+
+#line 144 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ int __cdecl atexit(void (__cdecl*)(void));
+ _onexit_t __cdecl _onexit( _onexit_t _Func);
+
+int __cdecl at_quick_exit(void (__cdecl*)(void));
+
+
+
+
+
+
+
+
+
+#line 158 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ typedef void (__cdecl* _purecall_handler)(void);
+
+
+ typedef void (__cdecl* _invalid_parameter_handler)(
+ wchar_t const*,
+ wchar_t const*,
+ wchar_t const*,
+ unsigned int,
+ uintptr_t
+ );
+
+
+ _purecall_handler __cdecl _set_purecall_handler(
+ _purecall_handler _Handler
+ );
+
+ _purecall_handler __cdecl _get_purecall_handler(void);
+
+
+ _invalid_parameter_handler __cdecl _set_invalid_parameter_handler(
+ _invalid_parameter_handler _Handler
+ );
+
+ _invalid_parameter_handler __cdecl _get_invalid_parameter_handler(void);
+
+ _invalid_parameter_handler __cdecl _set_thread_local_invalid_parameter_handler(
+ _invalid_parameter_handler _Handler
+ );
+
+ _invalid_parameter_handler __cdecl _get_thread_local_invalid_parameter_handler(void);
+
+
+
+
+
+
+
+#line 211 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ int __cdecl _set_error_mode( int _Mode);
+
+
+
+#line 217 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ int* __cdecl _errno(void);
+
+ errno_t __cdecl _set_errno( int _Value);
+ errno_t __cdecl _get_errno( int* _Value);
+
+ unsigned long* __cdecl __doserrno(void);
+
+#line 225 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ errno_t __cdecl _set_doserrno( unsigned long _Value);
+ errno_t __cdecl _get_doserrno( unsigned long * _Value);
+
+
+ char** __cdecl __sys_errlist(void);
+
+#line 232 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ int * __cdecl __sys_nerr(void);
+
+#line 235 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ void __cdecl perror( char const* _ErrMsg);
+
+
+
+
+#line 238 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ char** __cdecl __p__pgmptr (void);
+ wchar_t** __cdecl __p__wpgmptr(void);
+ int* __cdecl __p__fmode (void);
+
+
+
+#line 257 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ errno_t __cdecl _get_pgmptr ( char** _Value);
+
+
+ errno_t __cdecl _get_wpgmptr( wchar_t** _Value);
+
+ errno_t __cdecl _set_fmode ( int _Mode );
+
+ errno_t __cdecl _get_fmode ( int* _PMode);
+
+
+
+
+
+
+
+
+typedef struct _div_t
+{
+ int quot;
+ int rem;
+} div_t;
+
+typedef struct _ldiv_t
+{
+ long quot;
+ long rem;
+} ldiv_t;
+
+typedef struct _lldiv_t
+{
+ long long quot;
+ long long rem;
+} lldiv_t;
+
+ int __cdecl abs ( int _Number);
+ long __cdecl labs ( long _Number);
+ long long __cdecl llabs ( long long _Number);
+ __int64 __cdecl _abs64( __int64 _Number);
+
+ unsigned short __cdecl _byteswap_ushort( unsigned short _Number);
+ unsigned long __cdecl _byteswap_ulong ( unsigned long _Number);
+ unsigned __int64 __cdecl _byteswap_uint64( unsigned __int64 _Number);
+
+ div_t __cdecl div ( int _Numerator, int _Denominator);
+ ldiv_t __cdecl ldiv ( long _Numerator, long _Denominator);
+ lldiv_t __cdecl lldiv( long long _Numerator, long long _Denominator);
+
+
+
+#pragma warning ( push )
+#line 309 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#pragma warning ( disable : 6540 )
+
+#line 310 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+unsigned int __cdecl _rotl(
+ unsigned int _Value,
+ int _Shift
+ );
+
+
+unsigned long __cdecl _lrotl(
+ unsigned long _Value,
+ int _Shift
+ );
+
+unsigned __int64 __cdecl _rotl64(
+ unsigned __int64 _Value,
+ int _Shift
+ );
+
+unsigned int __cdecl _rotr(
+ unsigned int _Value,
+ int _Shift
+ );
+
+
+unsigned long __cdecl _lrotr(
+ unsigned long _Value,
+ int _Shift
+ );
+
+unsigned __int64 __cdecl _rotr64(
+ unsigned __int64 _Value,
+ int _Shift
+ );
+
+#pragma warning ( pop )
+
+
+
+
+
+#line 349 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ void __cdecl srand( unsigned int _Seed);
+
+ int __cdecl rand(void);
+
+
+
+
+
+
+
+
+
+
+
+
+#line 393 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#pragma pack ( push , 4 )
+#line 395 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ typedef struct
+ {
+ unsigned char ld[10];
+ } _LDOUBLE;
+#pragma pack ( pop )
+
+
+
+#line 414 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+typedef struct
+{
+ double x;
+} _CRT_DOUBLE;
+
+typedef struct
+{
+ float f;
+} _CRT_FLOAT;
+
+
+#pragma push_macro ( "long" )
+
+#line 428 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+typedef struct
+{
+ long double x;
+} _LONGDOUBLE;
+
+#pragma pop_macro ( "long" )
+
+#pragma pack ( push , 4 )
+#line 437 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+typedef struct
+{
+ unsigned char ld12[12];
+} _LDBL12;
+#pragma pack ( pop )
+
+
+
+
+
+
+
+
+#line 442 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ double __cdecl atof ( char const* _String);
+ int __cdecl atoi ( char const* _String);
+ long __cdecl atol ( char const* _String);
+ long long __cdecl atoll ( char const* _String);
+ __int64 __cdecl _atoi64( char const* _String);
+
+ double __cdecl _atof_l ( char const* _String, _locale_t _Locale);
+ int __cdecl _atoi_l ( char const* _String, _locale_t _Locale);
+ long __cdecl _atol_l ( char const* _String, _locale_t _Locale);
+ long long __cdecl _atoll_l ( char const* _String, _locale_t _Locale);
+ __int64 __cdecl _atoi64_l( char const* _String, _locale_t _Locale);
+
+ int __cdecl _atoflt ( _CRT_FLOAT* _Result, char const* _String);
+ int __cdecl _atodbl ( _CRT_DOUBLE* _Result, char* _String);
+ int __cdecl _atoldbl( _LDOUBLE* _Result, char* _String);
+
+
+ int __cdecl _atoflt_l(
+ _CRT_FLOAT* _Result,
+ char const* _String,
+ _locale_t _Locale
+ );
+
+
+ int __cdecl _atodbl_l(
+ _CRT_DOUBLE* _Result,
+ char* _String,
+ _locale_t _Locale
+ );
+
+
+
+ int __cdecl _atoldbl_l(
+ _LDOUBLE* _Result,
+ char* _String,
+ _locale_t _Locale
+ );
+
+
+ float __cdecl strtof(
+ char const* _String,
+ char** _EndPtr
+ );
+
+
+ float __cdecl _strtof_l(
+ char const* _String,
+ char** _EndPtr,
+ _locale_t _Locale
+ );
+
+
+ double __cdecl strtod(
+ char const* _String,
+ char** _EndPtr
+ );
+
+
+ double __cdecl _strtod_l(
+ char const* _String,
+ char** _EndPtr,
+ _locale_t _Locale
+ );
+
+
+ long double __cdecl strtold(
+ char const* _String,
+ char** _EndPtr
+ );
+
+
+ long double __cdecl _strtold_l(
+ char const* _String,
+ char** _EndPtr,
+ _locale_t _Locale
+ );
+
+
+ long __cdecl strtol(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix
+ );
+
+
+ long __cdecl _strtol_l(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+ long long __cdecl strtoll(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix
+ );
+
+
+ long long __cdecl _strtoll_l(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+ unsigned long __cdecl strtoul(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix
+ );
+
+
+ unsigned long __cdecl _strtoul_l(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+ unsigned long long __cdecl strtoull(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix
+ );
+
+
+ unsigned long long __cdecl _strtoull_l(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+ __int64 __cdecl _strtoi64(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix
+ );
+
+
+ __int64 __cdecl _strtoi64_l(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+ unsigned __int64 __cdecl _strtoui64(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix
+ );
+
+
+ unsigned __int64 __cdecl _strtoui64_l(
+ char const* _String,
+ char** _EndPtr,
+ int _Radix,
+ _locale_t _Locale
+ );
+
+
+
+
+
+
+
+
+
+
+ errno_t __cdecl _itoa_s(
+ int _Value,
+ char* _Buffer,
+ size_t _BufferCount,
+ int _Radix
+ );
+
+
+
+ 
+ char* __cdecl _itoa( 
+ int _Value, 
+ char * _Buffer, 
+ int _Radix 
+);
+
+
+
+ errno_t __cdecl _ltoa_s(
+ long _Value,
+ char* _Buffer,
+ size_t _BufferCount,
+ int _Radix
+ );
+
+
+
+ 
+ char* __cdecl _ltoa( 
+ long _Value, 
+ char * _Buffer, 
+ int _Radix 
+);
+
+
+
+ errno_t __cdecl _ultoa_s(
+ unsigned long _Value,
+ char* _Buffer,
+ size_t _BufferCount,
+ int _Radix
+ );
+
+
+
+ 
+ char* __cdecl _ultoa( 
+ unsigned long _Value, 
+ char * _Buffer, 
+ int _Radix 
+);
+
+
+
+ errno_t __cdecl _i64toa_s(
+ __int64 _Value,
+ char* _Buffer,
+ size_t _BufferCount,
+ int _Radix
+ );
+
+
+
+ char* __cdecl _i64toa(
+ __int64 _Value,
+ char* _Buffer,
+ int _Radix
+ );
+
+
+
+ errno_t __cdecl _ui64toa_s(
+ unsigned __int64 _Value,
+ char* _Buffer,
+ size_t _BufferCount,
+ int _Radix
+ );
+
+
+ char* __cdecl _ui64toa(
+ unsigned __int64 _Value,
+ char* _Buffer,
+ int _Radix
+ );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 738 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ errno_t __cdecl _ecvt_s(
+ char* _Buffer,
+ size_t _BufferCount,
+ double _Value,
+ int _DigitCount,
+ int* _PtDec,
+ int* _PtSign
+ );
+
+
+
+
+ char* __cdecl _ecvt(
+ double _Value,
+ int _DigitCount,
+ int* _PtDec,
+ int* _PtSign
+ );
+
+
+
+ errno_t __cdecl _fcvt_s(
+ char* _Buffer,
+ size_t _BufferCount,
+ double _Value,
+ int _FractionalDigitCount,
+ int* _PtDec,
+ int* _PtSign
+ );
+
+
+
+
+
+ char* __cdecl _fcvt(
+ double _Value,
+ int _FractionalDigitCount,
+ int* _PtDec,
+ int* _PtSign
+ );
+
+
+ errno_t __cdecl _gcvt_s(
+ char* _Buffer,
+ size_t _BufferCount,
+ double _Value,
+ int _DigitCount
+ );
+
+
+
+
+ char* __cdecl _gcvt(
+ double _Value,
+ int _DigitCount,
+ char* _Buffer
+ );
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 841 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ int __cdecl ___mb_cur_max_func(void);
+
+
+ int __cdecl ___mb_cur_max_l_func(_locale_t _Locale);
+
+
+
+
+#line 848 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ int __cdecl mblen(
+ char const* _Ch,
+ size_t _MaxCount
+ );
+
+
+ int __cdecl _mblen_l(
+ char const* _Ch,
+ size_t _MaxCount,
+ _locale_t _Locale
+ );
+
+
+
+ size_t __cdecl _mbstrlen(
+ char const* _String
+ );
+
+
+
+ size_t __cdecl _mbstrlen_l(
+ char const* _String,
+ _locale_t _Locale
+ );
+
+
+
+ size_t __cdecl _mbstrnlen(
+ char const* _String,
+ size_t _MaxCount
+ );
+
+
+
+ size_t __cdecl _mbstrnlen_l(
+ char const* _String,
+ size_t _MaxCount,
+ _locale_t _Locale
+ );
+
+
+ int __cdecl mbtowc(
+ wchar_t* _DstCh,
+ char const* _SrcCh,
+ size_t _SrcSizeInBytes
+ );
+
+
+ int __cdecl _mbtowc_l(
+ wchar_t* _DstCh,
+ char const* _SrcCh,
+ size_t _SrcSizeInBytes,
+ _locale_t _Locale
+ );
+
+
+ errno_t __cdecl mbstowcs_s(
+ size_t* _PtNumOfCharConverted,
+ wchar_t* _DstBuf,
+ size_t _SizeInWords,
+ char const* _SrcBuf,
+ size_t _MaxCount
+ );
+
+
+
+ 
+ size_t __cdecl mbstowcs( 
+ wchar_t * _Dest, 
+ char const* _Source, 
+ size_t _MaxCount 
+);
+
+
+ errno_t __cdecl _mbstowcs_s_l(
+ size_t* _PtNumOfCharConverted,
+ wchar_t* _DstBuf,
+ size_t _SizeInWords,
+ char const* _SrcBuf,
+ size_t _MaxCount,
+ _locale_t _Locale
+ );
+
+
+
+ 
+ size_t __cdecl _mbstowcs_l( 
+ wchar_t * _Dest, 
+ char const* _Source, 
+ size_t _MaxCount, 
+ _locale_t _Locale 
+);
+
+
+
+
+
+ int __cdecl wctomb(
+ char* _MbCh,
+ wchar_t _WCh
+ );
+
+
+ int __cdecl _wctomb_l(
+ char* _MbCh,
+ wchar_t _WCh,
+ _locale_t _Locale
+ );
+
+
+
+#line 976 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ errno_t __cdecl wctomb_s(
+ int* _SizeConverted,
+ char* _MbCh,
+ rsize_t _SizeInBytes,
+ wchar_t _WCh
+ );
+
+
+
+#line 986 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ errno_t __cdecl _wctomb_s_l(
+ int* _SizeConverted,
+ char* _MbCh,
+ size_t _SizeInBytes,
+ wchar_t _WCh,
+ _locale_t _Locale);
+
+
+ errno_t __cdecl wcstombs_s(
+ size_t* _PtNumOfCharConverted,
+ char* _Dst,
+ size_t _DstSizeInBytes,
+ wchar_t const* _Src,
+ size_t _MaxCountInBytes
+ );
+
+
+
+ 
+ size_t __cdecl wcstombs( 
+ char * _Dest, 
+ wchar_t const* _Source, 
+ size_t _MaxCount 
+);
+
+
+ errno_t __cdecl _wcstombs_s_l(
+ size_t* _PtNumOfCharConverted,
+ char* _Dst,
+ size_t _DstSizeInBytes,
+ wchar_t const* _Src,
+ size_t _MaxCountInBytes,
+ _locale_t _Locale
+ );
+
+
+
+ 
+ size_t __cdecl _wcstombs_l( 
+ char * _Dest, 
+ wchar_t const* _Source, 
+ size_t _MaxCount, 
+ _locale_t _Locale 
+);
+
+
+
+
+
+
+
+
+
+
+
+
+#line 1061 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#pragma push_macro ( "_fullpath" )
+
+
+
+ __declspec(allocator) char* __cdecl _fullpath(
+ char* _Buffer,
+ char const* _Path,
+ size_t _BufferCount
+ );
+
+#pragma pop_macro ( "_fullpath" )
+
+
+#line 1075 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ errno_t __cdecl _makepath_s(
+ char* _Buffer,
+ size_t _BufferCount,
+ char const* _Drive,
+ char const* _Dir,
+ char const* _Filename,
+ char const* _Ext
+ );
+
+
+
+ 
+ void __cdecl _makepath( 
+ char * _Buffer, 
+ char const* _Drive, 
+ char const* _Dir, 
+ char const* _Filename, 
+ char const* _Ext 
+);
+
+
+ void __cdecl _splitpath(
+ char const* _FullPath,
+ char* _Drive,
+ char* _Dir,
+ char* _Filename,
+ char* _Ext
+ );
+
+
+ errno_t __cdecl _splitpath_s(
+ char const* _FullPath,
+ char* _Drive,
+ size_t _DriveCount,
+ char* _Dir,
+ size_t _DirCount,
+ char* _Filename,
+ size_t _FilenameCount,
+ char* _Ext,
+ size_t _ExtCount
+ );
+
+
+
+
+
+
+#line 1129 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ errno_t __cdecl getenv_s(
+ size_t* _RequiredCount,
+ char* _Buffer,
+ rsize_t _BufferCount,
+ char const* _VarName
+ );
+
+
+
+
+
+ int* __cdecl __p___argc (void);
+ char*** __cdecl __p___argv (void);
+ wchar_t*** __cdecl __p___wargv(void);
+
+
+#line 1157 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ char*** __cdecl __p__environ (void);
+ wchar_t*** __cdecl __p__wenviron(void);
+
+
+
+
+
+
+
+
+
+
+#line 1182 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ char* __cdecl getenv(
+ char const* _VarName
+ );
+
+
+
+
+
+#line 1199 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ errno_t __cdecl _dupenv_s(
+ char** _Buffer,
+ size_t* _BufferCount,
+ char const* _VarName
+ );
+
+
+#line 1210 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ int __cdecl system(
+ char const* _Command
+ );
+
+
+
+#pragma warning ( push )
+#line 1218 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#pragma warning ( disable : 6540 )
+
+
+#line 1219 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ int __cdecl _putenv(
+ char const* _EnvString
+ );
+
+
+ errno_t __cdecl _putenv_s(
+ char const* _Name,
+ char const* _Value
+ );
+
+#pragma warning ( pop )
+
+#line 1232 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+ errno_t __cdecl _searchenv_s(
+ char const* _Filename,
+ char const* _VarName,
+ char* _Buffer,
+ size_t _BufferCount
+ );
+
+
+
+ 
+ void __cdecl _searchenv( 
+ char const* _Filename, 
+ char const* _VarName, 
+ char * _Buffer 
+);
+
+
+ __declspec(deprecated( "This function or variable has been superceded by newer library or operating system functionality. Consider using SetErrorMode instead. See online help for details."))
+ void __cdecl _seterrormode(
+ int _Mode
+ );
+
+ __declspec(deprecated( "This function or variable has been superceded by newer library or operating system functionality. Consider using Beep instead. See online help for details."))
+ void __cdecl _beep(
+ unsigned _Frequency,
+ unsigned _Duration
+ );
+
+ __declspec(deprecated( "This function or variable has been superceded by newer library or operating system functionality. Consider using Sleep instead. See online help for details."))
+ void __cdecl _sleep(
+ unsigned long _Duration
+ );
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 1356 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdlib.h"
+#pragma warning ( pop ) 
+#line 14 "src/lcorolib.c"
+
+#line 1 "src/lua.h"
+
+
+
+
+#line 1 "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include/stdarg.h"
+
+
+
+
+
+
+
+
+
+#line 12 "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include/stdarg.h"
+#pragma warning ( push )
+#line 14 "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include/stdarg.h"
+#pragma warning ( disable : 4514 4820 )
+
+
+
+
+
+
+
+
+
+
+#line 24 "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/include/stdarg.h"
+#pragma warning ( pop ) 
+#line 13 "src/lua.h"
+
+
+#line 1 "src/luaconf.h"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 17 "src/lua.h"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 55 "src/lua.h"
+typedef struct lua_State lua_State;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 87 "src/lua.h"
+typedef double lua_Number;
+
+
+
+typedef long long lua_Integer;
+
+
+typedef unsigned long long lua_Unsigned;
+
+
+typedef ptrdiff_t lua_KContext;
+
+
+
+typedef int (*lua_CFunction) (lua_State *L);
+
+
+typedef int (*lua_KFunction) (lua_State *L, int status, lua_KContext ctx);
+
+
+
+typedef const char * (*lua_Reader) (lua_State *L, void *ud, size_t *sz);
+
+typedef int (*lua_Writer) (lua_State *L, const void *p, size_t sz, void *ud);
+
+
+
+typedef void * (*lua_Alloc) (void *ud, void *ptr, size_t osize, size_t nsize);
+
+
+
+typedef void (*lua_WarnFunction) (void *ud, const char *msg, int tocont);
+
+
+
+typedef struct lua_Debug lua_Debug;
+
+
+
+typedef void (*lua_Hook) (lua_State *L, lua_Debug *ar);
+
+
+
+
+
+
+#line 152 "src/lua.h"
+extern const char lua_ident[];
+
+
+
+ extern lua_State *(lua_newstate) (lua_Alloc f, void *ud);
+ extern void (lua_close) (lua_State *L);
+ extern lua_State *(lua_newthread) (lua_State *L);
+ extern int (lua_closethread) (lua_State *L, lua_State *from);
+ extern int (lua_resetthread) (lua_State *L);
+
+ extern lua_CFunction (lua_atpanic) (lua_State *L, lua_CFunction panicf);
+
+
+ extern lua_Number (lua_version) (lua_State *L);
+
+
+
+ extern int (lua_absindex) (lua_State *L, int idx);
+ extern int (lua_gettop) (lua_State *L);
+ extern void (lua_settop) (lua_State *L, int idx);
+ extern void (lua_pushvalue) (lua_State *L, int idx);
+ extern void (lua_rotate) (lua_State *L, int idx, int n);
+ extern void (lua_copy) (lua_State *L, int fromidx, int toidx);
+ extern int (lua_checkstack) (lua_State *L, int n);
+
+ extern void (lua_xmove) (lua_State *from, lua_State *to, int n);
+
+
+
+
+ extern int (lua_isnumber) (lua_State *L, int idx);
+ extern int (lua_isstring) (lua_State *L, int idx);
+ extern int (lua_iscfunction) (lua_State *L, int idx);
+ extern int (lua_isinteger) (lua_State *L, int idx);
+ extern int (lua_isuserdata) (lua_State *L, int idx);
+ extern int (lua_type) (lua_State *L, int idx);
+ extern const char *(lua_typename) (lua_State *L, int tp);
+
+ extern lua_Number (lua_tonumberx) (lua_State *L, int idx, int *isnum);
+ extern lua_Integer (lua_tointegerx) (lua_State *L, int idx, int *isnum);
+ extern int (lua_toboolean) (lua_State *L, int idx);
+ extern const char *(lua_tolstring) (lua_State *L, int idx, size_t *len);
+ extern lua_Unsigned (lua_rawlen) (lua_State *L, int idx);
+ extern lua_CFunction (lua_tocfunction) (lua_State *L, int idx);
+ extern void *(lua_touserdata) (lua_State *L, int idx);
+ extern lua_State *(lua_tothread) (lua_State *L, int idx);
+ extern const void *(lua_topointer) (lua_State *L, int idx);
+
+
+
+
+
+#line 230 "src/lua.h"
+ extern void (lua_arith) (lua_State *L, int op);
+
+
+#line 236 "src/lua.h"
+ extern int (lua_rawequal) (lua_State *L, int idx1, int idx2);
+ extern int (lua_compare) (lua_State *L, int idx1, int idx2, int op);
+
+
+
+ extern void (lua_pushnil) (lua_State *L);
+ extern void (lua_pushnumber) (lua_State *L, lua_Number n);
+ extern void (lua_pushinteger) (lua_State *L, lua_Integer n);
+ extern const char *(lua_pushlstring) (lua_State *L, const char *s, size_t len);
+ extern const char *(lua_pushstring) (lua_State *L, const char *s);
+ extern const char *(lua_pushvfstring) (lua_State *L, const char *fmt,
+ va_list argp);
+ extern const char *(lua_pushfstring) (lua_State *L, const char *fmt, ...);
+ extern void (lua_pushcclosure) (lua_State *L, lua_CFunction fn, int n);
+ extern void (lua_pushboolean) (lua_State *L, int b);
+ extern void (lua_pushlightuserdata) (lua_State *L, void *p);
+ extern int (lua_pushthread) (lua_State *L);
+
+
+
+ extern int (lua_getglobal) (lua_State *L, const char *name);
+ extern int (lua_gettable) (lua_State *L, int idx);
+ extern int (lua_getfield) (lua_State *L, int idx, const char *k);
+ extern int (lua_geti) (lua_State *L, int idx, lua_Integer n);
+ extern int (lua_rawget) (lua_State *L, int idx);
+ extern int (lua_rawgeti) (lua_State *L, int idx, lua_Integer n);
+ extern int (lua_rawgetp) (lua_State *L, int idx, const void *p);
+
+ extern void (lua_createtable) (lua_State *L, int narr, int nrec);
+ extern void *(lua_newuserdatauv) (lua_State *L, size_t sz, int nuvalue);
+ extern int (lua_getmetatable) (lua_State *L, int objindex);
+ extern int (lua_getiuservalue) (lua_State *L, int idx, int n);
+
+
+
+ extern void (lua_setglobal) (lua_State *L, const char *name);
+ extern void (lua_settable) (lua_State *L, int idx);
+ extern void (lua_setfield) (lua_State *L, int idx, const char *k);
+ extern void (lua_seti) (lua_State *L, int idx, lua_Integer n);
+ extern void (lua_rawset) (lua_State *L, int idx);
+ extern void (lua_rawseti) (lua_State *L, int idx, lua_Integer n);
+ extern void (lua_rawsetp) (lua_State *L, int idx, const void *p);
+ extern int (lua_setmetatable) (lua_State *L, int objindex);
+ extern int (lua_setiuservalue) (lua_State *L, int idx, int n);
+
+
+
+ extern void (lua_callk) (lua_State *L, int nargs, int nresults,
+ lua_KContext ctx, lua_KFunction k);
+
+#line 295 "src/lua.h"
+ extern int (lua_pcallk) (lua_State *L, int nargs, int nresults, int errfunc,
+ lua_KContext ctx, lua_KFunction k);
+
+#line 299 "src/lua.h"
+ extern int (lua_load) (lua_State *L, lua_Reader reader, void *dt,
+ const char *chunkname, const char *mode);
+
+ extern int (lua_dump) (lua_State *L, lua_Writer writer, void *data, int strip);
+
+
+
+ extern int (lua_yieldk) (lua_State *L, int nresults, lua_KContext ctx,
+ lua_KFunction k);
+ extern int (lua_resume) (lua_State *L, lua_State *from, int narg,
+ int *nres);
+ extern int (lua_status) (lua_State *L);
+ extern int (lua_isyieldable) (lua_State *L);
+
+
+
+
+#line 317 "src/lua.h"
+ extern void (lua_setwarnf) (lua_State *L, lua_WarnFunction f, void *ud);
+ extern void (lua_warning) (lua_State *L, const char *msg, int tocont);
+
+
+
+
+
+#line 341 "src/lua.h"
+ extern int (lua_gc) (lua_State *L, int what, ...);
+
+
+
+
+ extern int (lua_error) (lua_State *L);
+
+ extern int (lua_next) (lua_State *L, int idx);
+
+ extern void (lua_concat) (lua_State *L, int n);
+ extern void (lua_len) (lua_State *L, int idx);
+
+ extern size_t (lua_stringtonumber) (lua_State *L, const char *s);
+
+ extern lua_Alloc (lua_getallocf) (lua_State *L, void **ud);
+ extern void (lua_setallocf) (lua_State *L, lua_Alloc f, void *ud);
+
+ extern void (lua_toclose) (lua_State *L, int idx);
+ extern void (lua_closeslot) (lua_State *L, int idx);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 455 "src/lua.h"
+ extern int (lua_getstack) (lua_State *L, int level, lua_Debug *ar);
+ extern int (lua_getinfo) (lua_State *L, const char *what, lua_Debug *ar);
+ extern const char *(lua_getlocal) (lua_State *L, const lua_Debug *ar, int n);
+ extern const char *(lua_setlocal) (lua_State *L, const lua_Debug *ar, int n);
+ extern const char *(lua_getupvalue) (lua_State *L, int funcindex, int n);
+ extern const char *(lua_setupvalue) (lua_State *L, int funcindex, int n);
+
+ extern void *(lua_upvalueid) (lua_State *L, int fidx, int n);
+ extern void (lua_upvaluejoin) (lua_State *L, int fidx1, int n1,
+ int fidx2, int n2);
+
+ extern void (lua_sethook) (lua_State *L, lua_Hook func, int mask, int count);
+ extern lua_Hook (lua_gethook) (lua_State *L);
+ extern int (lua_gethookmask) (lua_State *L);
+ extern int (lua_gethookcount) (lua_State *L);
+
+ extern int (lua_setcstacklimit) (lua_State *L, unsigned int limit);
+
+struct lua_Debug {
+ int event;
+ const char *name;
+ const char *namewhat;
+ const char *what;
+ const char *source;
+ size_t srclen;
+ int currentline;
+ int linedefined;
+ int lastlinedefined;
+ unsigned char nups;
+ unsigned char nparams;
+ char isvararg;
+ char istailcall;
+ unsigned short ftransfer;
+ unsigned short ntransfer;
+ char short_src[ 60];
+
+ struct CallInfo *i_ci;
+};
+
+
+
+
+
+
+
+#line 16 "src/lcorolib.c"
+
+#line 1 "src/lauxlib.h"
+
+
+
+
+
+#line 1 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+
+
+
+
+
+
+
+
 #line 1 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
 
 
@@ -1412,7 +3874,7 @@ typedef _Mbstatet mbstate_t;
  wchar_t const* _Mode
  );
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _wfopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
+
  FILE* __cdecl _wfopen(
  wchar_t const* _FileName,
  wchar_t const* _Mode
@@ -1426,7 +3888,7 @@ typedef _Mbstatet mbstate_t;
  );
 
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _wfreopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
+
  FILE* __cdecl _wfreopen(
  wchar_t const* _FileName,
  wchar_t const* _Mode,
@@ -1486,7 +3948,7 @@ typedef _Mbstatet mbstate_t;
 
 
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _wtmpnam_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+ 
  
  wchar_t* __cdecl _wtmpnam( 
  wchar_t * _Buffer 
@@ -1900,8 +4362,8 @@ typedef _Mbstatet mbstate_t;
  ;
 
 
+
 #line 835 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _fwscanf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _fwscanf_l(
  FILE* const _Stream,
  wchar_t const* const _Format,
@@ -1910,8 +4372,8 @@ typedef _Mbstatet mbstate_t;
 #line 843 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
  ;
 
+
 #line 854 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using fwscanf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl fwscanf(
  FILE* const _Stream,
  wchar_t const* const _Format,
@@ -1940,8 +4402,8 @@ typedef _Mbstatet mbstate_t;
  ;
 
 
+
 #line 913 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _wscanf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _wscanf_l(
  wchar_t const* const _Format,
  _locale_t const _Locale,
@@ -1949,8 +4411,8 @@ typedef _Mbstatet mbstate_t;
 #line 920 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
  ;
 
+
 #line 931 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using wscanf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl wscanf(
  wchar_t const* const _Format,
  ...)
@@ -2031,7 +4493,7 @@ typedef _Mbstatet mbstate_t;
  );
 
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _vsnwprintf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
+
  int __cdecl _vsnwprintf_l(
  wchar_t* const _Buffer,
  size_t const _BufferCount,
@@ -2070,13 +4532,13 @@ typedef _Mbstatet mbstate_t;
  ;
 
 #line 1108 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _snwprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+ 
  
  int __cdecl _snwprintf( 
  wchar_t * _Buffer, 
  size_t _BufferCount, 
  wchar_t const* _Format 
-, ...); __declspec(deprecated( "This function or variable may be unsafe. Consider using _vsnwprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+, ...); 
  
  int __cdecl _vsnwprintf( 
  wchar_t * _Buffer, 
@@ -2085,7 +4547,7 @@ typedef _Mbstatet mbstate_t;
 , va_list _Args);
 
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _vsnwprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
+
  int __cdecl _vsnwprintf(
  wchar_t* _Buffer,
  size_t _BufferCount,
@@ -2309,13 +4771,13 @@ typedef _Mbstatet mbstate_t;
  ;
 
 #line 1474 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using __swprintf_l_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+ 
  
  int __cdecl __swprintf_l( 
  wchar_t * _Buffer, 
  wchar_t const* _Format, 
  _locale_t _Locale 
-, ...); __declspec(deprecated( "This function or variable may be unsafe. Consider using _vswprintf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+, ...); 
  
  int __cdecl __vswprintf_l( 
  wchar_t * _Buffer, 
@@ -2323,12 +4785,12 @@ typedef _Mbstatet mbstate_t;
  _locale_t _Locale 
 , va_list _Args);
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using swprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+ 
  
  int __cdecl _swprintf( 
  wchar_t * _Buffer, 
  wchar_t const* _Format 
-, ...); __declspec(deprecated( "This function or variable may be unsafe. Consider using vswprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+, ...); 
  
  int __cdecl _vswprintf( 
  wchar_t * _Buffer, 
@@ -2407,8 +4869,8 @@ typedef _Mbstatet mbstate_t;
  ;
 
 
+
 #line 1623 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _snwprintf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _snwprintf_l(
  wchar_t* const _Buffer,
  size_t const _BufferCount,
@@ -2572,8 +5034,8 @@ typedef _Mbstatet mbstate_t;
 
 
 
+
 #line 1949 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _vsnwscanf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _vsnwscanf_l(
  wchar_t const* const _Buffer,
  size_t const _BufferCount,
@@ -2598,8 +5060,8 @@ typedef _Mbstatet mbstate_t;
  ;
 
 
+
 #line 1995 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _swscanf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _swscanf_l(
  wchar_t const* const _Buffer,
  wchar_t const* const _Format,
@@ -2609,8 +5071,8 @@ typedef _Mbstatet mbstate_t;
  ;
 
 
+
 #line 2015 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using swscanf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl swscanf(
  wchar_t const* const _Buffer,
  wchar_t const* const _Format,
@@ -2642,8 +5104,8 @@ typedef _Mbstatet mbstate_t;
 
 
 
+
 #line 2077 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _snwscanf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _snwscanf_l(
  wchar_t const* const _Buffer,
  size_t const _BufferCount,
@@ -2654,8 +5116,8 @@ typedef _Mbstatet mbstate_t;
  ;
 
 
+
 #line 2100 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/corecrt_wstdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _snwscanf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _snwscanf(
  wchar_t const* const _Buffer,
  size_t const _BufferCount,
@@ -2865,7 +5327,7 @@ typedef __int64 fpos_t;
 
  int __cdecl _flushall(void);
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
+
  FILE* __cdecl fopen(
  char const* _FileName,
  char const* _Mode
@@ -2900,7 +5362,7 @@ typedef __int64 fpos_t;
  );
 
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using freopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
+
  FILE* __cdecl freopen(
  char const* _FileName,
  char const* _Mode,
@@ -3043,7 +5505,7 @@ typedef __int64 fpos_t;
 
  int __cdecl _rmtmp(void);
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using setvbuf instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
+
  void __cdecl setbuf(
  FILE* _Stream,
  char* _Buffer
@@ -3072,13 +5534,13 @@ typedef __int64 fpos_t;
  );
 
 
+
 #line 433 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using tmpfile_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  FILE* __cdecl tmpfile(void);
 
 
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using tmpnam_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+ 
  
  char* __cdecl tmpnam( 
  char * _Buffer 
@@ -3583,8 +6045,8 @@ typedef __int64 fpos_t;
  ;
 
 
+
 #line 1178 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _fscanf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _fscanf_l(
  FILE* const _Stream,
  char const* const _Format,
@@ -3593,8 +6055,8 @@ typedef __int64 fpos_t;
 #line 1186 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
  ;
 
+
 #line 1197 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using fscanf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl fscanf(
  FILE* const _Stream,
  char const* const _Format,
@@ -3623,8 +6085,8 @@ typedef __int64 fpos_t;
  ;
 
 
+
 #line 1256 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _scanf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _scanf_l(
  char const* const _Format,
  _locale_t const _Locale,
@@ -3632,8 +6094,8 @@ typedef __int64 fpos_t;
 #line 1263 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
  ;
 
+
 #line 1274 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using scanf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl scanf(
  char const* const _Format,
  ...)
@@ -3709,7 +6171,7 @@ typedef __int64 fpos_t;
  );
 
 
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _vsnprintf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
+
  int __cdecl _vsnprintf_l(
  char* const _Buffer,
  size_t const _BufferCount,
@@ -3746,8 +6208,8 @@ typedef __int64 fpos_t;
  ;
 
 
+
 #line 1446 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _vsprintf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _vsprintf_l(
  char* const _Buffer,
  char const* const _Format,
@@ -3758,8 +6220,8 @@ typedef __int64 fpos_t;
  ;
 
 
+
 #line 1462 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using vsprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl vsprintf(
  char* const _Buffer,
  char const* const _Format,
@@ -3931,8 +6393,8 @@ typedef __int64 fpos_t;
  ;
 
 
+
 #line 1739 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _sprintf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _sprintf_l(
  char* const _Buffer,
  char const* const _Format,
@@ -3952,12 +6414,12 @@ typedef __int64 fpos_t;
  ;
 
 #line 1782 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+ 
  
  int __cdecl sprintf( 
  char * _Buffer, 
  char const* _Format 
-, ...); __declspec(deprecated( "This function or variable may be unsafe. Consider using vsprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+, ...); 
  
  int __cdecl vsprintf( 
  char * _Buffer, 
@@ -4014,8 +6476,8 @@ typedef __int64 fpos_t;
  ;
 
 
+
 #line 1882 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _snprintf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _snprintf_l(
  char* const _Buffer,
  size_t const _BufferCount,
@@ -4049,13 +6511,13 @@ typedef __int64 fpos_t;
  ;
 
 #line 1956 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _snprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+ 
  
  int __cdecl _snprintf( 
  char * _Buffer, 
  size_t _BufferCount, 
  char const* _Format 
-, ...); __declspec(deprecated( "This function or variable may be unsafe. Consider using _vsnprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.")) 
+, ...); 
  
  int __cdecl _vsnprintf( 
  char * _Buffer, 
@@ -4214,8 +6676,8 @@ typedef __int64 fpos_t;
 #pragma warning ( pop )
 
 
+
 #line 2219 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _sscanf_s_l instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl _sscanf_l(
  char const* const _Buffer,
  char const* const _Format,
@@ -4224,8 +6686,8 @@ typedef __int64 fpos_t;
 #line 2227 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
  ;
 
+
 #line 2238 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using sscanf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details."))
  int __cdecl sscanf(
  char const* const _Buffer,
  char const* const _Format,
@@ -4259,5 +6721,385 @@ typedef __int64 fpos_t;
 #line 2301 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
 #pragma warning ( disable : 6530 ) 
 
+
 #line 2302 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
- __declspec(deprecated( "This function or variable may be unsafe. Consider using _snscanf_s_l inste
+ int __cdecl _snscanf_l(
+ char const* const _Buffer,
+ size_t const _BufferCount,
+ char const* const _Format,
+ _locale_t const _Locale,
+ ...)
+#line 2311 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+ ;
+
+
+#line 2326 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+ int __cdecl _snscanf(
+ char const* const _Buffer,
+ size_t const _BufferCount,
+ char const* const _Format,
+ ...)
+#line 2334 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+ ;
+
+
+
+#line 2349 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+ int __cdecl _snscanf_s_l(
+ char const* const _Buffer,
+ size_t const _BufferCount,
+ char const* const _Format,
+ _locale_t const _Locale,
+ ...)
+#line 2359 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+ ;
+
+
+#line 2374 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+ int __cdecl _snscanf_s(
+ char const* const _Buffer,
+ size_t const _BufferCount,
+ char const* const _Format,
+ ...)
+#line 2382 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+ ;
+
+#line 2397 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+#pragma warning ( pop )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 2442 "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt/stdio.h"
+#pragma warning ( pop ) 
+#line 14 "src/lauxlib.h"
+
+#line 1 "src/luaconf.h"
+
+
+
+
+#line 16 "src/lauxlib.h"
+#line 1 "src/lua.h"
+
+
+
+#line 17 "src/lauxlib.h"
+
+
+
+
+
+#line 21 "src/lauxlib.h"
+typedef struct luaL_Buffer luaL_Buffer;
+
+
+
+
+
+
+
+
+
+
+
+#line 36 "src/lauxlib.h"
+typedef struct luaL_Reg {
+ const char *name;
+ lua_CFunction func;
+} luaL_Reg;
+
+
+
+#line 45 "src/lauxlib.h"
+ extern void (luaL_checkversion_) (lua_State *L, lua_Number ver, size_t sz);
+
+#line 49 "src/lauxlib.h"
+ extern int (luaL_getmetafield) (lua_State *L, int obj, const char *e);
+ extern int (luaL_callmeta) (lua_State *L, int obj, const char *e);
+ extern const char *(luaL_tolstring) (lua_State *L, int idx, size_t *len);
+ extern int (luaL_argerror) (lua_State *L, int arg, const char *extramsg);
+ extern int (luaL_typeerror) (lua_State *L, int arg, const char *tname);
+ extern const char *(luaL_checklstring) (lua_State *L, int arg,
+ size_t *l);
+ extern const char *(luaL_optlstring) (lua_State *L, int arg,
+ const char *def, size_t *l);
+ extern lua_Number (luaL_checknumber) (lua_State *L, int arg);
+ extern lua_Number (luaL_optnumber) (lua_State *L, int arg, lua_Number def);
+
+ extern lua_Integer (luaL_checkinteger) (lua_State *L, int arg);
+ extern lua_Integer (luaL_optinteger) (lua_State *L, int arg,
+ lua_Integer def);
+
+ extern void (luaL_checkstack) (lua_State *L, int sz, const char *msg);
+ extern void (luaL_checktype) (lua_State *L, int arg, int t);
+ extern void (luaL_checkany) (lua_State *L, int arg);
+
+ extern int (luaL_newmetatable) (lua_State *L, const char *tname);
+ extern void (luaL_setmetatable) (lua_State *L, const char *tname);
+ extern void *(luaL_testudata) (lua_State *L, int ud, const char *tname);
+ extern void *(luaL_checkudata) (lua_State *L, int ud, const char *tname);
+
+ extern void (luaL_where) (lua_State *L, int lvl);
+ extern int (luaL_error) (lua_State *L, const char *fmt, ...);
+
+ extern int (luaL_checkoption) (lua_State *L, int arg, const char *def,
+ const char *const lst[]);
+
+ extern int (luaL_fileresult) (lua_State *L, int stat, const char *fname);
+ extern int (luaL_execresult) (lua_State *L, int stat);
+
+
+
+
+#line 88 "src/lauxlib.h"
+ extern int (luaL_ref) (lua_State *L, int t);
+ extern void (luaL_unref) (lua_State *L, int t, int ref);
+
+ extern int (luaL_loadfilex) (lua_State *L, const char *filename,
+ const char *mode);
+
+
+#line 96 "src/lauxlib.h"
+ extern int (luaL_loadbufferx) (lua_State *L, const char *buff, size_t sz,
+ const char *name, const char *mode);
+ extern int (luaL_loadstring) (lua_State *L, const char *s);
+
+ extern lua_State *(luaL_newstate) (void);
+
+ extern lua_Integer (luaL_len) (lua_State *L, int idx);
+
+ extern void (luaL_addgsub) (luaL_Buffer *b, const char *s,
+ const char *p, const char *r);
+ extern const char *(luaL_gsub) (lua_State *L, const char *s,
+ const char *p, const char *r);
+
+ extern void (luaL_setfuncs) (lua_State *L, const luaL_Reg *l, int nup);
+
+ extern int (luaL_getsubtable) (lua_State *L, int idx, const char *fname);
+
+ extern void (luaL_traceback) (lua_State *L, lua_State *L1,
+ const char *msg, int level);
+
+ extern void (luaL_requiref) (lua_State *L, const char *modname,
+ lua_CFunction openf, int glb);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 182 "src/lauxlib.h"
+struct luaL_Buffer {
+ char *b;
+ size_t size;
+ size_t n;
+ lua_State *L;
+ union {
+ lua_Number n; double u; void *s; lua_Integer i; long l;
+ char b[ ((int)(16 * sizeof(void*) * sizeof(lua_Number)))];
+ } init;
+};
+
+
+
+
+
+
+
+#line 214 "src/lauxlib.h"
+ extern void (luaL_buffinit) (lua_State *L, luaL_Buffer *B);
+ extern char *(luaL_prepbuffsize) (luaL_Buffer *B, size_t sz);
+ extern void (luaL_addlstring) (luaL_Buffer *B, const char *s, size_t l);
+ extern void (luaL_addstring) (luaL_Buffer *B, const char *s);
+ extern void (luaL_addvalue) (luaL_Buffer *B);
+ extern void (luaL_pushresult) (luaL_Buffer *B);
+ extern void (luaL_pushresultsize) (luaL_Buffer *B, size_t sz);
+ extern char *(luaL_buffinitsize) (lua_State *L, luaL_Buffer *B, size_t sz);
+
+
+
+
+
+
+
+
+
+
+
+
+#line 243 "src/lauxlib.h"
+typedef struct luaL_Stream {
+ FILE *f;
+ lua_CFunction closef;
+} luaL_Stream;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#line 18 "src/lcorolib.c"
+#line 1 "src/lualib.h"
+
+
+
+
+#line 1 "src/lua.h"
+
+
+
+#line 12 "src/lualib.h"
+
+
+
+
+
+#line 16 "src/lualib.h"
+ extern int (luaopen_base) (lua_State *L);
+
+#line 21 "src/lualib.h"
+ extern int (luaopen_coroutine) (lua_State *L);
+
+#line 24 "src/lualib.h"
+ extern int (luaopen_table) (lua_State *L);
+
+#line 27 "src/lualib.h"
+ extern int (luaopen_io) (lua_State *L);
+
+#line 30 "src/lualib.h"
+ extern int (luaopen_os) (lua_State *L);
+
+#line 33 "src/lualib.h"
+ extern int (luaopen_string) (lua_State *L);
+
+#line 36 "src/lualib.h"
+ extern int (luaopen_utf8) (lua_State *L);
+
+#line 39 "src/lualib.h"
+ extern int (luaopen_math) (lua_State *L);
+
+#line 42 "src/lualib.h"
+ extern int (luaopen_debug) (lua_State *L);
+
+#line 45 "src/lualib.h"
+ extern int (luaopen_package) (lua_State *L);
+
+
+
+ extern void (luaL_openlibs) (lua_State *L);
+
+
+#line 19 "src/lcorolib.c"
+
+
+#line 19 "src/lcorolib.c"
+static lua_State *getco (lua_State *L) {
+ lua_State *co = lua_tothread(L, 1);
+ ((void)( ( co) || luaL_typeerror(L, ( 1), ( "thread"))));
+ return co;
+}
+
+
+
+static int auxresume (lua_State *L, lua_State *co, int narg) {
+ int status, nres;
+ if ( (!lua_checkstack(co, narg))) {
+ lua_pushstring(L, "too many arguments to resume");
+ return -1;
+ }
+ lua_xmove(L, co, narg);
+ status = lua_resume(co, L, narg, &nres);
+ if ( (status == 0 || status == 1)) {
+ if ( (!lua_checkstack(L, nres + 1))) {
+ lua_settop(co, -( nres)-1);
+ lua_pushstring(L, "too many results to resume");
+ return -1;
+ }
+ lua_xmove(co, L, nres);
+ return nres;
+ }
+ else {
+ lua_xmove(co, L, 1);
+ return -1;
+ }
+}
+
+
+static int luaB_coresume (lua_State *L) {
+ lua_State *co = getco(L);
+ int r;
+ r = auxresume(L, co, lua_gettop(L) - 1);
+ if ( (r < 0)) {
+ lua_pushboolean(L, 0);
+ lua_rotate(L, ( -2), 1);
+ return 2;
+ }
+ else {
+ lua_pushboolean(L, 1);
+ lua_rotate(L, ( -(r + 1)), 1);
+ return r + 1;
+ }
+}
+
+
+static int luaB_auxwrap (lua_State *L) {
+ lua_State *co = lua_tothread(L, ( (- 1000000 - 1000) - (1)));
+ int r = auxresume(L, co, lua_gettop(L));
+ if ( (r < 0)) {
+ int stat = lua_status(co);
+ if (stat != 0 && stat != 1) {
+ stat = lua_closethread(co, L);
+ ((void)0);
+ lua_xmove(co, L, 1);
+ }
+ if (stat != 4 &&
