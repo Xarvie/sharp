@@ -77,7 +77,6 @@ target_link_libraries(sharpc PRIVATE sharp_preproc)
 target_include_directories(sharpc PRIVATE
     ${CMAKE_SOURCE_DIR}/src/preproc
     ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/third_party/tcc/libtcc
 )
 
 # Windows: increase stack size to 8MB (default is 1MB) to handle complex
