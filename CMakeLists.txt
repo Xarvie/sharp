@@ -50,20 +50,6 @@ add_library(sharp_preproc STATIC ${CPP_SOURCES})
 target_include_directories(sharp_preproc PUBLIC ${CMAKE_SOURCE_DIR}/src/preproc)
 target_compile_options(sharp_preproc PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wno-implicit-fallthrough>)
 
-# Standalone sharp-cpp preprocessor driver
-add_executable(sharp-cpp src/preproc/cpp_main.c)
-target_link_libraries(sharp-cpp PRIVATE sharp_preproc)
-target_include_directories(sharp-cpp PRIVATE ${CMAKE_SOURCE_DIR}/src/preproc)
-
-# -----------------------------------------------------------------------
-# libtcc integration — embed TinyCC for self-hosted C→binary compilation
-# -----------------------------------------------------------------------
-
-set(TCC_DIR ${CMAKE_SOURCE_DIR}/third_party/tcc)
-
-# Dynamic loading of libtcc.dll at runtime — just need include path for libtcc.h
-# -----------------------------------------------------------------------
-
 # Source files — compiler
 set(SOURCES
     src/util.c
@@ -91,7 +77,7 @@ target_link_libraries(sharpc PRIVATE sharp_preproc)
 target_include_directories(sharpc PRIVATE
     ${CMAKE_SOURCE_DIR}/src/preproc
     ${CMAKE_SOURCE_DIR}/src
-    ${TCC_DIR}/libtcc
+    ${CMAKE_SOURCE_DIR}/third_party/tcc/libtcc
 )
 
 # Windows: increase stack size to 8MB (default is 1MB) to handle complex
@@ -107,57 +93,7 @@ if(WIN32)
     endif()
 endif()
 
-# Copy TCC runtime files to build output directory
-# Windows: copy DLL and executable
-# Linux/macOS: copy shared library if available
-if(WIN32)
-    add_custom_command(TARGET sharpc POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${TCC_DIR}/libtcc.dll"
-            $<TARGET_FILE_DIR:sharpc>
-        COMMENT "Copying libtcc.dll to output directory"
-    )
-    if(EXISTS "${TCC_DIR}/tcc.exe")
-        add_custom_command(TARGET sharpc POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${TCC_DIR}/tcc.exe"
-                $<TARGET_FILE_DIR:sharpc>
-            COMMENT "Copying tcc.exe to output directory"
-        )
-    endif()
-elseif(APPLE)
-    if(EXISTS "${TCC_DIR}/libtcc.dylib")
-        add_custom_command(TARGET sharpc POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${TCC_DIR}/libtcc.dylib"
-                $<TARGET_FILE_DIR:sharpc>
-            COMMENT "Copying libtcc.dylib to output directory"
-        )
-    endif()
-else()
-    # Linux: try to copy libtcc.so
-    if(EXISTS "${TCC_DIR}/libtcc.so")
-        add_custom_command(TARGET sharpc POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${TCC_DIR}/libtcc.so"
-                $<TARGET_FILE_DIR:sharpc>
-            COMMENT "Copying libtcc.so to output directory"
-        )
-    endif()
-endif()
-
-# Always copy the entire TCC tree to build tree so libtcc can find headers
-# This is needed on all platforms for system header support
-add_custom_command(TARGET sharpc POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/third_party/tcc"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${TCC_DIR}"
-        "${CMAKE_BINARY_DIR}/third_party/tcc"
-    COMMENT "Copying tcc runtime files to build tree"
-)
-
-install(TARGETS sharpc sharp-cpp
+install(TARGETS sharpc
     RUNTIME DESTINATION bin
 )
 

@@ -1,5 +1,6 @@
 /cmake-build-debug/
 /build/
+/build-debug/
 *.exe
 *.obj
 *.o
@@ -8,6 +9,11 @@
 *.pdb
 *.ilk
 *.exp
+*.log
+*.out
+*.pp
+*.tmp
 tests/*.c
 !tests/test_*.sp
 PLAN_C_SUPPORT.md
+*.pp.c

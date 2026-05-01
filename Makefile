@@ -15,7 +15,7 @@ CPP_FLAGS = $(CFLAGS) -Icpp -Wno-implicit-fallthrough
 all: $(BIN) $(CPP_BIN)
 
 $(BIN): $(OBJ) $(CPP_OBJ)
-	$(CC) $(CFLAGS) -Icpp -o $@ $(OBJ) $(CPP_OBJ)
+	$(CC) $(CFLAGS) -Icpp -o $@ $(OBJ) $(CPP_OBJ) $(LDFLAGS)
 
 %.o: %.c sharp.h types.h ast.h hir.h
 	$(CC) $(CFLAGS) -Icpp -c $< -o $@

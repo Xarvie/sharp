@@ -105,6 +105,7 @@ static bool macro_bodies_equal(const MacroDef *a, const MacroDef *b) {
 
 void macro_define(MacroTable *t, MacroDef *def, CppDiagArr *diags, CppLoc loc) {
     def->def_loc = loc;
+
     uint32_t h = macro_hash(def->name);
     for (MacroDef **pp = &t->buckets[h]; *pp; pp = &(*pp)->next) {
         if (strcmp((*pp)->name, def->name) == 0) {
@@ -1050,12 +1051,13 @@ static void expand_list(TokList *input, MacroTable *mt,
                 break; /* all remaining input was consumed and rescanned */
             } else {
                 /* Expansion result does not begin a new function-like macro
-                 * call — rescan the expansion alone and emit it, then let the
-                 * outer loop advance to n->next naturally.                   */
-                TokList rescanned = {0};
-                expand_list(&expanded, mt, interns, diags, &rescanned);
-                tl_free(&expanded);
-                for (TokNode *en = rescanned.head; en; en = en->next) {
+                 * call — `expanded` is already the fully-rescanned terminal
+                 * form (expand_list is recursive). A second expand_list pass
+                 * here is redundant: in well-formed cases it's a no-op, and
+                 * in the presence of any hide-set propagation gap it can
+                 * incorrectly re-expand tokens (or double-count token
+                 * budget). Just transfer `expanded` directly to `output`.   */
+                for (TokNode *en = expanded.head; en; en = en->next) {
                     if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
                     expand_count_token(mt);
                     PPTok copy = en->tok;
@@ -1063,7 +1065,7 @@ static void expand_list(TokList *input, MacroTable *mt,
                     sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
                     tl_append(output, copy);
                 }
-                tl_free(&rescanned);
+                tl_free(&expanded);
                 /* continue — outer for-loop advances to n->next */
             }
         }
