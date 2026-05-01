@@ -17,3 +17,4 @@ tests/*.c
 !tests/test_*.sp
 PLAN_C_SUPPORT.md
 *.pp.c
+test/
