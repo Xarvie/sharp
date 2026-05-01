@@ -17,4 +17,5 @@ tests/*.c
 !tests/test_*.sp
 PLAN_C_SUPPORT.md
 *.pp.c
-test/
+/test/output/
+# test/lua-5.4.6/ is vendored, do not modify
