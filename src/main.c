@@ -8,6 +8,7 @@
  *   sharpc <input.sp> -                # write C to stdout
  *   sharpc <input.sp> -dump-hir        # print CFG to stderr, then generate C
  *   sharpc <input.sp> -no-link         # skip binary generation
+ *   sharpc a.sp b.sp -o out.exe        # multi-file compile + link
  */
 #include "sharp.h"
 #include "hir.h"
@@ -16,8 +17,10 @@
 #ifdef _WIN32
   #include <windows.h>
   #include <process.h>
+  #include <direct.h>
 #else
   #include <unistd.h>
+  #include <sys/stat.h>
 #endif
 
 /* ========================================================================
@@ -186,6 +189,162 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
     }
 }
 
+/* Add system include paths to cpp_ctx (MSVC/UCRT/SDK on Windows). */
+static void setup_sys_includes(CppCtx *cpp_ctx) {
+#ifdef _WIN32
+    const char *inc_env = getenv("INCLUDE");
+    if (inc_env && inc_env[0]) {
+        char buf[8192];
+        strncpy(buf, inc_env, sizeof(buf) - 1);
+        buf[sizeof(buf) - 1] = '\0';
+        char *p = buf;
+        while (*p) {
+            char *semi = strchr(p, ';');
+            if (semi) *semi = '\0';
+            if (*p) cpp_add_sys_include(cpp_ctx, p);
+            if (!semi) break;
+            p = semi + 1;
+        }
+    } else {
+        bool found_vc = false;
+        const char *vc_tools = getenv("VCToolsInstallDir");
+        if (vc_tools && vc_tools[0]) {
+            char inc[512];
+            snprintf(inc, sizeof(inc), "%s\\include", vc_tools);
+            DWORD attr = GetFileAttributesA(inc);
+            if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                cpp_add_sys_include(cpp_ctx, inc);
+                found_vc = true;
+            }
+        }
+        if (!found_vc) {
+            const char *vc_bases[] = {
+                "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC",
+                "C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional\\VC\\Tools\\MSVC",
+                "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC",
+                "C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC",
+                NULL
+            };
+            for (int bi = 0; vc_bases[bi] && !found_vc; bi++) {
+                char pattern[512];
+                snprintf(pattern, sizeof(pattern), "%s\\*", vc_bases[bi]);
+                WIN32_FIND_DATAA fd;
+                HANDLE hf = FindFirstFileA(pattern, &fd);
+                if (hf == INVALID_HANDLE_VALUE) continue;
+                do {
+                    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                    if (fd.cFileName[0] == '.') continue;
+                    char inc[512];
+                    snprintf(inc, sizeof(inc), "%s\\%s\\include",
+                             vc_bases[bi], fd.cFileName);
+                    DWORD attr = GetFileAttributesA(inc);
+                    if (attr != INVALID_FILE_ATTRIBUTES &&
+                        (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                        cpp_add_sys_include(cpp_ctx, inc);
+                        found_vc = true;
+                        break;
+                    }
+                } while (FindNextFileA(hf, &fd));
+                FindClose(hf);
+            }
+        }
+        const char *sdk_base =
+            "C:\\Program Files (x86)\\Windows Kits\\10\\Include";
+        char sdk_pattern[512];
+        snprintf(sdk_pattern, sizeof(sdk_pattern), "%s\\*", sdk_base);
+        WIN32_FIND_DATAA sd;
+        HANDLE hs = FindFirstFileA(sdk_pattern, &sd);
+        char best_ver[64] = {0};
+        if (hs != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(sd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                if (sd.cFileName[0] == '.') continue;
+                if (strcmp(sd.cFileName, best_ver) > 0)
+                    strncpy(best_ver, sd.cFileName, sizeof(best_ver) - 1);
+            } while (FindNextFileA(hs, &sd));
+            FindClose(hs);
+        }
+        if (best_ver[0]) {
+            const char *subs[] = { "ucrt", "shared", "um", NULL };
+            for (int si = 0; subs[si]; si++) {
+                char p[512];
+                snprintf(p, sizeof(p), "%s\\%s\\%s",
+                         sdk_base, best_ver, subs[si]);
+                DWORD attr = GetFileAttributesA(p);
+                if (attr != INVALID_FILE_ATTRIBUTES &&
+                    (attr & FILE_ATTRIBUTE_DIRECTORY))
+                    cpp_add_sys_include(cpp_ctx, p);
+            }
+        }
+    }
+#else
+    cpp_add_sys_include(cpp_ctx, "/usr/include");
+    cpp_add_sys_include(cpp_ctx, "/usr/local/include");
+#endif
+}
+
+static bool detect_file_is_c(const char* path) {
+    size_t n = strlen(path);
+    return n >= 2 && strcmp(path + n - 2, ".c") == 0;
+}
+
+/* Process one file for -E mode: preprocess, convert linemarkers, write output.
+ * Returns 0 on success, 1 on failure. */
+static int process_one_file(CppCtx *cpp_ctx, const char* in, const char* out) {
+    CppLang lang = detect_file_is_c(in) ? CPP_LANG_C : CPP_LANG_SHARP;
+    CppResult pp = cpp_run(cpp_ctx, in, lang);
+    cpp_print_diags(&pp);
+    if (pp.error) { cpp_result_free(&pp); return 1; }
+
+    {
+        char* p = pp.text;
+        while ((p = strstr(p, "# ")) != NULL) {
+            char* after_hash = p + 1;
+            if (after_hash[1] >= '0' && after_hash[1] <= '9') {
+                /* Convert "# 123 ..." → "#line 123 ..."
+                 * Need to shift everything after "# " right by 4 bytes
+                 * to make room for "line" */
+                size_t shift = 4;
+                size_t tail_start = (size_t)(after_hash - pp.text);
+                size_t tail_len = pp.text_len - tail_start;
+                /* Grow the buffer by 4 bytes */
+                char* new_buf = realloc(pp.text, pp.text_len + shift + 1);
+                if (!new_buf) {
+                    fprintf(stderr, "sharpc: realloc failed\n");
+                    cpp_result_free(&pp);
+                    return 1;
+                }
+                pp.text = new_buf;
+                /* Recalculate pointers after realloc */
+                after_hash = pp.text + tail_start;
+                p = pp.text + (p - new_buf);
+                /* Shift tail right by 4 bytes */
+                memmove(after_hash + 1 + shift, after_hash + 1, tail_len);
+                /* Insert "line" */
+                after_hash[0] = 'l'; after_hash[1] = 'i';
+                after_hash[2] = 'n'; after_hash[3] = 'e'; after_hash[4] = ' ';
+                pp.text_len += shift;
+                p = after_hash + 5;
+            } else {
+                p = after_hash;
+            }
+        }
+    }
+
+    FILE* fout = fopen(out, "wb");
+    if (!fout) {
+        fprintf(stderr, "sharpc: cannot open '%s' for writing\n", out);
+        cpp_result_free(&pp);
+        return 1;
+    }
+    if (pp.text && pp.text_len)
+        fwrite(pp.text, 1, pp.text_len, fout);
+    fclose(fout);
+    cpp_result_free(&pp);
+    fprintf(stderr, "sharpc: preprocessed output written to '%s'\n", out);
+    return 0;
+}
+
 static char* read_file(const char* path) {
     FILE* f = fopen(path, "rb");
     if (!f) { fprintf(stderr, "cannot open '%s'\n", path); return NULL; }
@@ -205,7 +364,13 @@ int main(int argc, char** argv) {
     const char* out_path = NULL;
     const char* target_str = NULL;
     bool        dump_hir = false;
-    bool        preprocess_only = false;  /* -E flag */
+    bool        preprocess_only = false;
+
+    /* -E mode with paired args: sharpc -E in1.c out1.c in2.c out2.c */
+    typedef struct { const char *in, *out; } EPair;
+    EPair* e_pairs = NULL;
+    int    e_count = 0;
+    int    pair_start = -1; /* argv index where -E args start */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
@@ -221,16 +386,25 @@ int main(int argc, char** argv) {
         } else if (argv[i][0] == '-' && argv[i][1] == 0) {
             out_path = "-";
         } else if (strncmp(argv[i], "-I", 2) == 0 && argv[i][2]) {
-            /* handled below via CppCtx */
         } else if (strcmp(argv[i], "-I") == 0 && i + 1 < argc) {
-            i++; /* skip path; handled below */
+            i++;
         } else if (strncmp(argv[i], "-D", 2) == 0 && argv[i][2]) {
-            /* handled below */
         } else if (strncmp(argv[i], "-U", 2) == 0 && argv[i][2]) {
-            /* handled below */
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "unknown flag: %s\n", argv[i]);
             return 2;
+        } else if (preprocess_only) {
+            if (pair_start < 0) pair_start = i;
+            /* -E mode: collect pairs of positional args (input output) */
+            if (e_count % 2 == 0) {
+                e_pairs = realloc(e_pairs, (e_count/2 + 1) * sizeof(EPair));
+                e_pairs[e_count/2].in = argv[i];
+                e_pairs[e_count/2].out = NULL;
+                e_count++;
+            } else {
+                e_pairs[e_count/2].out = argv[i];
+                e_count++;
+            }
         } else if (!in_path) {
             in_path = argv[i];
         } else {
@@ -238,10 +412,65 @@ int main(int argc, char** argv) {
             return 2;
         }
     }
-    if (!in_path) {
-        fprintf(stderr, "usage: sharpc <file.[sp|c]> [-E] [-o out] [-dump-hir] [-no-link] [--target <triple>]\n");
-        fprintf(stderr, "  -E            preprocess only, write to stdout (or -o file)\n");
-        fprintf(stderr, "  target examples: x86_64-windows-msvc, x86_64-linux-gnu, aarch64-macos-none\n");
+
+    if (preprocess_only) {
+        if (e_count == 0 || e_count % 2 != 0) {
+            fprintf(stderr, "usage: sharpc -E <in1> <out1> [<in2> <out2> ...]\n");
+            free(e_pairs);
+            return 2;
+        }
+        CppCtx *cpp_ctx = cpp_ctx_new();
+        for (int i = 1; i < pair_start; i++) {
+            if (strncmp(argv[i], "-I", 2) == 0 && argv[i][2])
+                cpp_add_user_include(cpp_ctx, argv[i] + 2);
+            else if (strcmp(argv[i], "-I") == 0 && i + 1 < argc)
+                cpp_add_user_include(cpp_ctx, argv[++i]);
+            else if (strncmp(argv[i], "-D", 2) == 0 && argv[i][2]) {
+                const char *def = argv[i] + 2;
+                const char *eq  = strchr(def, '=');
+                if (eq) {
+                    char name[256]; size_t nl = (size_t)(eq - def);
+                    if (nl >= sizeof name) nl = sizeof name - 1;
+                    memcpy(name, def, nl); name[nl] = '\0';
+                    cpp_define(cpp_ctx, name, eq + 1);
+                } else { cpp_define(cpp_ctx, def, NULL); }
+            } else if (strncmp(argv[i], "-U", 2) == 0 && argv[i][2])
+                cpp_undefine(cpp_ctx, argv[i] + 2);
+        }
+        TargetTriple et = target_default();
+        apply_target_macros(cpp_ctx, &et);
+        setup_sys_includes(cpp_ctx);
+
+        int rc = 0;
+        for (int pi = 0; pi < e_count/2; pi++) {
+            if (process_one_file(cpp_ctx, e_pairs[pi].in, e_pairs[pi].out) != 0)
+                rc = 1;
+        }
+        cpp_ctx_free(cpp_ctx);
+        free(e_pairs);
+        return rc;
+    }
+
+    /* Collect all input files */
+    const char** input_files = NULL;
+    int ninputs = 0;
+    int input_cap = 8;
+    input_files = (const char**)calloc(input_cap, sizeof(const char*));
+
+    /* Collect all non-option, non-preprocess-only arguments as inputs */
+    for (int i = 1; i < argc; i++) {
+        if (argv[i][0] == '-') continue;
+        if (ninputs >= input_cap) {
+            input_cap *= 2;
+            input_files = (const char**)realloc(input_files, input_cap * sizeof(const char*));
+        }
+        input_files[ninputs++] = argv[i];
+    }
+
+    if (ninputs == 0) {
+        fprintf(stderr, "usage: sharpc <file1> [file2 ...] [-o out] [-dump-hir] [--target <triple>]\n");
+        fprintf(stderr, "       sharpc -E <in1> <out1> [<in2> <out2> ...]\n");
+        free(input_files);
         return 2;
     }
 
@@ -250,6 +479,7 @@ int main(int argc, char** argv) {
     if (target_str) {
         if (!parse_target_triple(target_str, &target)) {
             fprintf(stderr, "error: invalid target triple '%s'\n", target_str);
+            free(input_files);
             return 2;
         }
     } else {
@@ -257,7 +487,7 @@ int main(int argc, char** argv) {
     }
 
     /* ------------------------------------------------------------------ *
-     * Preprocessing pass (translation phases 1-6)                        *
+     * Shared preprocessor context                                        *
      * ------------------------------------------------------------------ */
     CppCtx *cpp_ctx = cpp_ctx_new();
 
@@ -281,257 +511,163 @@ int main(int argc, char** argv) {
     }
 
     apply_target_macros(cpp_ctx, &target);
+    setup_sys_includes(cpp_ctx);
+
+    /* Shared template registry for cross-file generic visibility */
+    TemplateRegistry templates;
+    tmpl_reg_init(&templates);
 
     /* ------------------------------------------------------------------ *
-     * System include paths
-     *
-     * Windows: MSVC + UCRT only.
-     *   Priority: INCLUDE env var (vcvarsall/Developer Prompt) → VCToolsInstallDir
-     *             → enumerate VS 2022 versioned dirs → Windows SDK dirs.
-     *
-     * Linux/macOS: system include dirs only.
+     * tmp/ directory management                                          *
      * ------------------------------------------------------------------ */
+    const char* tmp_dir = "tmp";
 #ifdef _WIN32
-    {
-        const char *inc_env = getenv("INCLUDE");
-        if (inc_env && inc_env[0]) {
-            /* vcvarsall.bat already set INCLUDE — contains VC + SDK + UCRT. */
-            char buf[8192];
-            strncpy(buf, inc_env, sizeof(buf) - 1);
-            buf[sizeof(buf) - 1] = '\0';
-            char *p = buf;
-            while (*p) {
-                char *semi = strchr(p, ';');
-                if (semi) *semi = '\0';
-                if (*p) cpp_add_sys_include(cpp_ctx, p);
-                if (!semi) break;
-                p = semi + 1;
-            }
-        } else {
-            /* No vcvarsall — discover VS install ourselves. */
-            bool found_vc = false;
-
-            /* VCToolsInstallDir is set by vcvarsall even without a full
-             * Developer Prompt (e.g. cmake --build invoked from VS).     */
-            const char *vc_tools = getenv("VCToolsInstallDir");
-            if (vc_tools && vc_tools[0]) {
-                char inc[512];
-                snprintf(inc, sizeof(inc), "%s\\include", vc_tools);
-                DWORD attr = GetFileAttributesA(inc);
-                if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                    cpp_add_sys_include(cpp_ctx, inc);
-                    found_vc = true;
-                }
-            }
-
-            if (!found_vc) {
-                /* Enumerate versioned subdirs under known VS 2022 MSVC bases */
-                const char *vc_bases[] = {
-                    "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC",
-                    "C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional\\VC\\Tools\\MSVC",
-                    "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC",
-                    "C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC",
-                    NULL
-                };
-                for (int bi = 0; vc_bases[bi] && !found_vc; bi++) {
-                    char pattern[512];
-                    snprintf(pattern, sizeof(pattern), "%s\\*", vc_bases[bi]);
-                    WIN32_FIND_DATAA fd;
-                    HANDLE hf = FindFirstFileA(pattern, &fd);
-                    if (hf == INVALID_HANDLE_VALUE) continue;
-                    do {
-                        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-                        if (fd.cFileName[0] == '.') continue;
-                        char inc[512];
-                        snprintf(inc, sizeof(inc), "%s\\%s\\include",
-                                 vc_bases[bi], fd.cFileName);
-                        DWORD attr = GetFileAttributesA(inc);
-                        if (attr != INVALID_FILE_ATTRIBUTES &&
-                            (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                            cpp_add_sys_include(cpp_ctx, inc);
-                            found_vc = true;
-                            break;
-                        }
-                    } while (FindNextFileA(hf, &fd));
-                    FindClose(hf);
-                }
-            }
-
-            /* Windows SDK: pick the newest installed version and add
-             * ucrt, shared, and um sub-directories.                  */
-            const char *sdk_base =
-                "C:\\Program Files (x86)\\Windows Kits\\10\\Include";
-            {
-                char sdk_pattern[512];
-                snprintf(sdk_pattern, sizeof(sdk_pattern), "%s\\*", sdk_base);
-                WIN32_FIND_DATAA sd;
-                HANDLE hs = FindFirstFileA(sdk_pattern, &sd);
-                char best_ver[64] = {0};
-                if (hs != INVALID_HANDLE_VALUE) {
-                    do {
-                        if (!(sd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-                        if (sd.cFileName[0] == '.') continue;
-                        if (strcmp(sd.cFileName, best_ver) > 0)
-                            strncpy(best_ver, sd.cFileName, sizeof(best_ver) - 1);
-                    } while (FindNextFileA(hs, &sd));
-                    FindClose(hs);
-                }
-                if (best_ver[0]) {
-                    const char *subs[] = { "ucrt", "shared", "um", NULL };
-                    for (int si = 0; subs[si]; si++) {
-                        char p[512];
-                        snprintf(p, sizeof(p), "%s\\%s\\%s",
-                                 sdk_base, best_ver, subs[si]);
-                        DWORD attr = GetFileAttributesA(p);
-                        if (attr != INVALID_FILE_ATTRIBUTES &&
-                            (attr & FILE_ATTRIBUTE_DIRECTORY))
-                            cpp_add_sys_include(cpp_ctx, p);
-                    }
-                }
-            }
-        }
-    }
+    _mkdir(tmp_dir);
 #else
-    /* Linux / macOS: system headers only. */
-    cpp_add_sys_include(cpp_ctx, "/usr/include");
-    cpp_add_sys_include(cpp_ctx, "/usr/local/include");
+    mkdir(tmp_dir, 0755);
 #endif
 
-    /* Use C language mode when the input file ends in .c */
-    CppLang lang = CPP_LANG_SHARP;
-    {
-        size_t plen = strlen(in_path);
-        if (plen >= 2 && strcmp(in_path + plen - 2, ".c") == 0)
-            lang = CPP_LANG_C;
-    }
-
-    CppResult pp = cpp_run(cpp_ctx, in_path, lang);
-    cpp_print_diags(&pp);
-    if (pp.error) {
-        cpp_result_free(&pp);
-        cpp_ctx_free(cpp_ctx);
-        return 1;
-    }
-
-    /* -E: preprocess only — write text to stdout (or -o file) and exit. */
-    if (preprocess_only) {
-        FILE *out = stdout;
-        bool  close_out = false;
-        if (out_path && strcmp(out_path, "-") != 0) {
-            out = fopen(out_path, "wb");
-            if (!out) {
-                fprintf(stderr, "sharpc: cannot open '%s' for writing\n", out_path);
-                cpp_result_free(&pp);
-                cpp_ctx_free(cpp_ctx);
-                return 1;
-            }
-            close_out = true;
-        }
-        if (pp.text && pp.text_len)
-            fwrite(pp.text, 1, pp.text_len, out);
-        if (close_out) fclose(out);
-        cpp_result_free(&pp);
-        cpp_ctx_free(cpp_ctx);
-        return 0;
-    }
-
-    if (getenv("SHARPC_DUMP_PP")) {
-        FILE* pf = fopen("preprocessed.out", "w");
-        if (pf) {
-            fputs(pp.text, pf);
-            fclose(pf);
-            fprintf(stderr, "[debug] preprocessed output written to preprocessed.out\n");
-        }
-    }
-
-    char* orig_src = read_file(in_path);
-    diag_set_source(in_path, orig_src ? orig_src : pp.text);
-
-    /* Remove GCC/clang line markers (# line "file" or # line) that
-     * interfere with parsing. Replace them with empty lines to preserve
-     * line numbers for diagnostics. */
-    char* src = pp.text;
-    {
-        char* p = src;
-        while ((p = strstr(p, "\n# ")) != NULL) {
-            char* line_start = p + 1;  /* skip the '\n' */
-            char* newline = strchr(line_start, '\n');
-            if (newline) {
-                /* Blank out the line marker, keep the newline */
-                size_t len = (size_t)(newline - line_start);
-                memset(line_start, ' ', len);
-                p = newline;
-            } else {
-                /* Last line, no trailing newline */
-                size_t len = strlen(line_start);
-                memset(line_start, ' ', len);
-                break;
-            }
-        }
-    }
-
-    Arena* arena = NULL;
-    Lexer lx;
-    lex_init(&lx, src, in_path);
-    Node* prog = parse_program(&lx, &arena);
-
-    SymTable* st = sema_build(prog, &arena);
-
-    if (g_error_count) {
-        fprintf(stderr, "sharpc: %d warning(s) during semantic analysis\n",
-                g_error_count);
-        /* Don't abort — let C compiler handle semantic issues */
-    }
-
-    lower_program(prog, st, &arena);
-    fprintf(stderr, "sharpc: lowering complete\n");
-
-    HirProg* hir = hir_build(prog, st, &arena);
-    fprintf(stderr, "sharpc: HIR build complete\n");
-    hir_mark_reachable(hir);
-    hir_check_returns(hir);
-
-    if (dump_hir) hir_dump(hir, stderr);
-
-    hir_free(hir);
-    fprintf(stderr, "sharpc: HIR freed\n");
-
-    if (g_error_count) {
-        fprintf(stderr, "sharpc: %d warning(s) during analysis\n",
-                g_error_count);
-        /* Don't abort — continue to generate C code */
-    }
+    /* Track generated .c files for later linking */
+    const char** tmp_files = NULL;
+    int ntmp_files = 0;
+    int tmp_cap = 8;
+    tmp_files = (const char**)calloc(tmp_cap, sizeof(const char*));
 
     /* ------------------------------------------------------------------ *
-     * Code generation                                                    *
+     * Per-File compilation loop                                          *
      * ------------------------------------------------------------------ */
-    if (!out_path) out_path = "-";
+    int compile_errors = 0;
 
-    if (strcmp(out_path, "-") == 0) {
-        fprintf(stderr, "sharpc: generating C to stdout...\n");
-        cgen_c(prog, st, stdout);
-    } else {
-        fprintf(stderr, "sharpc: generating C to '%s'...\n", out_path);
-        FILE* out = fopen(out_path, "wb");
+    for (int fi = 0; fi < ninputs; fi++) {
+        const char* in_path = input_files[fi];
+        fprintf(stderr, "sharpc: compiling %s...\n", in_path);
+
+        /* Detect language mode */
+        CppLang lang = CPP_LANG_SHARP;
+        {
+            size_t plen = strlen(in_path);
+            if (plen >= 2 && strcmp(in_path + plen - 2, ".c") == 0)
+                lang = CPP_LANG_C;
+        }
+
+        /* Phase A: Preprocess */
+        CppResult pp = cpp_run(cpp_ctx, in_path, lang);
+        cpp_print_diags(&pp);
+        if (pp.error) {
+            fprintf(stderr, "sharpc: preprocessing failed for %s\n", in_path);
+            cpp_result_free(&pp);
+            compile_errors = 1;
+            continue;
+        }
+
+        /* Convert "# 123" → "#line 123" in preprocessed output */
+        {
+            char* p = pp.text;
+            while ((p = strstr(p, "# ")) != NULL) {
+                char* after_hash = p + 1;
+                if (after_hash[1] >= '0' && after_hash[1] <= '9') {
+                    size_t shift = 4;
+                    size_t tail_start = (size_t)(after_hash - pp.text);
+                    size_t tail_len = pp.text_len - tail_start;
+                    char* new_buf = realloc(pp.text, pp.text_len + shift + 1);
+                    if (!new_buf) {
+                        fprintf(stderr, "sharpc: realloc failed\n");
+                        cpp_result_free(&pp);
+                        compile_errors = 1;
+                        goto cleanup;
+                    }
+                    pp.text = new_buf;
+                    after_hash = pp.text + tail_start;
+                    p = pp.text + (p - new_buf);
+                    memmove(after_hash + 1 + shift, after_hash + 1, tail_len);
+                    after_hash[0] = 'l'; after_hash[1] = 'i';
+                    after_hash[2] = 'n'; after_hash[3] = 'e'; after_hash[4] = ' ';
+                    pp.text_len += shift;
+                    p = after_hash + 5;
+                } else {
+                    p = after_hash;
+                }
+            }
+        }
+
+        /* Phase B: lex → parse → sema → lower → codegen */
+        Arena* arena = NULL;
+        Lexer lx;
+        lex_init(&lx, pp.text, in_path);
+        Node* prog = parse_program(&lx, &arena);
+
+        if (g_error_count) {
+            fprintf(stderr, "sharpc: %d error(s) during parsing %s\n", g_error_count, in_path);
+        }
+
+        SymTable* st = sema_build(prog, &arena);
+
+        if (g_error_count) {
+            fprintf(stderr, "sharpc: %d error(s) during semantic analysis of %s\n", g_error_count, in_path);
+        }
+
+        lower_program(prog, st, &arena);
+
+        HirProg* hir = hir_build(prog, st, &arena);
+        hir_mark_reachable(hir);
+        hir_check_returns(hir);
+        if (dump_hir) hir_dump(hir, stderr);
+        hir_free(hir);
+
+        /* Phase C: Generate tmp/<basename>.c */
+        char basename_buf[512];
+        const char* base = strrchr(in_path, '/');
+        if (!base) base = strrchr(in_path, '\\');
+        base = base ? base + 1 : in_path;
+
+        /* Strip extension */
+        strncpy(basename_buf, base, sizeof(basename_buf) - 1);
+        basename_buf[sizeof(basename_buf) - 1] = '\0';
+        char* dot = strrchr(basename_buf, '.');
+        if (dot) *dot = '\0';
+
+        char tmp_path[768];
+        snprintf(tmp_path, sizeof(tmp_path), "%s/%s.c", tmp_dir, basename_buf);
+
+        FILE* out = fopen(tmp_path, "wb");
         if (!out) {
-            fprintf(stderr, "sharpc: cannot write '%s'\n", out_path);
-            free(orig_src);
-            arena_free_all(&arena);
-            return 1;
+            fprintf(stderr, "sharpc: cannot write '%s'\n", tmp_path);
+            compile_errors = 1;
+            continue;
         }
         cgen_c(prog, st, out);
-        fprintf(stderr, "sharpc: C code generation complete, closing file...\n");
         fclose(out);
-        fprintf(stderr, "sharpc: C code written to '%s'\n", out_path);
+
+        /* Track tmp file for linking */
+        if (ntmp_files >= tmp_cap) {
+            tmp_cap *= 2;
+            tmp_files = (const char**)realloc(tmp_files, tmp_cap * sizeof(const char*));
+        }
+        tmp_files[ntmp_files++] = strdup(tmp_path);
+
+        /* Free per-file resources */
+        char* orig_src = read_file(in_path);
+        diag_set_source(in_path, orig_src ? orig_src : pp.text);
+        free(orig_src);
+        arena_free_all(&arena);
+        cpp_result_free(&pp);
+
+        fprintf(stderr, "sharpc: %s → %s\n", in_path, tmp_path);
     }
 
-    if (g_error_count) {
-        fprintf(stderr, "sharpc: %d warning(s) in total\n", g_error_count);
+cleanup:
+    if (compile_errors) {
+        fprintf(stderr, "sharpc: compilation failed\n");
+    } else {
+        fprintf(stderr, "sharpc: %d file(s) compiled successfully\n", ntmp_files);
     }
 
-    free(orig_src);
-    arena_free_all(&arena);
-    cpp_result_free(&pp);
+    /* Free resources */
+    for (int i = 0; i < ntmp_files; i++) free((char*)tmp_files[i]);
+    free(tmp_files);
+    tmpl_reg_free(&templates);
     cpp_ctx_free(cpp_ctx);
-    return 0;
+    free(input_files);
+
+    return compile_errors ? 1 : 0;
 }

@@ -1247,6 +1247,34 @@ static Node* parse_unary(P* p) {
             return n;
         }
     }
+
+    /* C-style cast: (Type)expr */
+    if (t.kind == TK_LPAREN) {
+        LexerState saved = lex_save(p->lex);
+        int saved_err = g_error_count;
+        g_silent = true;
+        lex_next(p->lex); /* consume '(' */
+        Type* cast_ty = parse_type(p);
+        g_silent = false;
+        bool is_cast = (cast_ty && g_error_count == saved_err &&
+                        lex_peek(p->lex).kind == TK_RPAREN);
+        if (is_cast) {
+            lex_restore(p->lex, saved);
+            g_error_count = saved_err;
+            lex_next(p->lex); /* consume '(' */
+            Type* ty = parse_type(p);
+            expect(p, TK_RPAREN, "expected ')' after cast type");
+            Node* operand = parse_unary(p);
+            Node* n = mk(p, ND_CAST, t.line);
+            n->declared_type = ty;
+            n->rhs = operand;
+            return n;
+        } else {
+            lex_restore(p->lex, saved);
+            g_error_count = saved_err;
+        }
+    }
+
     return parse_postfix(p);
 }
 

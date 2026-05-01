@@ -306,3 +306,35 @@ bool type_is_primitive(TypeKind k) {
 bool type_is_pointerlike(Type* t) {
     return ty_is_pointer_like(t);
 }
+
+/* ===================================================================== *
+ *   TemplateRegistry — shared generic template registry
+ * ===================================================================== */
+
+void tmpl_reg_init(TemplateRegistry* reg) {
+    reg->count = 0;
+    reg->cap = 16;
+    reg->names = (const char**)calloc(reg->cap, sizeof(const char*));
+    reg->decls = (void**)calloc(reg->cap, sizeof(void*));
+    reg->kinds = (int*)calloc(reg->cap, sizeof(int));
+}
+
+void tmpl_reg_add(TemplateRegistry* reg, const char* name, void* decl, int kind) {
+    if (reg->count >= reg->cap) {
+        reg->cap *= 2;
+        reg->names = (const char**)realloc(reg->names, reg->cap * sizeof(const char*));
+        reg->decls = (void**)realloc(reg->decls, reg->cap * sizeof(void*));
+        reg->kinds = (int*)realloc(reg->kinds, reg->cap * sizeof(int));
+    }
+    reg->names[reg->count] = name;
+    reg->decls[reg->count] = decl;
+    reg->kinds[reg->count] = kind;
+    reg->count++;
+}
+
+void tmpl_reg_free(TemplateRegistry* reg) {
+    free(reg->names);
+    free(reg->decls);
+    free(reg->kinds);
+    reg->count = reg->cap = 0;
+}

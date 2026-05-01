@@ -605,6 +605,34 @@ typedef struct {
     int           nvalues;
 } SymTable;
 
+/* ===================================================================== *
+ *   Template Registry — shared generic template definitions across files
+ * ===================================================================== */
+typedef struct TemplateRegistry {
+    const char** names;     /* template names (struct or func) */
+    void**       decls;     /* corresponding AST nodes */
+    int*         kinds;     /* 0=struct, 1=func */
+    int          count;
+    int          cap;
+} TemplateRegistry;
+
+void        tmpl_reg_init(TemplateRegistry* reg);
+void        tmpl_reg_add(TemplateRegistry* reg, const char* name, void* decl, int kind);
+void        tmpl_reg_free(TemplateRegistry* reg);
+
+/* ===================================================================== *
+ *   Compilation Unit — one input file → one tmp/*.c output
+ * ===================================================================== */
+typedef struct {
+    const char*         input_path;      /* input file path */
+    const char*         output_path;     /* output tmp/<basename>.c */
+    char*               pp_text;         /* preprocessed text (owned) */
+    size_t              pp_text_len;
+    Node*               ast;             /* AST */
+    SymTable*           symtab;          /* file-level symbol table */
+    TemplateRegistry*   templates;       /* shared template registry */
+} CompilationUnit;
+
 SymTable*   sema_build       (Node* program, Arena** arena);
 SymStruct*  sema_find_struct (SymTable* st, const char* name);
 SymMethod*  sema_find_method (SymTable* st, const char* parent, const char* name);
