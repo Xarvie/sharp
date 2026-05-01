@@ -635,6 +635,5 @@ void lower_program(Node* program, SymTable* st, Arena** arena);
  *   Code generator (C backend)
  * ===================================================================== */
 void cgen_c   (Node* program, SymTable* st, FILE* out);
-void cgen_buf (Node* program, SymTable* st, StrBuf* sb);
 
 #endif /* SHARP_H */

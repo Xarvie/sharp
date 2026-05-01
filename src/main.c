@@ -186,61 +186,6 @@ static void apply_target_macros(CppCtx* cpp, const TargetTriple* target) {
     }
 }
 
-static char* read_file(const char* path);
-
-/* Compile a C source file to an executable using the system C compiler.
- * Windows: clang (MSVC-compatible)
- * Unix:    clang / gcc
- * Returns 0 on success.
- */
-static int compile_c_to_exe(const char* c_file, const char* exe_file) {
-#ifdef _WIN32
-    /* On Windows, use clang-cl with MSVC/UCRT target for maximum compatibility */
-    const char* compilers[] = {"clang-cl", "cl", NULL};
-    for (int i = 0; compilers[i]; i++) {
-        char check_cmd[256];
-        snprintf(check_cmd, sizeof(check_cmd), "where %s >nul 2>&1", compilers[i]);
-        if (system(check_cmd) != 0) continue;
-
-        char cmd[1024];
-        if (strcmp(compilers[i], "clang-cl") == 0) {
-            snprintf(cmd, sizeof(cmd),
-                "clang-cl --target=x86_64-pc-windows-msvc -O2 -o \"%s\" \"%s\"",
-                exe_file, c_file);
-        } else {
-            /* MSVC cl.exe */
-            snprintf(cmd, sizeof(cmd),
-                "cl /O2 /Fe\"%s\" \"%s\"",
-                exe_file, c_file);
-        }
-        fprintf(stderr, "sharpc: compiling with %s...\n", compilers[i]);
-        int rc = system(cmd);
-        if (rc == 0) return 0;
-        fprintf(stderr, "sharpc: %s failed, trying next compiler...\n", compilers[i]);
-    }
-    fprintf(stderr, "sharpc: no suitable C compiler found (tried clang-cl, cl)\n");
-    fprintf(stderr, "sharpc: Install clang (LLVM) or MSVC Build Tools\n");
-    return -1;
-#else
-    const char* compilers[] = {"clang", "gcc", "cc", NULL};
-    char cmd[1024];
-    for (int i = 0; compilers[i]; i++) {
-        char check_cmd[256];
-        snprintf(check_cmd, sizeof(check_cmd), "which %s > /dev/null 2>&1", compilers[i]);
-        if (system(check_cmd) != 0) continue;
-
-        snprintf(cmd, sizeof(cmd), "%s -std=c11 -O2 -Wall -o '%s' '%s'",
-                 compilers[i], exe_file, c_file);
-        fprintf(stderr, "sharpc: compiling with %s...\n", compilers[i]);
-        int rc = system(cmd);
-        if (rc == 0) return 0;
-        fprintf(stderr, "sharpc: %s failed, trying next compiler...\n", compilers[i]);
-    }
-    fprintf(stderr, "sharpc: no suitable C compiler found (tried clang, gcc, cc)\n");
-    return -1;
-#endif
-}
-
 static char* read_file(const char* path) {
     FILE* f = fopen(path, "rb");
     if (!f) { fprintf(stderr, "cannot open '%s'\n", path); return NULL; }
@@ -255,44 +200,11 @@ static char* read_file(const char* path) {
     return buf;
 }
 
-static char* default_out_path(const char* in) {
-    size_t n = strlen(in);
-    char* out = (char*)malloc(n + 3);
-    memcpy(out, in, n + 1);
-    if (n >= 3 && strcmp(in + n - 3, ".sp") == 0) {
-        out[n - 3] = '.'; out[n - 2] = 'c'; out[n - 1] = 0;
-    } else {
-        strcat(out, ".c");
-    }
-    return out;
-}
-
-static char* default_exe_path(const char* in_path) {
-    size_t n = strlen(in_path);
-    char* out = (char*)malloc(n + 5);
-    memcpy(out, in_path, n + 1);
-    if (n >= 3 && strcmp(in_path + n - 3, ".sp") == 0) {
-#ifdef _WIN32
-        out[n - 3] = '.'; out[n - 2] = 'e'; out[n - 1] = 'x'; out[n] = 'e'; out[n+1] = 0;
-#else
-        out[n - 2] = 0;
-#endif
-    } else {
-#ifdef _WIN32
-        strcat(out, ".exe");
-#else
-        strcat(out, ".out");
-#endif
-    }
-    return out;
-}
-
 int main(int argc, char** argv) {
     const char* in_path  = NULL;
     const char* out_path = NULL;
     const char* target_str = NULL;
     bool        dump_hir = false;
-    bool        no_link  = false;
     bool        preprocess_only = false;  /* -E flag */
 
     for (int i = 1; i < argc; i++) {
@@ -302,8 +214,6 @@ int main(int argc, char** argv) {
             preprocess_only = true;
         } else if (strcmp(argv[i], "-dump-hir") == 0) {
             dump_hir = true;
-        } else if (strcmp(argv[i], "-no-link") == 0) {
-            no_link = true;
         } else if (strncmp(argv[i], "--target=", 9) == 0) {
             target_str = argv[i] + 9;
         } else if (strcmp(argv[i], "--target") == 0 && i + 1 < argc) {
@@ -593,16 +503,14 @@ int main(int argc, char** argv) {
     }
 
     /* ------------------------------------------------------------------ *
-     * Code generation + compilation using system C compiler              *
+     * Code generation                                                    *
      * ------------------------------------------------------------------ */
-    bool out_alloced = false;
-    if (!out_path) { out_path = default_out_path(in_path); out_alloced = true; }
-    bool should_link = (strcmp(out_path, "-") != 0) && !no_link;
+    if (!out_path) out_path = "-";
 
     if (strcmp(out_path, "-") == 0) {
         fprintf(stderr, "sharpc: generating C to stdout...\n");
         cgen_c(prog, st, stdout);
-    } else if (!should_link) {
+    } else {
         fprintf(stderr, "sharpc: generating C to '%s'...\n", out_path);
         FILE* out = fopen(out_path, "wb");
         if (!out) {
@@ -615,86 +523,12 @@ int main(int argc, char** argv) {
         fprintf(stderr, "sharpc: C code generation complete, closing file...\n");
         fclose(out);
         fprintf(stderr, "sharpc: C code written to '%s'\n", out_path);
-    } else {
-        StrBuf cbuf = {0};
-        cgen_buf(prog, st, &cbuf);
-
-        /* Determine if output is an executable */
-        const char* exe_path = NULL;
-        bool exe_alloced = false;
-        bool is_exe_output = false;
-        if (out_path && strcmp(out_path, "-") != 0) {
-            size_t ol = strlen(out_path);
-            is_exe_output = (ol >= 4 && strcmp(out_path + ol - 4, ".exe") == 0) ||
-                            (ol >= 4 && strcmp(out_path + ol - 4, ".out") == 0);
-        }
-
-        const char* c_temp_path;
-        bool c_temp_alloced = false;
-        if (is_exe_output) {
-            /* Generate a temporary .c file for compilation */
-            size_t len = strlen(out_path) + 3;
-            char* tmp = (char*)malloc(len);
-            strncpy(tmp, out_path, len - 1);
-            tmp[len - 1] = '\0';
-            /* Replace .exe/.out with .c */
-            char* ext = strrchr(tmp, '.');
-            if (ext) {
-                strcpy(ext, ".c");
-            } else {
-                strcat(tmp, ".c");
-            }
-            c_temp_path = tmp;
-            c_temp_alloced = true;
-            exe_path = out_path;
-        } else {
-            c_temp_path = out_path;
-            exe_path = default_exe_path(in_path);
-            exe_alloced = true;
-        }
-
-        FILE* c_out = fopen(c_temp_path, "wb");
-        if (!c_out) {
-            sb_free(&cbuf);
-            fprintf(stderr, "sharpc: cannot write '%s'\n", c_temp_path);
-            if (c_temp_alloced) free((char*)c_temp_path);
-            if (exe_alloced) free((char*)exe_path);
-            if (out_alloced) free((char*)out_path);
-            free(orig_src);
-            arena_free_all(&arena);
-            return 1;
-        }
-        fwrite(cbuf.data, 1, cbuf.len, c_out);
-        fclose(c_out);
-        sb_free(&cbuf);
-
-        if (compile_c_to_exe(c_temp_path, exe_path) != 0) {
-            fprintf(stderr, "sharpc: C compilation failed\n");
-            remove(c_temp_path);
-            if (c_temp_alloced) free((char*)c_temp_path);
-            if (exe_alloced) free((char*)exe_path);
-            if (out_alloced) free((char*)out_path);
-            free(orig_src);
-            arena_free_all(&arena);
-            cpp_result_free(&pp);
-            cpp_ctx_free(cpp_ctx);
-            return 1;
-        }
-
-        fprintf(stderr, "sharpc: %s built successfully\n", exe_path);
-        /* Clean up temporary C file */
-        if (c_temp_alloced) {
-            remove(c_temp_path);
-            free((char*)c_temp_path);
-        }
-        if (exe_alloced) free((char*)exe_path);
     }
 
     if (g_error_count) {
         fprintf(stderr, "sharpc: %d warning(s) in total\n", g_error_count);
     }
 
-    if (out_alloced)   free((char*)out_path);
     free(orig_src);
     arena_free_all(&arena);
     cpp_result_free(&pp);
