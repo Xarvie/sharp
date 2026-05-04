@@ -92,6 +92,11 @@ static const KwEntry kw_table[] = {
             { "__volatile__",     STOK_VOLATILE      },
             { "__signed",         STOK_SIGNED        },
             { "__signed__",       STOK_SIGNED        },
+            /* Phase R7: GCC __alignof / __alignof__ (without the standard
+             * _Alignof spelling).  zstd's ZSTD_ALIGNOF macro uses __alignof
+             * (no trailing underscores) on GCC. */
+            { "__alignof",        STOK__ALIGNOF      },
+            { "__alignof__",      STOK__ALIGNOF      },
             /* GCC extension: __attribute__ and the older alias __attribute.
              * Always followed by `((…))` payload, swallowed by parse.c. */
             { "__attribute__",    STOK_ATTRIBUTE     },

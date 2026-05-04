@@ -2875,13 +2875,42 @@ static AstNode *parse_primary(PS *ps) {
         AstNode *n = ast_node_new(AST_SIZEOF, t.loc);
         ps_expect(ps, STOK_LPAREN, "sizeof '('");
         if (is_type_start(ps)) {
-            n->u.sizeof_.operand = parse_type(ps);
+            AstNode *ty = parse_type(ps);
+            /* Phase R7: `sizeof(T[expr])` — VLA/array-type operand.
+             * After parsing the base type, consume any `[size]` suffixes so
+             * `sizeof(char[(c)?1:-1])` parses as `sizeof(char[-1])`.
+             * `parse_array_suffix` handles nested `[N1][N2]` too. */
+            if (ps_at(ps, STOK_LBRACKET))
+                ty = parse_array_suffix(ps, ty);
+            n->u.sizeof_.operand = ty;
             n->u.sizeof_.is_type = true;
         } else {
             n->u.sizeof_.operand = parse_expr(ps);
             n->u.sizeof_.is_type = false;
         }
         ps_expect(ps, STOK_RPAREN, "sizeof ')'");
+        return n;
+    }
+
+    /* Phase R7: `_Alignof(T)` / `__alignof(T)` / `__alignof__(T)`.
+     * Returns the alignment requirement of T as a size_t constant.
+     * We parse the type operand and emit `_Alignof(T)` in cg (standard C11
+     * form accepted by all downstream compilers). */
+    case STOK__ALIGNOF: {
+        AstNode *n = ast_node_new(AST_SIZEOF, t.loc);  /* reuse sizeof node */
+        ps_expect(ps, STOK_LPAREN, "_Alignof '('");
+        if (is_type_start(ps)) {
+            AstNode *ty = parse_type(ps);
+            if (ps_at(ps, STOK_LBRACKET))
+                ty = parse_array_suffix(ps, ty);
+            n->u.sizeof_.operand = ty;
+            n->u.sizeof_.is_type = true;
+        } else {
+            n->u.sizeof_.operand = parse_expr(ps);
+            n->u.sizeof_.is_type = false;
+        }
+        n->u.sizeof_.is_alignof = true;  /* signal cg to emit _Alignof */
+        ps_expect(ps, STOK_RPAREN, "_Alignof ')'");
         return n;
     }
 
@@ -3172,6 +3201,42 @@ static AstNode *parse_stmt(PS *ps) {
         }
         /* attributes followed by something else are part of a decl;
          * fall through to the declaration path below. */
+    }
+
+    /* Phase R7: `__asm__("..." : outputs : inputs : clobbers);` as a
+     * standalone statement (GCC extended inline assembly).  Used in zstd
+     * and other codebases for CPUID detection, memory barriers, etc.
+     * We accept and discard the statement — the transpiled C passes through
+     * cc, which handles real asm; our generated output omits the asm.
+     * The balanced-paren sweeper in eat_attribute_specifiers handles the
+     * extended asm syntax because colons inside the parens are not counted
+     * (only `(` / `)` are tracked for nesting depth). */
+    if (t.kind == STOK_ASM) {
+        eat_attribute_specifiers(ps, NULL);  /* consumes __asm__(...) */
+        ps_match(ps, STOK_SEMI);             /* optional trailing ';' */
+        return NULL;
+    }
+
+    /* Phase R7: `_Static_assert(cond, "msg");` as a statement.  C11
+     * compile-time assertion — no runtime effect.  The generated C omits
+     * it (discarding only the compile-time check, not any runtime semantics).
+     * We eat the balanced-paren payload and the trailing `;`. */
+    if (t.kind == STOK__STATIC_ASSERT) {
+        ps_advance(ps);
+        if (ps_match(ps, STOK_LPAREN)) {
+            int depth = 0;
+            while (!ps_at(ps, STOK_EOF)) {
+                SharpTokKind k = ps_peek(ps).kind;
+                if (k == STOK_LPAREN)       { depth++; ps_advance(ps); }
+                else if (k == STOK_RPAREN) {
+                    ps_advance(ps);
+                    if (depth == 0) break;
+                    depth--;
+                } else { ps_advance(ps); }
+            }
+        }
+        ps_match(ps, STOK_SEMI);
+        return NULL;
     }
 
     /* block */

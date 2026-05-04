@@ -327,7 +327,32 @@ These are the principles the maintainer asked for explicitly:
 
 ## 8. PAUSED AT (most recent first)
 
-### 2026-05-04 — Phase R6 complete; __attribute__ passthrough + 3 pre-existing bug fixes
+### 2026-05-05 — Phase R7 complete; zstd 0.23.0 (52K lines) + 8 fixes
+
+**State**: clean.
+
+* `make test` (probes): **69 / 69**
+* `make asan`: clean
+* `make strict`: clean
+* `c_superset_probe.sh`: **73 / 74** (p74/p75/p76 new; only p21 deferred)
+* zstd 0.23.0 smoke test: **✅ PASS** (new target)
+
+**Eight fixes (full details in PHASE_R7_SUMMARY.md):**
+1. `__alignof` / `__alignof__` keywords → lex.c keyword table
+2. `_Alignof(T)` in parse_primary → new STOK__ALIGNOF case; `is_alignof` flag in cg
+3. `sizeof(T[expr])` → parse_primary array suffix after type; cg array-type operand
+4. `__asm__(...)` as statement → parse_stmt STOK_ASM case (eat+discard)
+5. `_Static_assert(...)` as statement → parse_stmt STOK__STATIC_ASSERT case
+6. Function-pointer call return type → sema_call strips TY_PTR; sema_binop suppresses ty_error cascade
+7. `MAX(a,b)` ternary in array sizes → cg_const_expr + eval_array_size AST_TERNARY case; **critical for zstd struct sizes** (DCtx was 29816 instead of 95968 bytes)
+8. `sizeof(ctable[0])` → cg_const_expr sizeof(expr) delegates to cg_expr
+
+**Suggested next phase: R8.**
+- Eighth real-world target: **tinycc** (C compiler in C, ~30K lines)
+- Or: `__attribute__((vector_size(N)))` as a type (enables zstd without `-DZSTD_NO_INTRINSICS`)
+- Or: enum-without-explicit-value in `eval_array_size`
+
+
 
 **State**: clean.  R6 delivered GCC attribute passthrough and fixed three
 pre-existing bugs that R6's expanded test coverage exposed.

@@ -343,7 +343,12 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
     if (op == STOK_EQEQ || op == STOK_BANGEQ ||
         op == STOK_LT   || op == STOK_GT      ||
         op == STOK_LTEQ || op == STOK_GTEQ) {
-        if (!ty_is_scalar(lt) || !ty_is_scalar(rt))
+        /* Phase R7: suppress cascade errors — when either operand has an
+         * error type (e.g. result of calling a function-pointer variable
+         * whose return type could not be resolved by sema), the comparison
+         * is still valid C; let cc verify the actual types. */
+        if (!ty_is_error(lt) && !ty_is_error(rt) &&
+            (!ty_is_scalar(lt) || !ty_is_scalar(rt)))
             sema_err(ss, expr->loc, "comparison of non-scalar types");
         return ty_int(ts);
     }
@@ -447,6 +452,15 @@ static Type *sema_call(SS *ss, AstNode *expr) {
 
     /* If callee is a FUNC type, return its return type. */
     if (callee_t && callee_t->kind == TY_FUNC) return callee_t->u.func.ret;
+    /* Phase R7: calling through a function pointer: TY_PTR(TY_FUNC(ret,...)).
+     * Strip one layer of TY_PTR (and optional TY_CONST) to reach TY_FUNC. */
+    {
+        Type *inner = callee_t;
+        if (inner && inner->kind == TY_CONST)  inner = inner->u.const_.base;
+        if (inner && inner->kind == TY_PTR)    inner = inner->u.ptr.base;
+        if (inner && inner->kind == TY_CONST)  inner = inner->u.const_.base;
+        if (inner && inner->kind == TY_FUNC)   return inner->u.func.ret;
+    }
     /* For identifiers resolved to a SYM_FUNC decl, we can look up the ret type. */
     if (expr->u.call.callee->kind == AST_IDENT) {
         Symbol *sym = scope_lookup(ss->scope,

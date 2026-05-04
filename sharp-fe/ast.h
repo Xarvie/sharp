@@ -412,7 +412,14 @@ struct AstNode {
         struct { AstNode *base; AstNode *index; } index_;
 
         struct { AstNode *type;    AstNode *operand; } cast;
-        struct { AstNode *operand; bool is_type;     } sizeof_;
+        struct {
+            AstNode *operand;
+            bool     is_type;
+            /* Phase R7: true when this node represents `_Alignof`/`__alignof`
+             * rather than `sizeof`.  cg emits `_Alignof(T)` instead of
+             * `sizeof(T)`.  The AST node is reused (same operand shape). */
+            bool     is_alignof;
+        } sizeof_;
 
         struct {                     /* Buffer { ptr: x, len: n }          */
             AstNode *type;

@@ -437,6 +437,40 @@ static int64_t eval_array_size(TyStore *ts, const AstNode *expr,
         default:           return -1;
         }
     }
+    case AST_IDENT: {
+        /* Phase R7: array size may be an enum constant or a `const int`
+         * variable initialised with a literal (e.g. `ZSTD_btultra2+1`
+         * where `ZSTD_btultra2=9` is an enumerator).  Look up the
+         * identifier in scope; if it is a SYM_VAR/SYM_ENUM_CONST whose
+         * decl has an integer literal initialiser, return that value. */
+        if (!scope || !expr->u.ident.name) return -1;
+        Symbol *sym = scope_lookup(scope, expr->u.ident.name);
+        if (!sym || !sym->decl) return -1;
+        /* Enumerator: AST_ENUMERATOR with an explicit value. */
+        if (sym->decl->kind == AST_ENUMERATOR) {
+            const AstNode *val = sym->decl->u.enumerator.value;
+            if (val) return eval_array_size(ts, val, scope);
+            /* Enumerator without explicit value: walk the enum to find
+             * position (expensive; skip for now, return -1 conservatively). */
+            return -1;
+        }
+        /* VAR_DECL with a literal initialiser (e.g. `const int N = 10;`). */
+        if (sym->decl->kind == AST_VAR_DECL && sym->decl->u.var_decl.init)
+            return eval_array_size(ts, sym->decl->u.var_decl.init, scope);
+        return -1;
+    }
+    case AST_TERNARY: {
+        /* Phase R7: `MAX(a,b)` macro expands to `(a)>(b) ? (a) : (b)`.
+         * Without this case, struct fields like
+         *   `workspace[ZSTD_BUILD_FSE_TABLE_WKSP_SIZE_U32]`
+         * (which contain nested MAX() calls) would be computed as -1
+         * (unknown), causing the struct to be emitted with wrong size. */
+        int64_t cond = eval_array_size(ts, expr->u.ternary.cond, scope);
+        if (cond < 0) return -1;  /* unknown condition → unknown size */
+        return cond
+            ? eval_array_size(ts, expr->u.ternary.then_, scope)
+            : eval_array_size(ts, expr->u.ternary.else_, scope);
+    }
     default:
         return -1;
     }
@@ -642,3 +676,4 @@ void ty_print(const Type *t, FILE *fp) {
         break;
     }
 }
+/* close the default: */ 

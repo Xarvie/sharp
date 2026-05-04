@@ -569,14 +569,21 @@ static void cg_const_expr(CgCtx *ctx, const AstNode *e) {
         break;
     }
     case AST_SIZEOF:
-        cg_puts(ctx, "sizeof(");
+        /* Phase R7: sizeof(type) and sizeof(expr) in constant contexts.
+         * When the operand is a type, emit via ty_from_ast.
+         * When the operand is an expression, emit the expression via
+         * cg_expr (not cg_const_expr) so that array subscripts, function
+         * calls, and other non-const forms are emitted correctly.
+         * cc evaluates sizeof(expr) as a compile-time constant. */
+        cg_puts(ctx, e->u.sizeof_.is_alignof ? "_Alignof(" : "sizeof(");
         if (e->u.sizeof_.is_type && e->u.sizeof_.operand) {
             Type *t = ty_from_ast(ctx->ts, e->u.sizeof_.operand,
                                   cg_type_scope(ctx), NULL);
             if (t && !ty_is_error(t)) cg_type(ctx, t);
             else cg_puts(ctx, "int");
         } else {
-            cg_const_expr(ctx, e->u.sizeof_.operand);
+            /* Expression operand: delegate to cg_expr for full coverage. */
+            cg_expr(ctx, e->u.sizeof_.operand);
         }
         cg_puts(ctx, ")");
         break;
@@ -597,6 +604,20 @@ static void cg_const_expr(CgCtx *ctx, const AstNode *e) {
                 cg_puts(ctx, uops[op]);
         }
         cg_const_expr(ctx, e->u.unary.operand);
+        break;
+    case AST_TERNARY:
+        /* Phase R7: ternary `cond ? then : else` in array-size expressions.
+         * `MAX(a,b)` expands to `((a)>(b) ? (a) : (b))` — without this case,
+         * `cg_const_expr` would fall to `default:` and emit `0`, causing
+         * struct fields like `workspace[ZSTD_BUILD_FSE_TABLE_WKSP_SIZE_U32]`
+         * to be emitted with the wrong size. */
+        cg_puts(ctx, "(");
+        cg_const_expr(ctx, e->u.ternary.cond);
+        cg_puts(ctx, " ? ");
+        cg_const_expr(ctx, e->u.ternary.then_);
+        cg_puts(ctx, " : ");
+        cg_const_expr(ctx, e->u.ternary.else_);
+        cg_puts(ctx, ")");
         break;
     default:
         cg_puts(ctx, "0");
@@ -1003,7 +1024,9 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
     }
 
     case AST_SIZEOF:
-        cg_puts(ctx, "sizeof(");
+        /* Phase R7: `_Alignof`/`__alignof` nodes share the sizeof AST node
+         * but emit `_Alignof(T)` instead of `sizeof(T)`. */
+        cg_puts(ctx, expr->u.sizeof_.is_alignof ? "_Alignof(" : "sizeof(");
         if (expr->u.sizeof_.is_type) {
             /* Prefer the sema-annotated type; fall back to ty_from_ast
              * for types (like struct typedefs) whose sizeof operand node
@@ -1016,20 +1039,46 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
              * that cg_type_scope() returns (e.g. `typedef struct {...} t_a`
              * defined inside a function body).  In that case emit the type
              * name verbatim from the AST — the local C scope will resolve
-             * it correctly when the generated file is compiled. */
-            Type *t = sema_type_of(expr->u.sizeof_.operand);
-            if (!t || ty_is_error(t))
-                t = ty_from_ast(ctx->ts, expr->u.sizeof_.operand,
-                                cg_type_scope(ctx), NULL);
-            if (t && !ty_is_error(t)) {
-                cg_type(ctx, t);
-            } else if (expr->u.sizeof_.operand &&
-                       expr->u.sizeof_.operand->kind == AST_TYPE_NAME &&
-                       expr->u.sizeof_.operand->u.type_name.name) {
-                /* Local type name: emit verbatim for cc to resolve. */
-                cg_puts(ctx, expr->u.sizeof_.operand->u.type_name.name);
+             * it correctly when the generated file is compiled.
+             *
+             * Phase R7: array-type operands (from `sizeof(char[N])`) go
+             * through cg_decl-style emission: `char[N]` must be written as
+             * `char[N]` not as `char *` or `char`.  Use the AST directly
+             * when the operand is an array type node. */
+            AstNode *op = expr->u.sizeof_.operand;
+            if (op && op->kind == AST_TYPE_ARRAY) {
+                /* Emit array type verbatim from AST: base[size] */
+                /* Find innermost base type */
+                const AstNode *cursor = op;
+                while (cursor && cursor->kind == AST_TYPE_ARRAY)
+                    cursor = cursor->u.type_array.base;
+                if (cursor) {
+                    Type *bt = ty_from_ast(ctx->ts, (AstNode*)cursor,
+                                          cg_type_scope(ctx), NULL);
+                    cg_type(ctx, bt ? bt : ty_int(ctx->ts));
+                }
+                /* Emit array suffixes */
+                cursor = op;
+                while (cursor && cursor->kind == AST_TYPE_ARRAY) {
+                    cg_puts(ctx, "[");
+                    if (cursor->u.type_array.size)
+                        cg_const_expr(ctx, cursor->u.type_array.size);
+                    cg_puts(ctx, "]");
+                    cursor = cursor->u.type_array.base;
+                }
             } else {
-                cg_puts(ctx, "int");
+                Type *t = sema_type_of(op);
+                if (!t || ty_is_error(t))
+                    t = ty_from_ast(ctx->ts, op, cg_type_scope(ctx), NULL);
+                if (t && !ty_is_error(t)) {
+                    cg_type(ctx, t);
+                } else if (op && op->kind == AST_TYPE_NAME &&
+                           op->u.type_name.name) {
+                    /* Local type name: emit verbatim for cc to resolve. */
+                    cg_puts(ctx, op->u.type_name.name);
+                } else {
+                    cg_puts(ctx, "int");
+                }
             }
         } else {
             cg_expr(ctx, expr->u.sizeof_.operand);
