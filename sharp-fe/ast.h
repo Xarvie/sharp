@@ -174,6 +174,11 @@ typedef enum {
     AST_DESIGNATED_INIT,
     AST_COMPOUND_LIT,
     AST_AT_INTRINSIC,    /* @has_operator(T,+) or @static_assert(c,"msg")  */
+    /* Phase R4: GCC statement-expression extension.  `({ stmts; expr; })`
+     * evaluates a block of statements as an expression; the value is the
+     * last expression-statement's value (or void if none).  Used heavily
+     * in glibc's assert() and type-safe MAX/MIN macros. */
+    AST_STMT_EXPR,       /* ({ block })  — value = last expr-stmt          */
 
     AST_COUNT
 } AstKind;
@@ -427,6 +432,15 @@ struct AstNode {
             char  *name;    /* "has_operator" or "static_assert" (no @)   */
             AstVec args;
         } at_intrinsic;
+
+        /* ── AST_STMT_EXPR (R4) ──────────────────────────────────────── */
+        /* GCC statement-expression: ({ stmts; expr; }).  `block` is a
+         * regular AST_BLOCK.  The value/type of the whole expression is
+         * the last expression-statement's value, or void if the block is
+         * empty or ends with a non-expression statement. */
+        struct {
+            AstNode *block;          /* AST_BLOCK containing the stmts     */
+        } stmt_expr;
 
     } u;
 };

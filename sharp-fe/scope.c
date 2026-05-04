@@ -172,6 +172,21 @@ Symbol *scope_define(Scope *s, SymKind kind, const char *name,
                 (!old_has_init && !new_has_init && !old_is_extern && !new_is_extern)) {
                 return existing;
             }
+            /* Phase R3: ISO C99 §6.9.2 tentative definition followed by
+             * a real definition with initialiser.  `static T x;` /
+             * `T x;` is a tentative def; the later `T x = init;` is
+             * the canonical real def, and the two refer to one
+             * variable.  Promote the new (initialised) decl over the
+             * tentative one regardless of static/extern; sqlite3.c
+             * uses this idiom for trace flags and config globals. */
+            if (!old_has_init && new_has_init) {
+                existing->decl = decl;
+                return existing;
+            }
+            if (old_has_init && !new_has_init) {
+                /* Real def already seen; later tentative is a no-op. */
+                return existing;
+            }
             /* Otherwise (two real definitions with init) → fall through. */
         }
         /* S5: `typedef struct Tag Tag;` followed by `struct Tag { ... };`
@@ -351,6 +366,13 @@ static void build_struct(Scope *file_scope, AstNode *sd, FeDiagArr *diags) {
     /* Pass 2: register fields. */
     for (size_t i = 0; i < sd->u.struct_def.fields.len; i++) {
         AstNode *fd = sd->u.struct_def.fields.data[i];
+        /* Phase R3: anonymous bit-fields (parse path emits empty
+         * name for `int :N;` per ISO C99 §6.7.2.1¶12) are not
+         * accessible by name.  Skip registration to avoid the
+         * empty-name collision when multiple `:N` padding fields
+         * appear in the same struct (sqlite3.c's vmprintf state). */
+        if (!fd->u.field_decl.name || !fd->u.field_decl.name[0])
+            continue;
         scope_define(ss, SYM_FIELD, fd->u.field_decl.name, fd, diags);
     }
 

@@ -196,10 +196,38 @@ static void cg_type(CgCtx *ctx, Type *t) {
         }
         break;
     }
-    case TY_PTR:
+    case TY_PTR: {
+        /* Phase R3: pointer-to-function — `ret (*)(params)` form.
+         * cg_decl already has this for named declarators (line 299+);
+         * cg_type's plain-TY_PTR arm would emit `func *` which isn't
+         * a syntactically valid C type expression.  Detect 1+ PTR
+         * layers ending in TY_FUNC and emit the abstract form
+         * matching what parse_type now accepts.  sqlite3.c casts
+         * through `(int (*)(int, uid_t, gid_t)) ptr` to invoke
+         * variadic syscall pointers. */
+        int nstars = 0;
+        const Type *c = t;
+        while (c && c->kind == TY_PTR) { nstars++; c = c->u.ptr.base; }
+        if (c && c->kind == TY_FUNC) {
+            cg_type(ctx, c->u.func.ret);
+            cg_puts(ctx, " (");
+            for (int i = 0; i < nstars; i++) cg_puts(ctx, "*");
+            cg_puts(ctx, ")(");
+            if (c->u.func.nparams == 0) {
+                cg_puts(ctx, "void");
+            } else {
+                for (size_t i = 0; i < c->u.func.nparams; i++) {
+                    if (i) cg_puts(ctx, ", ");
+                    cg_type(ctx, c->u.func.params[i]);
+                }
+            }
+            cg_puts(ctx, ")");
+            break;
+        }
         cg_type(ctx, t->u.ptr.base);
         cg_puts(ctx, " *");
         break;
+    }
     case TY_ARRAY:
         /* Fallback: in expression contexts (sizeof, cast, function param),
          * arrays decay to pointers.  cg_decl() handles the variable-decl
@@ -276,6 +304,61 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
         while (cursor && cursor->kind == TY_ARRAY) {
             cursor = cursor->u.array.base;
         }
+        /* Phase R3: array of function-pointer needs the nested
+         * declarator form
+         *
+         *     ret (* name[N])(args)
+         *
+         * Plain `cg_type` would emit `ret (*)(args)` and the caller
+         * would tack `name[N]` after — C rejects that.  Detect when
+         * the innermost element peels through PTR layers down to
+         * TY_FUNC and switch to the nested shape.  Lua hits this
+         * with `static const lua_CFunction searchers[] = {...};`.
+         *
+         * We additionally peel a single layer of TY_CONST/TY_VOLATILE
+         * around the pointer so that `const cb_fn arr[]` produces
+         * `ret (* const name[])(args)` (the `const` decorates the
+         * pointer itself; the canonical place is between `*` and
+         * the name). */
+        bool elem_const = false;
+        const Type *elem = cursor;
+        if (elem && elem->kind == TY_CONST) {
+            elem_const = true;
+            elem = elem->u.const_.base;
+        }
+        int elem_nstars = 0;
+        const Type *peel = elem;
+        while (peel && peel->kind == TY_PTR) { elem_nstars++; peel = peel->u.ptr.base; }
+        if (peel && peel->kind == TY_FUNC) {
+            cg_type(ctx, peel->u.func.ret);
+            cg_puts(ctx, " (");
+            for (int i = 0; i < elem_nstars; i++) cg_puts(ctx, "*");
+            if (elem_const) cg_puts(ctx, " const");
+            if (name && *name) {
+                if (elem_const) cg_puts(ctx, " ");
+                cg_puts(ctx, name);
+            }
+            /* Array suffixes go INSIDE the parens, between name and
+             * the closing `)`. */
+            const Type *suff = t;
+            while (suff && suff->kind == TY_ARRAY) {
+                long sz = suff->u.array.size;
+                if (sz < 0) cg_puts(ctx, "[]");
+                else        cg_printf(ctx, "[%ld]", sz);
+                suff = suff->u.array.base;
+            }
+            cg_puts(ctx, ")(");
+            if (peel->u.func.nparams == 0) {
+                cg_puts(ctx, "void");
+            } else {
+                for (size_t i = 0; i < peel->u.func.nparams; i++) {
+                    if (i) cg_puts(ctx, ", ");
+                    cg_type(ctx, peel->u.func.params[i]);
+                }
+            }
+            cg_puts(ctx, ")");
+            return;
+        }
         cg_type(ctx, (Type *)cursor);
         if (name && *name) cg_printf(ctx, " %s", name);
         else cg_puts(ctx, " ");
@@ -295,7 +378,41 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
      * because plain `cg_type` emission would lose the parameter list (TY_FUNC
      * has no compact prefix form).  We handle the common "1+ pointers to
      * function" pattern by counting leading PTR layers down to a TY_FUNC.
-     * Returns with the entire declaration emitted; the caller appends `;`. */
+     * Returns with the entire declaration emitted; the caller appends `;`.
+     *
+     * Phase R5: also handle TY_CONST(TY_PTR(TY_FUNC(...))) — a const
+     * function pointer, e.g. `compressFunc_t const compress`.  ISO C
+     * requires the const to sit between the `*` and the name:
+     *     int (* const compress)(void *, ...)
+     * not:
+     *     int (*)(void *, ...) const compress   ← rejected by cc */
+    if (t && t->kind == TY_CONST) {
+        const Type *inner = t->u.const_.base;
+        if (inner) {
+            int nstars = 0;
+            const Type *c = inner;
+            while (c && c->kind == TY_PTR) { nstars++; c = c->u.ptr.base; }
+            if (nstars > 0 && c && c->kind == TY_FUNC) {
+                /* const function-pointer: ret (* const name)(params) */
+                cg_type(ctx, c->u.func.ret);
+                cg_puts(ctx, " (");
+                for (int i = 0; i < nstars; i++) cg_puts(ctx, "*");
+                cg_puts(ctx, " const");
+                if (name && *name) cg_printf(ctx, " %s", name);
+                cg_puts(ctx, ")(");
+                if (c->u.func.nparams == 0) {
+                    cg_puts(ctx, "void");
+                } else {
+                    for (size_t i = 0; i < c->u.func.nparams; i++) {
+                        if (i) cg_puts(ctx, ", ");
+                        cg_type(ctx, c->u.func.params[i]);
+                    }
+                }
+                cg_puts(ctx, ")");
+                return;
+            }
+        }
+    }
     if (t && t->kind == TY_PTR) {
         int nstars = 0;
         const Type *c = t;
@@ -863,13 +980,29 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
             /* Prefer the sema-annotated type; fall back to ty_from_ast
              * for types (like struct typedefs) whose sizeof operand node
              * was not annotated by sema — without this, sizeof(LG) where
-             * LG is a struct typedef would emit sizeof(int). */
+             * LG is a struct typedef would emit sizeof(int).
+             *
+             * Phase R5: if both sema and ty_from_ast fail (returns
+             * ty_error), the type name is probably a LOCAL typedef that is
+             * only visible in the function-body scope, not the file scope
+             * that cg_type_scope() returns (e.g. `typedef struct {...} t_a`
+             * defined inside a function body).  In that case emit the type
+             * name verbatim from the AST — the local C scope will resolve
+             * it correctly when the generated file is compiled. */
             Type *t = sema_type_of(expr->u.sizeof_.operand);
             if (!t || ty_is_error(t))
                 t = ty_from_ast(ctx->ts, expr->u.sizeof_.operand,
                                 cg_type_scope(ctx), NULL);
-            if (t && !ty_is_error(t)) cg_type(ctx, t);
-            else cg_puts(ctx, "int");
+            if (t && !ty_is_error(t)) {
+                cg_type(ctx, t);
+            } else if (expr->u.sizeof_.operand &&
+                       expr->u.sizeof_.operand->kind == AST_TYPE_NAME &&
+                       expr->u.sizeof_.operand->u.type_name.name) {
+                /* Local type name: emit verbatim for cc to resolve. */
+                cg_puts(ctx, expr->u.sizeof_.operand->u.type_name.name);
+            } else {
+                cg_puts(ctx, "int");
+            }
         } else {
             cg_expr(ctx, expr->u.sizeof_.operand);
         }
@@ -943,6 +1076,34 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
         cg_printf(ctx, "/* @%s */ 1", expr->u.at_intrinsic.name);
         break;
 
+    case AST_STMT_EXPR:
+        /* Phase R4: GCC statement-expression `({ stmts; expr; })`.
+         * We emit the GNU extension verbatim: `({` then the block's
+         * statements (using cg_block's indented emission), then `})`.
+         * GCC and clang both accept this syntax; the C compiler validates
+         * the semantics.  The surrounding parentheses are required by the
+         * GNU extension grammar. */
+        cg_puts(ctx, "({");
+        if (expr->u.stmt_expr.block) {
+            /* cg_block emits the statements indented, without outer braces.
+             * We wrap manually so the result is `({ stmt; stmt; expr; })`. */
+            const AstNode *block = expr->u.stmt_expr.block;
+            const AstNode *saved_defers = NULL;
+            (void)saved_defers;
+            for (size_t i = 0; i < block->u.block.stmts.len; i++) {
+                cg_puts(ctx, " ");
+                /* Emit each stmt without a surrounding block; the `({`
+                 * and `})` are the delimiters.  Pass NULL defers because
+                 * defer semantics across stmt-expr boundaries are not
+                 * supported (cc enforces the semantic). */
+                cg_stmt(ctx, block->u.block.stmts.data[i], NULL, 0);
+                /* strip the trailing newline that cg_stmt appends so the
+                 * whole expr fits on one logical "line" in the output */
+            }
+        }
+        cg_puts(ctx, " })");
+        break;
+
     default:
         cg_puts(ctx, "/*?expr*/");
         break;
@@ -974,9 +1135,50 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
         cg_struct(ctx, stmt);
         break;
 
+    case AST_TYPEDEF_DECL: {
+        /* Phase R5: local typedef inside a function body, e.g.
+         *   typedef struct { char c; LZ4_stream_t t; } t_a;
+         * The struct/union body was already emitted by the preceding
+         * AST_STRUCT_DEF statement (from the parse_block R5 ordering fix).
+         * cg_struct emits `typedef struct X X; struct X { ... };` so the
+         * struct tag name is usable as a plain identifier.  We just need to
+         * emit the alias: `typedef TargetName Alias;`.
+         *
+         * Note: ty_from_ast uses the file scope and CANNOT find local types.
+         * We therefore emit the target name directly from the AST node,
+         * which is safe because the preceding struct body emission put the
+         * tag into the local C scope. */
+        const char *alias = stmt->u.typedef_decl.alias;
+        const AstNode *target = stmt->u.typedef_decl.target;
+        if (!alias || !target) break;
+        cg_indent(ctx);
+        if (target->kind == AST_TYPE_NAME && target->u.type_name.name) {
+            cg_printf(ctx, "typedef %s %s;\n", target->u.type_name.name, alias);
+        } else {
+            /* Non-trivial target (pointer, array, etc.): try ty_from_ast. */
+            Type *t = ty_from_ast(ctx->ts, target, cg_type_scope(ctx), NULL);
+            cg_puts(ctx, "typedef ");
+            cg_decl(ctx, t ? t : ty_int(ctx->ts), alias);
+            cg_puts(ctx, ";\n");
+        }
+        break;
+    }
+
     case AST_DECL_STMT: {
         AstNode *vd = stmt->u.decl_stmt.decl;
-        if (!vd || vd->kind != AST_VAR_DECL) break;
+        if (!vd) break;
+        /* Phase R5: block-scope typedef (`typedef struct {...} t_a;`) is
+         * wrapped as AST_DECL_STMT { decl: AST_TYPEDEF_DECL } by the
+         * parser's stmt_wrap path.  Previously the `!= AST_VAR_DECL`
+         * guard dropped it silently.  Delegate to the AST_TYPEDEF_DECL
+         * case above, which emits `typedef TargetName Alias;` from the
+         * AST node directly (ty_from_ast uses file scope and can't find
+         * locally-defined struct/union types). */
+        if (vd->kind == AST_TYPEDEF_DECL) {
+            cg_stmt(ctx, vd, defers, ndefers);
+            break;
+        }
+        if (vd->kind != AST_VAR_DECL) break;
         cg_indent(ctx);
         switch (vd->u.var_decl.storage) {
         case SC_STATIC:   cg_puts(ctx, "static ");   break;
@@ -1359,8 +1561,37 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
     AstNode *ret_node = fn->u.func_def.ret_type;
     Type *ret_t = ret_node ? ty_from_ast(ctx->ts, ret_node, cg_type_scope(ctx), NULL)
                            : ty_void(ctx->ts);
-    cg_type(ctx, ret_t);
-    cg_puts(ctx, " ");
+    /* Phase R3: a function whose return type is itself a pointer to a
+     * function must be emitted as a *nested* declarator
+     *
+     *     inner_ret (* name(outer_args))(inner_args)
+     *
+     * (ISO C 6.7.6.3 — the declarator "inhabits" the place where the
+     * pointed-to function would be).  Lua's lua.h declares
+     *
+     *     int (*lua_atpanic(lua_State *L, int (*panicf)(lua_State *)))
+     *                      (lua_State *);
+     *
+     * and several siblings.  Detection: peel TY_PTR layers; if we land
+     * on TY_FUNC, switch to the nested emission shape.  Otherwise the
+     * normal `ret_t  name(args)` form applies. */
+    int  ret_nstars  = 0;
+    Type *ret_inner  = NULL;
+    {
+        Type *peel = ret_t;
+        while (peel && peel->kind == TY_PTR) { ret_nstars++; peel = peel->u.ptr.base; }
+        if (peel && peel->kind == TY_FUNC) ret_inner = peel;
+    }
+    if (ret_inner) {
+        /* outer-ret + `(* …` opener; the matching `)( inner-args )`
+         * closer is emitted after the outer parameter list below. */
+        cg_type(ctx, ret_inner->u.func.ret);
+        cg_puts(ctx, " (");
+        for (int i = 0; i < ret_nstars; i++) cg_puts(ctx, "*");
+    } else {
+        cg_type(ctx, ret_t);
+        cg_puts(ctx, " ");
+    }
 
     /* Function name */
     if (sname) {
@@ -1418,6 +1649,22 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
     }
     if (first) cg_puts(ctx, "void");
     cg_puts(ctx, ")");
+
+    /* Phase R3: close the nested declarator for "function returning
+     * function pointer".  Form: `outer_ret (* name(outer_args))
+     *                                       (inner_args)`. */
+    if (ret_inner) {
+        cg_puts(ctx, ")(");
+        if (ret_inner->u.func.nparams == 0) {
+            cg_puts(ctx, "void");
+        } else {
+            for (size_t i = 0; i < ret_inner->u.func.nparams; i++) {
+                if (i) cg_puts(ctx, ", ");
+                cg_type(ctx, ret_inner->u.func.params[i]);
+            }
+        }
+        cg_puts(ctx, ")");
+    }
 
     if (!fn->u.func_def.body) {
         cg_puts(ctx, ";"); cg_nl(ctx);
@@ -2301,6 +2548,40 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
         } else if (d->kind == AST_TYPEDEF_DECL) {
             const AstNode *target = d->u.typedef_decl.target;
             const char    *alias  = d->u.typedef_decl.alias;
+            /* Phase R5: skip re-emitting typedefs whose alias names are
+             * already defined by the generated preamble headers
+             * (<stddef.h>, <stdbool.h>).  These come from system headers
+             * that were expanded in the preprocessed input; re-emitting
+             * them causes "conflicting types" errors because the anonymous
+             * struct body in the preprocessed source gets a different
+             * internal name than the one in the preamble's stddef.h.
+             *
+             * The canonical example: lz4.h includes <stddef.h> which
+             * defines `max_align_t` as an anonymous struct.  After cpp
+             * preprocessing, that anonymous struct appears in the token
+             * stream and cg assigns it a name (__anon_struct_N).  The
+             * generated file's preamble then includes <stddef.h> again,
+             * which defines `max_align_t` with a different anonymous
+             * struct — causing the conflict.
+             *
+             * This set covers names guaranteed to be defined by
+             * <stddef.h> on any GCC/clang target; it does NOT need to
+             * cover names that use the same underlying type on all
+             * platforms (e.g. `size_t` = `unsigned long` everywhere)
+             * because those don't produce struct-vs-struct conflicts. */
+            static const char * const PREAMBLE_TYPEDEF_BLOCKLIST[] = {
+                "max_align_t",   /* stddef.h: struct with alignment members */
+                NULL
+            };
+            if (alias) {
+                bool skip = false;
+                for (int bi = 0; PREAMBLE_TYPEDEF_BLOCKLIST[bi]; bi++) {
+                    if (strcmp(alias, PREAMBLE_TYPEDEF_BLOCKLIST[bi]) == 0) {
+                        skip = true; break;
+                    }
+                }
+                if (skip) continue;
+            }
             /* Self-referential `typedef struct Tag Tag;` (or the union
              * variant) — emit it verbatim with the original `struct`
              * or `union` keyword.  Without that keyword, `typedef Tag

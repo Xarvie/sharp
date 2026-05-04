@@ -236,7 +236,8 @@ sharp-fe/                         # 单根目录，与 sharp-cpp/ 平级
 | **S5** | Lua 5.4.7 端到端集成 + GCC labels-as-values + float 字面量精度 + import.c leak 修复 | ✅ 完成 | 三道门 190/190 + Lua testsuite `final OK !!!` + C-superset 51/52 | `PHASE_S5_SUMMARY.md` + `build_lua_with_sharpfe.sh` |
 | **Phase R1** | 第二个真实世界 C 项目（cJSON 1.7.18）—— Sharp 关键字模式分流、GCC 浮点值宏、TY_ARRAY 衰减、`T * const` 发射 | ✅ 完成 | 三道门 193/193 + cJSON 输出与 cc-only 基线**逐字节相同** + C-superset 54/55 | `PHASE_R1_SUMMARY.md` + `build_cjson_with_sharpfe.sh` |
 | **Phase R2** | 第三 + 第四个真实世界 C 项目（picol、stb_image）—— `_Thread_local`、K&R 函数类型 typedef、block-scope 匿名 enum 三连环、do-while 单语句体 | ✅ 完成 | 三道门 197/197 + picol/stb_image 双双字节对齐 + Lua/cJSON 0 回归 + C-superset 58/59 | `PHASE_R2_SUMMARY.md` + `build_picol_with_sharpfe.sh` + `build_stb_image_with_sharpfe.sh` |
-| **Phase R3** | 第五个真实世界 C 项目（候选：sqlite-amalgamation / mcpp / zlib），或转向 dogfooding（D1） | ⏳ 待开始 | 全部 .c 通过完整管线 + 输出对照 / 或者 sharp-fe 模块用 Sharp 重写 | `build_X_with_sharpfe.sh` 或 `dogfood_smoke.sh` |
+| **Phase R3** | 第五个真实目标（zlib 1.3.1 端到端）+ sqlite-amalgamation surface validation —— is_type_start 多种 IDENT 后跟模式、postfix const、抽象函数指针 cast、anonymous bit-field、tentative def、函数返回 fn-ptr 与 fn-ptr 数组的嵌套 declarator | ✅ 完成 | 三道门 203/203 + zlib 11/11 字节对齐 + Lua/cJSON/picol/stb_image 0 回归 + C-superset 66/67 | `PHASE_R3_SUMMARY.md` + `build_zlib_with_sharpfe.sh` |
+| **Phase R4** | 三选一：(a) GCC builtins 专项 (`__builtin_va_arg` + `__atomic_*` + statement-expression) 解锁 sqlite；或 (b) 第六个真实目标 (tinycc / lz4 / mcpp / nuklear)；或 (c) D1 dogfooding 用 Sharp 重写 sharp-fe 模块 | ⏳ 待开始 | (a) sqlite 端到端字节对齐；(b) 新目标字节对齐；(c) sharp-fe 模块 round-trip | `PHASE_R4_SUMMARY.md` |
 | **Phase R3** | 错误信息黄金测试：50+ 故意写错的 .sp/.c，diag 输出与黄金答案逐字节对比 | ⏳ 待开始 | 50+ diag case | `test_diag_corpus.c` |
 | **Phase R4** | 跨编译器兼容：生成 C 喂给 gcc + clang + tcc 都零警告 | ⏳ 待开始 | 上述测试 × 3 cc | `cc_compat_smoke.sh` |
 | **Phase R5** | 名字改编可逆性 + 调试器友好性：gdb/lldb 能 demangle 出 `Vec<int>::push` | ⏳ 待开始 | 10 个调试场景 | `debug_smoke.sh` |

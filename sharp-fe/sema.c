@@ -524,9 +524,26 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
              * external — its type collapses to int (the C compiler
              * will resolve the real signature when compiling the
              * generated C output).  Lua's luaconf.h uses
-             * `__builtin_expect` in luai_likely / luai_unlikely. */
-            if (strncmp(name, "__builtin_", 10) == 0) {
+             * `__builtin_expect` in luai_likely / luai_unlikely.
+             * Phase R4: also accept GCC atomic builtins (__atomic_load_n,
+             * __atomic_store_n, __atomic_compare_exchange_n, etc.) and
+             * legacy sync builtins (__sync_fetch_and_add, etc.).  They are
+             * never declared explicitly; cc resolves the real semantics. */
+            if (strncmp(name, "__builtin_", 10) == 0 ||
+                strncmp(name, "__atomic_",   9) == 0 ||
+                strncmp(name, "__sync_",     7) == 0) {
                 t = ty_int(ts);
+                break;
+            }
+            /* Phase R5: GCC magic string variables — __PRETTY_FUNCTION__
+             * (function name + signature, GCC extension) and __FUNCTION__
+             * (alias for __func__, MSVC/GCC).  Both evaluate to a
+             * NUL-terminated string literal with type `const char *`.
+             * They are predefined per-function identifiers, not macros,
+             * so cpp does not expand them; sema must accept them. */
+            if (strcmp(name, "__PRETTY_FUNCTION__") == 0 ||
+                strcmp(name, "__FUNCTION__") == 0) {
+                t = ty_ptr(ts, ty_const(ts, ty_char(ts)));
                 break;
             }
             sema_err(ss, expr->loc, "undefined name '%s'", name);
@@ -723,6 +740,65 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
         } else {
             sema_err(ss, expr->loc, "unknown @intrinsic '%s'", iname);
             t = ty_error(ts);
+        }
+        break;
+    }
+
+    case AST_STMT_EXPR: {
+        /* Phase R4: GCC statement-expression ({ stmts; expr; }).
+         *
+         * The block inside the stmt_expr was not visited by scope_build
+         * (scope_build only walks statement-level trees, not expressions).
+         * We therefore create a fresh SCOPE_BLOCK here, register any
+         * DECL_STMT declarations into it, then walk the block with sema
+         * using that scope.
+         *
+         * This is the "lazy scope creation" pattern: scope_build is the
+         * normal path, but for expression-level blocks we build the scope
+         * on demand inside sema.  The created scope is owned by the block
+         * node (stored in type_ref, freed by scope_free_chain when the
+         * parent scope is freed).
+         *
+         * Type of the whole expression = type of the last
+         * expression-statement, or void if the block is empty / ends
+         * with a non-expression statement. */
+        AstNode *block = expr->u.stmt_expr.block;
+        t = ty_void(ts);
+        if (!block) break;
+
+        /* Create and attach a block-level scope if not already set. */
+        Scope *blk_scope = block->type_ref
+                         ? (Scope *)block->type_ref
+                         : scope_new(SCOPE_BLOCK, ss->scope, block);
+        if (!block->type_ref) {
+            block->type_ref = blk_scope;
+            /* Register every DECL_STMT variable declaration into the new
+             * scope so that later sema_expr calls can find them. */
+            for (size_t i = 0; i < block->u.block.stmts.len; i++) {
+                AstNode *s = block->u.block.stmts.data[i];
+                if (!s || s->kind != AST_DECL_STMT) continue;
+                AstNode *vd = s->u.decl_stmt.decl;
+                if (!vd || vd->kind != AST_VAR_DECL) continue;
+                if (vd->u.var_decl.name)
+                    scope_define(blk_scope, SYM_VAR,
+                                 vd->u.var_decl.name, vd,
+                                 ss->ctx->diags);
+            }
+        }
+
+        SS inner = *ss;
+        inner.scope = blk_scope;
+        size_t n_stmts = block->u.block.stmts.len;
+        for (size_t i = 0; i < n_stmts; i++) {
+            AstNode *s = block->u.block.stmts.data[i];
+            if (!s) continue;
+            if (i + 1 == n_stmts && s->kind == AST_EXPR_STMT) {
+                /* Last statement is an expression-statement: its type is
+                 * the value of the whole statement-expression. */
+                t = sema_expr(&inner, s->u.expr_stmt.expr);
+            } else {
+                sema_stmt(&inner, s);
+            }
         }
         break;
     }

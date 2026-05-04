@@ -266,6 +266,27 @@ static bool is_type_start(PS *ps) {
             SharpTok t = ps_peek(ps);
             return td_has_n(&ps->typedefs, t.text, t.len);
         }
+        /* Phase R3: IDENT '(' — only a type-start when the IDENT is a
+         * typedef-name and the parenthesis opens a parenthesised
+         * declarator (e.g. `sqlite3_syscall_ptr (*x)(args);` — typedef
+         * as the return type of a function-pointer field).  Without
+         * the typedef-set probe we'd consume calls like `f(x)` as
+         * declarations.  sqlite3.c hits this dozens of times. */
+        if (k2 == STOK_LPAREN) {
+            SharpTok t = ps_peek(ps);
+            return td_has_n(&ps->typedefs, t.text, t.len);
+        }
+        /* Phase R3: IDENT followed by a type-qualifier (const, volatile,
+         * restrict) — this is the postfix-qualifier form `Mt const *p`,
+         * equivalent to `const Mt *p` per ISO C99 §6.7.3.  Same gate
+         * as IDENT '(' / IDENT ')': only a type-start when IDENT is a
+         * known typedef-name.  sqlite3.c has many `T const *` fields
+         * and casts (e.g. `sqlite3_io_methods const *pMethod`). */
+        if (k2 == STOK_CONST || k2 == STOK_VOLATILE ||
+            k2 == STOK_RESTRICT) {
+            SharpTok t = ps_peek(ps);
+            return td_has_n(&ps->typedefs, t.text, t.len);
+        }
         if (k2 == STOK_LT) {
             SharpTokKind k3 = ps_peek3(ps).kind;
             switch (k3) {
@@ -290,6 +311,9 @@ static bool is_type_start(PS *ps) {
  * ====================================================================== */
 static AstNode *parse_type(PS *ps);
 static AstNode *parse_type_unqual(PS *ps);
+/* Phase R3: needed by parse_type's abstract function-pointer
+ * declarator handling (defined later in the file). */
+static void parse_param_list_inner(PS *ps, AstVec *out);
 static AstNode *parse_struct_def(PS *ps);
 static AstNode *parse_enum_def(PS *ps);
 static AstNode *parse_expr(PS *ps);
@@ -629,6 +653,29 @@ try_generic:
     }
 
 apply_suffix:
+    /* Phase R3: postfix qualifiers on the base type — `T const`, `T
+     * volatile` are equivalent to `const T` / `volatile T` per ISO C99
+     * §6.7.3.  parse_type used to accept only the prefix form, so
+     * casts like `(unsigned char const *)p` failed (sqlite3.c uses
+     * this idiom in its UTF-8 helpers).  Eat any trailing const /
+     * volatile here, then proceed to the pointer / array suffix loop. */
+    for (;;) {
+        if (ps_at(ps, STOK_CONST)) {
+            CppLoc cl = ps_advance(ps).loc;
+            AstNode *cn = ast_node_new(AST_TYPE_CONST, cl);
+            cn->u.type_const.base = base;
+            base = cn;
+        } else if (ps_at(ps, STOK_VOLATILE)) {
+            CppLoc vl = ps_advance(ps).loc;
+            AstNode *vn = ast_node_new(AST_TYPE_VOLATILE, vl);
+            vn->u.type_volatile.base = base;
+            base = vn;
+        } else if (ps_at(ps, STOK_RESTRICT)) {
+            ps_advance(ps);  /* discard */
+        } else {
+            break;
+        }
+    }
     /* pointer suffix: T* or T**  with optional pointer-qualifiers after */
     while (ps_at(ps, STOK_STAR)) {
         ps_advance(ps);
@@ -652,6 +699,56 @@ apply_suffix:
             } else {
                 break;
             }
+        }
+    }
+    /* Phase R3: abstract function-pointer declarator in a type-name
+     * position — `RetT (*)(args)` or `RetT (* const)(args)`.  This is
+     * the cast form used to call a function-pointer field through a
+     * void-ish base, e.g. sqlite3.c's syscall-table dispatch:
+     *
+     *   ((int (*)(int, uid_t, gid_t)) aSyscall[20].pCurrent)(fd, uid, gid)
+     *
+     * After parsing the return type and any prefix `*`s, we may see
+     * `(`.  Look ahead for the `(` `*+` (qualifiers)? `)` `(` shape;
+     * if it matches, consume the inner `*`s, the closing `)`, the
+     * function parameter list, and wrap the resulting TYPE_FUNC
+     * in `nstars` TYPE_PTR layers.
+     *
+     * We detect by peeking — `(` followed by `*` is unambiguous in
+     * this grammar position (no expression context: parse_type only
+     * reaches this point when the caller already committed to a
+     * type-expression). */
+    if (ps_at(ps, STOK_LPAREN) && ps_peek2(ps).kind == STOK_STAR) {
+        CppLoc lp = ps_advance(ps).loc;  /* eat '(' */
+        int nstars = 0;
+        while (ps_at(ps, STOK_STAR)) {
+            ps_advance(ps);
+            nstars++;
+            /* Eat any pointer-side qualifiers — these decorate the
+             * pointer itself; cg layers them on the outermost wrap. */
+            while (ps_at(ps, STOK_CONST) || ps_at(ps, STOK_VOLATILE) ||
+                   ps_at(ps, STOK_RESTRICT)) {
+                ps_advance(ps);  /* discard for abstract-decl shape */
+            }
+        }
+        ps_expect(ps, STOK_RPAREN, "abstract declarator ')'");
+        /* Function suffix: `(args)` for the function the pointer
+         * points to.  Without parameters, `()` denotes a function
+         * taking unspecified args; `(void)` an explicit-empty list. */
+        if (ps_at(ps, STOK_LPAREN)) {
+            ps_advance(ps);
+            AstNode *fn = ast_node_new(AST_TYPE_FUNC, lp);
+            fn->u.type_func.ret = base;
+            parse_param_list_inner(ps, &fn->u.type_func.params);
+            ps_expect(ps, STOK_RPAREN, "function-declarator ')'");
+            base = fn;
+        }
+        /* Wrap with `nstars` pointer layers.  Common form is exactly
+         * one star (`(*)`), giving pointer-to-function. */
+        for (int i = 0; i < nstars; i++) {
+            AstNode *p = ast_node_new(AST_TYPE_PTR, lp);
+            p->u.type_ptr.base = base;
+            base = p;
         }
     }
     return base;
@@ -1657,6 +1754,16 @@ static AstNode *parse_struct_def(PS *ps) {
                     snprintf(synth, sizeof synth,
                              "__anon_field_%u", ps->anon_struct_counter++);
                     field_name = cpp_xstrdup(synth);
+                } else if (ps_at(ps, STOK_COLON)) {
+                    /* Phase R3: ISO C99 anonymous bit-field — `int :32;`
+                     * or `int :0;` for explicit alignment / padding.
+                     * Per 6.7.2.1¶12 the field has no name and the
+                     * width determines its storage occupancy.  Emit
+                     * with empty name; cg_decl writes only the type
+                     * when name is empty, and the bit_width arm adds
+                     * the `: N` suffix.  sqlite3.c uses this for
+                     * reserved struct padding. */
+                    field_name = cpp_xstrdup("");
                 } else {
                     ps_error(ps, ps_peek(ps).loc,
                         "field declaration is missing a name");
@@ -2599,6 +2706,18 @@ static AstNode *parse_primary(PS *ps) {
 
     /* -- Grouping: (expr) or (Type)expr -- */
     case STOK_LPAREN: {
+        /* Phase R4: GCC statement-expression ({ stmts; expr; }).
+         * Detected by the lead token being `{` immediately after `(`.
+         * `{` cannot start a type, so this check is unambiguous and must
+         * precede the is_type_start heuristic.  The value is the last
+         * expression-statement's value (sema determines the type). */
+        if (ps_at(ps, STOK_LBRACE)) {
+            AstNode *block = parse_block(ps);
+            ps_expect(ps, STOK_RPAREN, "closing ')' of statement-expression");
+            AstNode *n = ast_node_new(AST_STMT_EXPR, t.loc);
+            n->u.stmt_expr.block = block;
+            return parse_postfix(ps, n);
+        }
         /* heuristic: if inner is a type, this is either a cast or a
          * compound literal (S4) — a `(Type){ init-list }` expression. */
         size_t save = ps->pos;
@@ -2875,10 +2994,37 @@ static AstNode *parse_block(PS *ps) {
     AstNode *blk = ast_node_new(AST_BLOCK, t.loc);
     while (!ps_at(ps, STOK_RBRACE) && !ps_at(ps, STOK_EOF)) {
         AstNode *s = parse_stmt(ps);
+        /* Phase R5 fix: drain pending_decls in two passes so that inline
+         * anonymous type definitions (AST_STRUCT_DEF / AST_ENUM_DEF) are
+         * emitted BEFORE the variable that uses them, while additional
+         * declarators from `int x=1, y=2;` (which ARE var_decl siblings)
+         * are emitted AFTER the primary declarator `s`.
+         *
+         * Example of the ordering problem without this fix:
+         *   const union { U32 u; BYTE c[4]; } one = { 1 };
+         * would emit:
+         *   const __anon_union_19 one = {1};   ← type not yet defined!
+         *   typedef union __anon_union_19 ...;
+         *   union __anon_union_19 { ... };
+         * With the fix:
+         *   typedef union __anon_union_19 ...;
+         *   union __anon_union_19 { ... };     ← defined first ✓
+         *   const __anon_union_19 one = {1};
+         *
+         * Pass 1: struct/union/enum definitions — must precede their use */
+        size_t npd = ps->pending_decls.len;
+        for (size_t i = 0; i < npd; i++) {
+            AstNode *pd = ps->pending_decls.data[i];
+            if (pd && (pd->kind == AST_STRUCT_DEF || pd->kind == AST_ENUM_DEF))
+                astvec_push(&blk->u.block.stmts, pd);
+        }
+        /* Main statement */
         if (s) astvec_push(&blk->u.block.stmts, s);
-        /* Drain any extra declarators produced by `int x = 1, y = 2;` */
-        for (size_t i = 0; i < ps->pending_decls.len; i++) {
-            astvec_push(&blk->u.block.stmts, ps->pending_decls.data[i]);
+        /* Pass 2: additional declarators (`int x=1, y=2;` siblings) */
+        for (size_t i = 0; i < npd; i++) {
+            AstNode *pd = ps->pending_decls.data[i];
+            if (pd && pd->kind != AST_STRUCT_DEF && pd->kind != AST_ENUM_DEF)
+                astvec_push(&blk->u.block.stmts, pd);
         }
         ps->pending_decls.len = 0;
     }
@@ -2891,6 +3037,21 @@ static AstNode *parse_stmt(PS *ps) {
 
     /* bare ';' */
     if (t.kind == STOK_SEMI) { ps_advance(ps); return NULL; }
+
+    /* Phase R3: bare `__attribute__((...));` as a statement.  GCC's
+     * fallthrough marker (`__attribute__((fallthrough));` in switch
+     * case fall-through positions, sqlite uses it heavily) and other
+     * statement-attached attributes appear unbound.  Eat the attribute
+     * spec and the trailing `;`, return NULL (block loop skips). */
+    if (t.kind == STOK_ATTRIBUTE) {
+        eat_attribute_specifiers(ps);
+        if (ps_at(ps, STOK_SEMI)) {
+            ps_advance(ps);
+            return NULL;
+        }
+        /* attributes followed by something else are part of a decl;
+         * fall through to the declaration path below. */
+    }
 
     /* block */
     if (t.kind == STOK_LBRACE) return parse_block(ps);

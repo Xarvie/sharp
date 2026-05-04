@@ -244,6 +244,9 @@ void ast_node_free(AstNode *node) {
         free(node->u.at_intrinsic.name);
         astvec_deep_free(&node->u.at_intrinsic.args);
         break;
+    case AST_STMT_EXPR: /* Phase R4 */
+        ast_node_free(node->u.stmt_expr.block);
+        break;
 
     default:
         break;
@@ -387,6 +390,7 @@ const char *ast_kind_name(AstKind k) {
         "CAST", "SIZEOF", "STRUCT_LIT",
         "INIT_LIST", "DESIGNATED_INIT", "COMPOUND_LIT",
         "AT_INTRINSIC",
+        "STMT_EXPR",    /* Phase R4: GCC ({ ... }) */
     };
     if ((unsigned)k < AST_COUNT) return names[k];
     return "?";
@@ -696,6 +700,10 @@ void ast_print(const AstNode *node, int depth, FILE *fp) {
     case AST_AT_INTRINSIC:
         fprintf(fp, "(AT_INTRINSIC @%s\n", node->u.at_intrinsic.name);
         print_vec(&node->u.at_intrinsic.args, "args", depth+1, fp);
+        indent_print(depth, fp); fprintf(fp, ")\n");              break;
+    case AST_STMT_EXPR: /* Phase R4 */
+        fprintf(fp, "(STMT_EXPR\n");
+        ast_print(node->u.stmt_expr.block, depth+1, fp);
         indent_print(depth, fp); fprintf(fp, ")\n");              break;
 
     default:

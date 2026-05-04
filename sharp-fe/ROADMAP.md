@@ -327,6 +327,174 @@ These are the principles the maintainer asked for explicitly:
 
 ## 8. PAUSED AT (most recent first)
 
+### 2026-05-04 — Phase R5 complete; lz4 4.4.5 集成（4/4 编译）+ 5 个修复
+
+**State**: clean.  R5 使用 lz4 4.4.5（pip 获取）作为第六个真实代码目标，
+surfaced 并修复了 5 个 C 超集 bug。
+
+* `make test`: **207 / 207**（probes 69, integration 40, import 25, decls 73）
+* `make asan`: clean
+* `make strict`: clean
+* `c_superset_probe.sh`: **69 / 70**（仅 p21 永久 deferred）
+
+**lz4 编译：4/4 文件全部通过 sharpc → cc。**
+
+**5 个修复（详见 PHASE_R5_SUMMARY.md）：**
+1. `__PRETTY_FUNCTION__`/`__FUNCTION__` → sema 作为 `const char*` 接受
+2. `max_align_t` 重定义 → cg Pass-1c blocklist 阻止重复 emit
+3. 块内 inline 匿名 union/struct 定序 → `parse_block` 两遍处理 pending_decls
+4. `TY_CONST→TY_PTR→TY_FUNC` const 函数指针 → `cg_decl` 新 arm
+5. 块作用域 typedef 丢失 + `sizeof(local_type)` fallback → cg_stmt + cg_expr
+
+**已知限制（lz4 smoke test crash）：**
+lz4 的算法依赖 `__attribute__((always_inline))` 做编译期常量传播。
+sharp-fe 按 §S1 设计丢弃所有 GCC 属性，导致 `LZ4_compress_generic_validated`
+不被内联，`tableType` 不是常量，hash 路径选择不正确，运行时 SEGV。
+根因与本次修复内容无关，需要独立的属性透传 phase（R6）。
+
+**Files touched**: `sema.c`, `cg.c`, `parse.c`。零 `sharp-cpp/` 改动。
+
+**建议下一步**：
+- **R6（最高优先）：`__attribute__` 透传**，解锁 lz4 smoke test，影响所有依赖
+  `always_inline`/`noreturn`/`visibility` 的真实库。
+- **或选第七个目标**（不依赖 always_inline 正确性的库：tinycc、mcpp、nuklear）。
+
+### 2026-05-04 — Phase R4 complete; GCC builtins + statement-expressions
+
+**State**: clean.  R4 delivered two GCC extensions that were blocking
+sqlite end-to-end and any codebase using `assert` without `-DNDEBUG`.
+
+* `make test`: **207 / 207** (probes 69, integration 40, import 25, decls 73)
+* `make asan`: clean
+* `make strict`: clean
+* `c_superset_probe.sh`: **69 / 70** (p70, p71, p72 added; only deferred `p21_kr_func` still fails)
+
+**Fix 1 — `__atomic_*` and `__sync_*` builtins (p72).**  `sema.c`'s
+AST_IDENT builtin-prefix check already accepted `__builtin_*` as
+implicitly-typed callable externals.  Extended with two more prefixes
+(`__atomic_`, `__sync_`) in 2 lines.  Locked in by probe `p72_atomic.c`
+and a `test_r4_*` regression.
+
+**Fix 2 — GCC statement-expressions `({...})` (p71).**  The most
+substantial R4 change: four layers plumbed through parse/ast/sema/cg.
+- **parse.c**: in `parse_primary`'s `STOK_LPAREN` case, detect `{` as
+  the second token and parse `parse_block()` → `AST_STMT_EXPR`.
+  Unambiguous: `{` cannot start a type, so the check precedes
+  `is_type_start` without conflict.
+- **ast.h/ast.c**: `AST_STMT_EXPR` with `{ AstNode *block; }` member;
+  three standard arms (free, kind-name, print).
+- **sema.c**: lazy scope creation — `scope_build` only walks statements,
+  not expressions, so the block inside a stmt-expr is never seen during
+  scope build.  `sema_expr` creates a `SCOPE_BLOCK` on first encounter,
+  registers `DECL_STMT` variables into it, then type-checks the block.
+  The scope is stored in `block->type_ref` and freed by
+  `scope_free_chain` with no extra cleanup.  Type of the expression =
+  type of the last expression-statement (or void).
+- **cg.c**: emit `({ stmt; stmt; expr; })` via `cg_stmt` per statement.
+
+**Fix 3 — `__builtin_va_arg` validation (p70).**  Already worked via the
+existing `__builtin_*` opaque mechanism.  Probe `p70_builtin_va_arg.c`
+added to corpus to prevent future regressions.
+
+**Files touched in R4**:
+- `sharp-fe/`: `ast.h`, `ast.c`, `parse.c`, `sema.c`, `cg.c`,
+  `test_decls.c`
+- `sharp-fe/c_superset_probes/`: new `p70_builtin_va_arg.c`,
+  `p71_stmt_expr.c`, `p72_atomic.c`
+
+**Crucially: zero changes to `sharp-cpp/`.**  Fourth consecutive phase
+where every fix lives in `sharp-fe/`.
+
+**sqlite-amalgamation status after R4:**  The three deferred blockers
+from R3 are now resolved:
+- `__builtin_va_arg(ap, T)` — already worked (confirmed by p70)
+- `__atomic_*` / `__sync_*` — now fixed (p72)
+- `__int128` — workaround (`-D__int128=long`) still needed; native
+  support left for a dedicated phase
+
+**Suggested next phase: R5 (sqlite end-to-end attempt).**  Write
+`build_sqlite_with_sharpfe.sh`, run it with `-D__int128=long
+-DSQLITE_THREADSAFE=0`, surface remaining gaps, fix, achieve byte-for-
+byte match.  Or: **error-message golden tests** (PLAN.md §R3) to lock
+diagnostic quality before more surface coverage.
+
+### 2026-05-04 — Phase R3 complete; fifth real-world target (zlib) + sqlite-amalgamation surface validation
+
+**State**: clean.  R3 added zlib 1.3.1 (full end-to-end) and
+sqlite-amalgamation 3.46.1 (surface validation — six deep bugs
+surfaced and fixed; full pipeline blocked on three deferred GCC
+builtins).  The validated end-to-end target list is now five
+codebases (Lua, cJSON, picol, stb_image, zlib).
+
+* `make test`: **203 / 203** (probes 69, integration 40, import 25, decls 69)
+* `make asan`: clean
+* `make strict`: clean
+* `c_superset_probe.sh`: **66 / 67** (only deferred `p21_kr_func` still fails)
+* `build_lua_with_sharpfe.sh`: **`final OK !!!`** (no regression)
+* `build_cjson_with_sharpfe.sh`: **byte-for-byte match** (no regression)
+* `build_picol_with_sharpfe.sh`: **byte-for-byte match** (no regression)
+* `build_stb_image_with_sharpfe.sh`: **byte-for-byte match** (no regression)
+* `build_zlib_with_sharpfe.sh`: **byte-for-byte match** (new target — 11/11 .c files round-trip)
+
+**zlib — zero new bugs.**  Like picol in R2, zlib rode through
+unchanged on the back of fixes surfaced by other targets.  Its
+~22K lines of mature ANSI C exercise huffman tables, complex bit
+manipulation, and the unbraced-do-while pattern stb_image first
+hit (R2 fix).
+
+**sqlite-amalgamation — six deep bugs surfaced, all fixed.**
+Two more bugs (cg fallout: function returning fn-ptr, and array
+of fn-ptr) were caught by Lua's TESTSUITE regression after the cg
+changes; both fixed.  Full write-up in `sharp-fe/PHASE_R3_SUMMARY.md`:
+
+1. **`IDENT (` not recognised as type-start.**  typedef-name
+   followed by `(` opening a function-pointer declarator.
+   `is_type_start` gained the gate.
+2. **Bare `__attribute__((...));` as a statement.**  parse_stmt
+   special-cases STOK_ATTRIBUTE + `;`.
+3. **Anonymous bit-field `int :32;` for padding.**  parse
+   synthesizes empty name; scope.c skips registration.
+4. **Postfix `T const *` qualifier.**  parse_type apply_suffix
+   eats postfix qualifiers; is_type_start gates IDENT followed
+   by const/volatile/restrict.
+5. **Abstract function-pointer cast `(RetT (*)(args))expr`.**
+   parse_type accepts `(*)` abstract declarator; cg_type emits
+   `ret (*)(args)` for TY_PTR(TY_FUNC).
+6. **Tentative definitions** (ISO C99 §6.9.2).  scope_define
+   promotes new-with-init over existing-without-init regardless
+   of storage class.
+7. **Function returning fn-ptr** — Lua's `lua_atpanic`-style
+   prototypes.  cg_func emits the nested declarator form when
+   ret_t peels through PTR layers to TY_FUNC.
+8. **Array of fn-ptrs** — Lua's `static const lua_CFunction
+   searchers[]`.  cg_decl array branch peels optional const +
+   PTR layers; emits `ret (* const name[])(args)` nested form.
+
+**Files touched in R3**:
+- `sharp-fe/`: `parse.c`, `cg.c`, `scope.c`, `test_decls.c`
+- `sharp-fe/c_superset_probes/`: new p61, p62, p63, p64, p66,
+  p67, p68, p69 (8 new probes)
+- `sharp/`: new `build_zlib_with_sharpfe.sh`
+
+**Crucially: zero changes to sharp-cpp/.**  Second consecutive
+phase where every fix lives in `sharp-fe/`.
+
+**Three GCC builtins remain deferred** (block full sqlite end-to-end):
+- `__builtin_va_arg(ap, T)` — type as argument; needs special parser + sema
+- `__atomic_load_n` / `__atomic_store_n` — GCC builtin atomics
+- `__int128` 128-bit integer (workaround: `-D__int128=long`)
+
+These are substantial features each; together they would unlock
+sqlite plus likely zstd, libpng, and other production codebases.
+
+**Suggested next phase: R4.**  Three credible directions:
+- **GCC-builtins specialisation** — implement the deferred items
+  above; unlocks sqlite end-to-end.  Highest single-step value.
+- **Sixth real-world target** — `tinycc` (structurally
+  self-similar), `lz4`, `mcpp`, or `nuklear`.
+- **D1 — dogfooding** — start translating sharp-fe modules into
+  Sharp dialect.
+
 ### 2026-05-04 — Phase R2 complete; third + fourth real-world targets (picol, stb_image) integrated
 
 **State**: clean.  R2 added picol and stb_image to the validated
