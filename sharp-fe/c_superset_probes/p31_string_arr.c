@@ -1,0 +1,1 @@
+int main() { char s[] = "abc"; return s[0] - 'a'; }

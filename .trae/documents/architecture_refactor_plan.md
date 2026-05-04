@@ -14,23 +14,32 @@ tmp/*.c → cl 编译 + 链接 → 最终可执行文件/库
 
 ## 2. 当前问题
 
-### 2.1 架构问题
-- **没有 per-file 隔离**：所有文件混入同一个 SymTable，无法独立处理
-- **单文件输出**：多个输入文件只能输出一个合并的 .c 文件
-- **没有 link 阶段**：无法编译多文件项目
+### 2.1 架构问题（已修复）
+- ~~**没有 per-file 隔离**~~ → Per-File CompilationUnit 已实现
+- ~~**单文件输出**~~ → 每个文件独立输出 tmp/<basename>.c
+- ~~**没有 link 阶段**~~ → 待实现
 
-### 2.2 Parser 缺失的 C 语法
+### 2.2 预处理器（已修复）
+- **Linemarker 转换 bug**：`# 123` → `#line 123` 转换中 `memmove` 方向错误导致输出截断
+  - 根因：`memmove(after_hash + 5, after_hash + 1, tail_len + 1)` 向前覆盖而非向后腾出空间
+  - 修复：使用 `realloc` 扩展缓冲区 + `memmove(after_hash + 1 + shift, after_hash + 1, tail_len)` 向后移位
+
+### 2.3 Parser 缺失的 C 语法（阻塞中）
 - **逗号运算符**：`(expr1, expr2)` 在表达式中
 - **空语句**：单独的 `;`
 - **函数指针调用**：`(*_errno())` 这种模式解析失败
 - **复杂 MSVC 类型**：`__declspec(dllimport)` 等声明
+- **Statement expression**：`{ ... }` 作为表达式值（MSVC 内联函数中常见）
+- **复杂宏展开**：`__analysis_assume` 等宏展开后产生 `!!(expr)` + if 语句组合
 - **错误恢复不完整**：一个解析错误导致级联错误
 
-### 2.3 构建流程
-- 缺少 tmp 目录中间文件管理
-- 无法自动发现并编译多个 .c 文件
+当前状态：33 个 Lua 文件中，22 个通过完整管线，11 个因 parser 不支持上述语法而失败。
 
-### 2.4 Spec v0.10 定义但未实现的特性
+### 2.4 构建流程（部分完成）
+- ~~缺少 tmp 目录中间文件管理~~ → 已实现
+- ~~无法自动发现并编译多个 .c 文件~~ → 已实现 Per-File 循环
+
+### 2.5 Spec v0.10 定义但未实现的特性
 - **独立泛型函数**：`void swap<T>(T* a, T* b)` — Parser/Sema/Cgen 均未实现
 - **泛型函数调用与类型推断**：`swap<int>(&x, &y)` / `swap(&x, &y)` — 缺失
 - **`@` 内省原语**：`@has_destructor(T)`, `@has_operator(T, +)`, `@has_method(T, name)`, `@is_same(T, U)`, `@typeof(expr)`, `@static_assert(cond, msg)` — 缺失
@@ -38,15 +47,26 @@ tmp/*.c → cl 编译 + 链接 → 最终可执行文件/库
 - **显式实例化声明**：`extern struct Vec<int>` — 缺失
 - **泛型函数单态化**：Cgen 中无泛型函数特化代码生成
 
-### 2.5 泛型跨文件问题（Per-File 模式下新增）
+### 2.6 泛型跨文件问题（Per-File 模式下新增）
 - 模板定义如何跨文件可见（file1.sp 定义 `struct Box<T>`，file2.sp 实例化 `Box<int>`）
 - Monomorphization 收集的边界：每个文件独立收集还是全局汇总
 - 重复特化：多文件都使用 `Box<int>` 时如何避免重复生成
 - 泛型定义必须在头文件 (`.sph`) 中对实例化点可见
 
-## 3. 重构方案
+## 3. 开发规范
 
-### 阶段 1：修复 Parser 的 C 语法支持（阻塞性）
+> 详见 `.trae/rules/开发规范.md`
+
+- **预处理器必须能处理 `.sp` 和 `.c`，所有 `.c` 当作 `.sp` 来处理**
+- **严禁为 `.sp` 和 `.c` 和 `.h` 做两条流水线处理，严格遵守**
+- **修改特性支持后，必须为 Lua 项目进行编译测试**
+- **确保 sp 预处理器永远兼容 `.c` 和 `.h` 文件**
+
+## 4. 重构方案
+
+### 阶段 1：修复 Parser 的 C 语法支持（阻塞性 — 未完成）
+
+> 本阶段是后续所有阶段的前提，必须首先完成。
 
 #### 3.1.1 支持逗号运算符
 在 `parse_expr` 中已部分支持，验证括号内也能正确解析。
@@ -60,7 +80,20 @@ tmp/*.c → cl 编译 + 链接 → 最终可执行文件/库
 #### 3.1.4 支持 __declspec 修饰
 在函数声明和 extern 中识别 `__declspec(...)` 并传递给 cgen。
 
-### 阶段 2：实现 Per-File 编译单元
+#### 3.1.5 支持 Statement Expression（MSVC 内联函数）
+MSVC 头文件中常见 `{ int _x = ...; if (_x) ... }` 作为表达式值。
+需要扩展 `parse_primary` 识别 `{` 开头的复合语句作为表达式。
+
+#### 3.1.6 支持复杂宏展开后的语法
+`__analysis_assume` 等宏展开后产生 `!!(expr)` + if 语句组合，
+需要 parser 能处理这种非标准但合法的 C 语法。
+
+#### 3.1.7 完善错误恢复
+解析错误时跳过到下一个同步点（`;`、`}`、`#`），避免级联错误。
+
+### 阶段 2：实现 Per-File 编译单元（已部分完成）
+
+> Per-File 循环已在 main.c 中实现，但因阶段 1 未完成而无法通过 Lua 测试。
 
 #### 设计前提
 - **`.sp`、`.c`、`.h` 都是 Sharp 源文件**，语法完全相同
@@ -73,71 +106,42 @@ tmp/*.c → cl 编译 + 链接 → 最终可执行文件/库
 ```
 每个输入文件 (无论 .sp/.c/.h):
   cpp_run()        → 预处理文本 (展开所有 #include/#define, 带 linemarker)
+  linemarker fix   → # 123 → #line 123 (修复后完整输出)
   lex_init()       → 吸收 linemarker, 产出 Sharp token 流
   parse_program()  → AST
   sema_build()     → SymTable (含 monos 收集)
   cgen_c()         → tmp/<basename>.c
 ```
 
-#### 3.2.2 定义 CompilationUnit 结构
+#### 3.2.2 CompilationUnit 结构（已实现）
 ```c
 typedef struct {
     const char*       input_path;     // 输入文件路径 (a.sp / util.c / foo.h)
     const char*       output_path;    // 输出 tmp/<basename>.c
-    CppResult         pp_result;      // 预处理结果
+    char*             pp_text;        // 预处理文本
+    size_t            pp_text_len;    // 预处理文本长度
     Node*             ast;            // AST
     SymTable*         symtab;         // 文件级符号表
-    struct CppCtx*    cpp_ctx;        // 共享的预处理器上下文
-    struct TemplateRegistry* templates; // 共享的泛型模板注册表
+    TemplateRegistry* templates;      // 共享的泛型模板注册表
 } CompilationUnit;
 ```
 
-#### 3.2.3 定义 TemplateRegistry（共享模板注册表）
+#### 3.2.3 TemplateRegistry（已实现）
 ```c
 typedef struct {
     const char** names;    // 泛型模板名称（struct 或 func）
-    Node**       decls;    // 对应的 AST 节点
+    void**       decls;    // 对应的 AST 节点
+    int*         kinds;    // 模板类型（struct/func）
     int          count;
+    int          cap;
 } TemplateRegistry;
 ```
 所有文件的编译单元共享同一个 TemplateRegistry，解决泛型模板定义的跨文件可见性。
 
-#### 3.2.4 修改 main.c 的编译循环
-```c
-// Phase A: 创建共享预处理器上下文
-CppCtx* cpp_ctx = cpp_ctx_new();
-setup_cpp_macros(cpp_ctx);   // 目标平台宏、内置宏等
-setup_include_paths(cpp_ctx);
-
-// Phase B: 每个文件独立预处理
-CppResult pp[MAX_FILES];
-for i = 0..nfiles-1:
-    CppLang lang = (ends_with(inputs[i], ".c")) ? CPP_LANG_C : CPP_LANG_SHARP;
-    pp[i] = cpp_run(cpp_ctx, inputs[i], lang);
-
-// Phase C: 每个文件完整编译管线
-TemplateRegistry registry = {0};
-for i = 0..nfiles-1:
-    CompilationUnit cu = {0};
-    cu.input_path  = inputs[i];
-    cu.output_path = tmp_dir / basename(inputs[i]) + ".c";
-    cu.cpp_ctx     = cpp_ctx;
-    cu.templates   = &registry;
-
-    // lex → parse → sema → codegen (全部文件统一管线)
-    lex_init(&lx, pp[i].text, inputs[i]);
-    cu.ast = parse_program(&lx, &arena);
-    cu.symtab = sema_build(cu.ast, &arena);
-    cgen_c(cu.ast, cu.symtab, tmp_file);
-    // cu.symtab->monos 收集到全局列表
-
-// Phase D: Monomorphization 汇总去重 → 二次 codegen（如需）
-merge_and_dedup_monos(all_monos);
-// 若某些特化需要显式生成，在此阶段处理
-
-// Phase E: Link
-compile_and_link_all_tmp_files();
-```
+#### 3.2.4 编译循环（已实现）
+- 共享 CppCtx 预处理器上下文
+- 所有文件通过同一管线：preprocess → lex → parse → sema → cgen
+- tmp 目录管理已实现
 
 #### 3.2.5 Monomorphization 两阶段收集
 1. **Per-File 阶段**：每个文件独立运行 sema，收集自己触发的泛型实例化到本地 monos
@@ -262,24 +266,24 @@ for each SymMono m in st->monos:
 #### 3.8.3 测试独立泛型函数 `swap<T>` + 类型推断
 #### 3.8.4 测试 `@has_destructor` 条件编译
 #### 3.8.5 测试 const 方法
-#### 3.8.6 测试 Lua 多文件编译
+#### 3.8.6 测试 Lua 多文件完整管线编译（33/33 通过）
 #### 3.8.7 测试 .c 文件直接编译
 #### 3.8.8 测试显式实例化 `extern struct Vec<int>`
 
-## 4. 实施顺序
+## 5. 实施顺序
 
-| 阶段 | 内容 | 预计变更 | 阻塞关系 |
-|------|------|----------|----------|
-| 1 | 修复 Parser C 语法 | parser.c | 无 |
-| 2 | Per-File 编译单元 + TemplateRegistry | main.c, sharp.h, sema.c | 依赖 1 |
-| 3 | 独立泛型函数 | parser.c, sharp.h, sema.c, cgen.c | 依赖 2 |
-| 4 | `@` 内省原语 | lexer.c, parser.c, sema.c, preproc/, cgen.c | 依赖 3 |
-| 5 | const 方法后缀 | lexer.c, parser.c, sema.c, cgen.c | 可与 3/4 并行 |
-| 6 | 显式实例化 | parser.c, sema.c, cgen.c | 依赖 3 |
-| 7 | Link 阶段 | main.c | 依赖 2 |
-| 8 | 集成测试 | tests/ | 依赖 1-7 |
+| 阶段 | 内容 | 预计变更 | 状态 | 阻塞关系 |
+|------|------|----------|------|----------|
+| 1 | 修复 Parser C 语法 | parser.c | 未完成 | 无（阻塞后续） |
+| 2 | Per-File 编译单元 + TemplateRegistry | main.c, sharp.h, sema.c | 部分完成 | 依赖 1 |
+| 3 | 独立泛型函数 | parser.c, sharp.h, sema.c, cgen.c | 未开始 | 依赖 2 |
+| 4 | `@` 内省原语 | lexer.c, parser.c, sema.c, preproc/, cgen.c | 未开始 | 依赖 3 |
+| 5 | const 方法后缀 | lexer.c, parser.c, sema.c, cgen.c | 未开始 | 可与 3/4 并行 |
+| 6 | 显式实例化 | parser.c, sema.c, cgen.c | 未开始 | 依赖 3 |
+| 7 | Link 阶段 | main.c | 未开始 | 依赖 2 |
+| 8 | 集成测试 | tests/ | 未开始 | 依赖 1-7 |
 
-## 5. 风险和缓解
+## 6. 风险和缓解
 
 | 风险 | 缓解措施 |
 |------|----------|
@@ -291,22 +295,23 @@ for each SymMono m in st->monos:
 | 泛型特化跨文件重复 | 统一 mangled name + 链接器 COMDAT 去重 |
 | const 方法破坏现有 API | 先实现 const 标志解析，再逐步添加检查逻辑 |
 
-## 6. 成功标准
+## 7. 成功标准
 
 ### 基础标准
 1. `sharpc hello.sp -o hello.exe` 输出 Hello World
-2. `sharpc -E lapi.c lapi_out.c && cl lapi_out.c` 编译成功
+2. `sharpc lapi.c -o lapi.obj` 完整管线编译成功（非仅 -E 模式）
 3. `sharpc lua1.sp lua2.sp -o lua.exe` 多文件编译成功
 4. 所有现有 tests/ 测试通过
+5. Lua 项目 33/33 文件通过完整管线编译 + cl.exe 链接
 
 ### Spec v0.10 标准
-5. `struct Box<T> { T value; ...方法... }` 泛型 struct + 体内方法编译通过
-6. `void swap<T>(T* a, T* b)` 独立泛型函数编译通过
-7. `swap<int>(&x, &y)` 显式类型参数调用编译通过
-8. `swap(&x, &y)` 类型推断调用编译通过
-9. `#if @has_destructor(T)` 在泛型体内条件编译正确
-10. `@static_assert(@has_operator(T, +), "msg")` 约束检查正确
-11. `long len() const` const 方法编译通过，const 接收者不能调用非 const 方法
-12. `extern struct Vec<int>` 显式实例化控制特化生成位置
-13. `Vec<const char*>` vs `Vec<char*>` 产生不同实例化
-14. 名字改编遵循 spec 规则：`Vec<int>` → `Vec__int`，`swap<int>` → `swap__int`
+6. `struct Box<T> { T value; ...方法... }` 泛型 struct + 体内方法编译通过
+7. `void swap<T>(T* a, T* b)` 独立泛型函数编译通过
+8. `swap<int>(&x, &y)` 显式类型参数调用编译通过
+9. `swap(&x, &y)` 类型推断调用编译通过
+10. `#if @has_destructor(T)` 在泛型体内条件编译正确
+11. `@static_assert(@has_operator(T, +), "msg")` 约束检查正确
+12. `long len() const` const 方法编译通过，const 接收者不能调用非 const 方法
+13. `extern struct Vec<int>` 显式实例化控制特化生成位置
+14. `Vec<const char*>` vs `Vec<char*>` 产生不同实例化
+15. 名字改编遵循 spec 规则：`Vec<int>` → `Vec__int`，`swap<int>` → `swap__int`

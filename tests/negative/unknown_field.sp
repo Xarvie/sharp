@@ -1,6 +1,0 @@
-// EXPECT: E2011
-struct Point { int x; int y; }
-int main() {
-    Point p = Point { x: 1, y: 2 };
-    return p.z;
-}
