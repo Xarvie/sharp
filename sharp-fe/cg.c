@@ -627,6 +627,52 @@ static void cg_const_expr(CgCtx *ctx, const AstNode *e) {
 
 static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
     if (!fd || fd->kind != AST_FIELD_DECL) return;
+
+    /* Phase R8: anonymous struct/union field injection.
+     * Fields synthesised with name `__anon_field_N` (from parse.c's
+     * anonymous-aggregate handling) must be re-emitted as an INLINE BODY
+     * without a tag name and without a declarator name.
+     *
+     * C §6.7.2.1: anonymous union/struct requires no tag AND no declarator.
+     * Emitting `union __anon_union_23;` (tagged, no declarator) is NOT an
+     * anonymous union and cc does not inject its members.
+     * Correct form: `union { fields... };` (no tag, no declarator).
+     *
+     * Implementation: find the __anon_struct_N def in file_ast, emit its
+     * body inline using the `union { ... };` / `struct { ... };` syntax. */
+    const char *fname = fd->u.field_decl.name;
+    bool is_anon = fname && strncmp(fname, "__anon_", 7) == 0;
+
+    if (is_anon && fd->u.field_decl.type &&
+        fd->u.field_decl.type->kind == AST_TYPE_NAME &&
+        ctx->file_ast) {
+        const char *inner_name = fd->u.field_decl.type->u.type_name.name;
+        /* Find the AST_STRUCT_DEF for the anonymous aggregate. */
+        const AstNode *inner_sd = NULL;
+        for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
+            const AstNode *d = ctx->file_ast->u.file.decls.data[k];
+            if (d && d->kind == AST_STRUCT_DEF && d->u.struct_def.name &&
+                strcmp(d->u.struct_def.name, inner_name) == 0) {
+                inner_sd = d;
+                break;
+            }
+        }
+        if (inner_sd && inner_sd->u.struct_def.fields.len > 0) {
+            /* Emit inline body: `union {\n  fields...\n};` */
+            const char *kw = inner_sd->u.struct_def.is_union ? "union" : "struct";
+            cg_printf(ctx, "%s {\n", kw);
+            for (size_t j = 0; j < inner_sd->u.struct_def.fields.len; j++) {
+                const AstNode *sub = inner_sd->u.struct_def.fields.data[j];
+                cg_puts(ctx, "    ");  /* indent inside inner body */
+                cg_field_decl_from_ast(ctx, sub);
+            }
+            cg_puts(ctx, "    };\n");
+            return;  /* body emitted; skip the normal path */
+        }
+        /* If we can't find or inline the body, fall through to
+         * the normal path which emits the tag reference. */
+    }
+
     /* Resolve through the type system for the base element type;
      * the array suffix size is taken from the AST where possible. */
     Type *ft = ty_from_ast(ctx->ts, fd->u.field_decl.type,
@@ -637,10 +683,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
      * the AST to preserve the original expression. */
     bool array_with_unknown_sz = false;
     if (ft && ft->kind == TY_ARRAY && ft->u.array.size < 0) {
-        /* Walk the AST type to find the innermost non-array type and
-         * collect all array size expressions in order. */
         const AstNode *ast_ty = fd->u.field_decl.type;
-        /* Strip const/volatile wrappers. */
         while (ast_ty && (ast_ty->kind == AST_TYPE_CONST ||
                           ast_ty->kind == AST_TYPE_VOLATILE))
             ast_ty = ast_ty->u.type_const.base;
@@ -648,7 +691,6 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
             ast_ty->u.type_array.size &&
             ast_ty->u.type_array.size->kind != AST_INT_LIT) {
             array_with_unknown_sz = true;
-            /* Find base element type. */
             const AstNode *base_ast = ast_ty;
             while (base_ast && base_ast->kind == AST_TYPE_ARRAY)
                 base_ast = base_ast->u.type_array.base;
@@ -656,8 +698,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                 ? ty_from_ast(ctx->ts, base_ast, cg_type_scope(ctx), NULL)
                 : ft->u.array.base;
             cg_type(ctx, base_t ? base_t : ft);
-            cg_printf(ctx, " %s", fd->u.field_decl.name);
-            /* Emit array suffixes from AST (outermost first). */
+            cg_printf(ctx, " %s", fname);
             const AstNode *cur = ast_ty;
             while (cur && cur->kind == AST_TYPE_ARRAY) {
                 cg_puts(ctx, "[");
@@ -669,7 +710,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
         }
     }
     if (!array_with_unknown_sz) {
-        cg_decl(ctx, ft, fd->u.field_decl.name);
+        cg_decl(ctx, ft, fname);
     }
     if (fd->u.field_decl.bit_width) {
         cg_puts(ctx, " : ");
@@ -2384,6 +2425,11 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
 
     if (!file) return;
 
+    /* Phase R8: set file_ast early (before Pass 0) so that
+     * cg_field_decl_from_ast can look up anonymous struct/union definitions
+     * when inlining anonymous aggregate bodies in struct fields. */
+    ctx->file_ast = file;
+
     /* Pass 0: scan the entire file.decls for every AST_STRUCT_DEF and
      * every self-referential typedef (`typedef struct X X;`) and emit a
      * forward typedef for each.  This must be done BEFORE Pass 1 so that
@@ -2474,6 +2520,28 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                 cg_printf(ctx, "%s %s;\n", kw, snm);
             } else {
                 cg_printf(ctx, "typedef %s %s %s;\n", kw, snm, snm);
+            }
+        } else if (d->kind == AST_TYPEDEF_DECL) {
+            /* Phase R8: `typedef struct Foo Bar;` (opaque forward typedef).
+             * Emit `typedef struct Foo Foo;` here (in pass 1, BEFORE pass 1c
+             * function declarations) so that any function using `Foo*` as a
+             * parameter type can find the struct tag. */
+            const AstNode *tgt2 = d->u.typedef_decl.target;
+            const char *alias2  = d->u.typedef_decl.alias;
+            if (tgt2 && tgt2->kind == AST_TYPE_NAME &&
+                tgt2->u.type_name.name && alias2 &&
+                strcmp(tgt2->u.type_name.name, alias2) != 0) {
+                const char *tag2 = tgt2->u.type_name.name;
+                Symbol *tag_sym2 = ctx->file_scope
+                    ? scope_lookup_local(ctx->file_scope, tag2) : NULL;
+                if (tag_sym2 && tag_sym2->decl &&
+                    tag_sym2->decl->kind == AST_STRUCT_DEF &&
+                    tag_sym2->decl->u.struct_def.fields.len == 0 &&
+                    tag_sym2->decl->u.struct_def.methods.len == 0) {
+                    const char *kw2 = tag_sym2->decl->u.struct_def.is_union
+                                       ? "union" : "struct";
+                    cg_printf(ctx, "typedef %s %s %s;\n", kw2, tag2, tag2);
+                }
             }
         } else if (d->kind == AST_ENUM_DEF) {
             cg_puts(ctx, "enum");
@@ -2679,6 +2747,30 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                     }
                 }
                 if (skip) continue;
+            }
+            /* Phase R8: `typedef struct Foo Bar;` where Foo != Bar (opaque
+             * pointer pattern).  `Foo` might only exist as a scope.c
+             * synthetic forward entry (never added to file.decls), so pass 1
+             * would not emit `typedef struct Foo Foo;` for it.  Emit an
+             * explicit `struct Foo;` here so that `Foo` is a valid type name
+             * in the generated C before we write `typedef Foo Bar;`. */
+            if (target && target->kind == AST_TYPE_NAME &&
+                target->u.type_name.name && alias &&
+                strcmp(target->u.type_name.name, alias) != 0) {
+                const char *tag_nm = target->u.type_name.name;
+                /* Only emit the forward tag if it's registered as a
+                 * no-body struct in scope (opaque forward typedef). */
+                Symbol *tag_sym = ctx->file_scope
+                    ? scope_lookup_local(ctx->file_scope, tag_nm) : NULL;
+                if (tag_sym && tag_sym->decl &&
+                    tag_sym->decl->kind == AST_STRUCT_DEF &&
+                    tag_sym->decl->u.struct_def.fields.len == 0 &&
+                    tag_sym->decl->u.struct_def.methods.len == 0) {
+                    const char *kw_fwd = tag_sym->decl->u.struct_def.is_union
+                                         ? "union" : "struct";
+                    cg_printf(ctx, "typedef %s %s %s;\n",
+                              kw_fwd, tag_nm, tag_nm);
+                }
             }
             /* Self-referential `typedef struct Tag Tag;` (or the union
              * variant) — emit it verbatim with the original `struct`

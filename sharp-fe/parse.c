@@ -2873,7 +2873,18 @@ static AstNode *parse_primary(PS *ps) {
     /* -- sizeof -- */
     case STOK_SIZEOF: {
         AstNode *n = ast_node_new(AST_SIZEOF, t.loc);
-        ps_expect(ps, STOK_LPAREN, "sizeof '('");
+        /* Phase R8: `sizeof expr` (without parentheses) is valid C when
+         * the operand is an expression (ISO 6.5.3.4).  Parentheses are
+         * only required for type operands.  Brotli's platform.h uses
+         * `sizeof t` where `t` is a local variable. */
+        if (!ps_at(ps, STOK_LPAREN)) {
+            /* No '(' — must be `sizeof expr` (unary precedence, so parse
+             * at the cast/unary level to avoid swallowing too much). */
+            n->u.sizeof_.operand = parse_expr_prec(ps, 14); /* unary prec */
+            n->u.sizeof_.is_type = false;
+            return n;
+        }
+        ps_advance(ps);  /* consume '(' */
         if (is_type_start(ps)) {
             AstNode *ty = parse_type(ps);
             /* Phase R7: `sizeof(T[expr])` — VLA/array-type operand.

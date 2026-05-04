@@ -907,3 +907,22 @@ delete the old helper.
 **Files touched in this pause-state**: `parse.c` (rolled back to clean),
 `ast.h`/`ast.c` (rolled back), `sema.c` (rolled back), `cg.c` (untouched
 since prior baseline).
+
+### 2026-05-05 — Phase R8 complete; brotli 1.1.0 (23K lines, 31 files) + 4 fixes
+
+**State**: clean.
+
+* `make test` (probes): **69 / 69**
+* `make asan`: clean
+* `make strict`: clean
+* `c_superset_probe.sh`: **76 / 77** (p77/p78/p79 new; only p21 deferred)
+* brotli 1.1.0 smoke test: **✅ PASS** (31/31 files)
+
+**Four fixes (details in PHASE_R8_SUMMARY.md):**
+1. `sizeof expr` (no parens) → parse_primary early-exit when next token ≠ `(`
+2. **Anonymous union member injection** → scope.c build_struct injects inner fields; cg.c inlines body without tag or declarator name (C §6.7.2.1¶15)
+3. **Opaque forward typedef struct** `typedef struct Foo Bar;` → scope.c registers `Foo` as forward struct; cg.c pass 1 emits `typedef struct Foo Foo;` before function declarations
+4. Function-pointer callee return type → sema_call strips TY_PTR to reach TY_FUNC
+
+**Cumulative targets:** Lua 5.4.7 ✅ cJSON ✅ picol ✅ stb_image ✅ zlib ✅ lz4 ✅ zstd ✅ brotli ✅
+

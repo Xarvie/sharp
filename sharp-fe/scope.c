@@ -363,17 +363,55 @@ static void build_struct(Scope *file_scope, AstNode *sd, FeDiagArr *diags) {
         scope_define(ss, SYM_GENERIC_PARAM, gp->u.generic_param.name, gp, diags);
     }
 
-    /* Pass 2: register fields. */
+    /* Pass 2: register fields.
+     * Phase R8: anonymous union/struct member injection.
+     * When a field is named `__anon_field_N` (synthesised by parse.c for
+     * C anonymous aggregates like `union { T a; U b; };`), also inject
+     * the nested aggregate's own fields into the outer struct scope so
+     * that `outer->a` and `outer->b` work without naming the union.
+     * ISO C §6.7.2.1¶15: "Each member of an anonymous structure or
+     * union is considered to be a member of the containing structure
+     * or union."
+     *
+     * Implementation: look up the anonymous type by name in file_scope,
+     * find its struct scope, and register each sub-field into ss. */
     for (size_t i = 0; i < sd->u.struct_def.fields.len; i++) {
         AstNode *fd = sd->u.struct_def.fields.data[i];
-        /* Phase R3: anonymous bit-fields (parse path emits empty
-         * name for `int :N;` per ISO C99 §6.7.2.1¶12) are not
-         * accessible by name.  Skip registration to avoid the
-         * empty-name collision when multiple `:N` padding fields
-         * appear in the same struct (sqlite3.c's vmprintf state). */
+        /* Phase R3: skip empty-named bit-field padding. */
         if (!fd->u.field_decl.name || !fd->u.field_decl.name[0])
             continue;
         scope_define(ss, SYM_FIELD, fd->u.field_decl.name, fd, diags);
+
+        /* Anonymous aggregate injection: field name starts with __anon_ */
+        if (strncmp(fd->u.field_decl.name, "__anon_", 7) == 0 &&
+            fd->u.field_decl.type &&
+            fd->u.field_decl.type->kind == AST_TYPE_NAME) {
+            const char *inner_name = fd->u.field_decl.type->u.type_name.name;
+            Symbol *inner_sym = inner_name
+                ? scope_lookup_local(file_scope, inner_name) : NULL;
+            AstNode *inner_sd = inner_sym ? inner_sym->decl : NULL;
+            if (inner_sd && inner_sd->kind == AST_STRUCT_DEF) {
+                /* The inner struct scope may not be built yet (we process
+                 * pending_decls in file-scope order, but the anonymous
+                 * struct was emitted before the outer struct in pending_decls
+                 * so its scope should already exist). */
+                Scope *inner_ss = inner_sd->type_ref
+                                    ? (Scope *)inner_sd->type_ref : NULL;
+                if (inner_ss) {
+                    /* Inject each field of the anonymous aggregate. */
+                    for (size_t j = 0; j < inner_sd->u.struct_def.fields.len; j++) {
+                        AstNode *sub = inner_sd->u.struct_def.fields.data[j];
+                        if (!sub->u.field_decl.name || !sub->u.field_decl.name[0])
+                            continue;
+                        /* Only inject if name not already defined (avoid
+                         * overwriting an explicit field with the same name). */
+                        if (!scope_lookup_local(ss, sub->u.field_decl.name))
+                            scope_define(ss, SYM_FIELD,
+                                         sub->u.field_decl.name, sub, diags);
+                    }
+                }
+            }
+        }
     }
 
     /* Pass 3: register methods (two-pass: names first, bodies second). */
@@ -562,6 +600,48 @@ Scope *scope_build(AstNode *file, FeDiagArr *diags) {
         case AST_TYPEDEF_DECL:
             if (d->u.typedef_decl.alias)
                 scope_define(fs, SYM_TYPE, d->u.typedef_decl.alias, d, diags);
+            /* Phase R8: `typedef struct Foo Bar;` — opaque forward typedef.
+             * The struct tag `Foo` may never appear as a standalone
+             * AST_STRUCT_DEF in file.decls (there's no body).  Register `Foo`
+             * as a forward-declared SYM_TYPE so that `ty_from_ast` can resolve
+             * `Foo` in pointer contexts (`Bar *ptr;`) without "unknown type".
+             * We synthesise a no-body AST_STRUCT_DEF node and register it.
+             *
+             * Guard: skip when the target name is a C built-in primitive
+             * (int, long, char, …).  `typedef long X;` must not emit a
+             * synthetic `struct long;`. */
+            if (d->u.typedef_decl.target &&
+                d->u.typedef_decl.target->kind == AST_TYPE_NAME) {
+                const char *tag = d->u.typedef_decl.target->u.type_name.name;
+                static const char * const BUILTINS[] = {
+                    /* single-word primitives */
+                    "void","bool","_Bool","char","short","int","long","float",
+                    "double","signed","unsigned","__int128",
+                    /* two-word combinations that ty_from_name recognises */
+                    "long long","long double","signed char","unsigned char",
+                    "signed short","unsigned short","signed int","unsigned int",
+                    "signed long","unsigned long","long int","short int",
+                    "long long int","unsigned long int","signed long long",
+                    "unsigned long long","unsigned long long int",
+                    "long long unsigned int",
+                    /* GCC/clang internal primitives */
+                    "__builtin_va_list","_Float64","_Float32",
+                    NULL
+                };
+                bool is_builtin = false;
+                if (tag) {
+                    for (int bi = 0; BUILTINS[bi]; bi++)
+                        if (!strcmp(tag, BUILTINS[bi]))
+                            { is_builtin = true; break; }
+                }
+                if (tag && tag[0] && !is_builtin &&
+                    !scope_lookup_local(fs, tag)) {
+                    AstNode *fwd = ast_node_new(AST_STRUCT_DEF, d->loc);
+                    fwd->u.struct_def.name = cpp_xstrdup(tag);
+                    fwd->u.struct_def.is_union = false;
+                    scope_define(fs, SYM_TYPE, tag, fwd, diags);
+                }
+            }
             break;
         case AST_ENUM_DEF:
             /* S2: register the optional tag (if any) as SYM_TYPE so
