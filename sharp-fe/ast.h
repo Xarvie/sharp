@@ -250,6 +250,14 @@ struct AstNode {
              * `static _Thread_local const char *stbi__g_failure_reason;`
              * is the canonical real-world case. */
             bool     is_thread_local;
+            /* Phase R6: GCC __attribute__((...)) text captured verbatim
+             * from the declaration.  NULL if no attributes were present.
+             * Emitted into the generated C after the closing ')' of the
+             * parameter list (trailing-attribute position), which is
+             * unambiguous and accepted by all modern C compilers.
+             * Example: "static inline __attribute__((always_inline))" in
+             * the source stores "__attribute__((always_inline))" here. */
+            char    *gcc_attrs;
         } func_def;
 
         /* ── AST_TYPEDEF_DECL ────────────────────────────────────────── */
@@ -270,6 +278,10 @@ struct AstNode {
             StorageClass storage;
             /* Phase R2: C11 _Thread_local storage-class. */
             bool     is_thread_local;
+            /* Phase R6: GCC __attribute__((...)) text, or NULL.
+             * Emitted after the declarator (before `=` or `;`) in the
+             * generated C.  Covers aligned, unused, deprecated, etc. */
+            char    *gcc_attrs;
         } var_decl;
 
         /* ── Type nodes ──────────────────────────────────────────────── */

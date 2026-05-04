@@ -327,7 +327,54 @@ These are the principles the maintainer asked for explicitly:
 
 ## 8. PAUSED AT (most recent first)
 
-### 2026-05-04 — Phase R5 complete; lz4 4.4.5 集成（4/4 编译）+ 5 个修复
+### 2026-05-04 — Phase R6 complete; __attribute__ passthrough + 3 pre-existing bug fixes
+
+**State**: clean.  R6 delivered GCC attribute passthrough and fixed three
+pre-existing bugs that R6's expanded test coverage exposed.
+
+* `make test` (probes): **69 / 69**
+* `make asan`: clean
+* `make strict`: clean
+* `c_superset_probe.sh`: **70 / 71** (p73 new; only p21 still deferred)
+* lz4 4.4.5 smoke test: **✅ PASS** (was SEGV in R5)
+
+**Feature — `__attribute__` passthrough (parse.c / ast.h / ast.c / cg.c):**
+GCC function and variable attributes are now captured verbatim and re-emitted
+in the generated C.  Attributes on functions are emitted in leading position
+(`static inline __attribute__((always_inline)) int f(…)`) which is accepted
+by all GCC/Clang versions for both definitions and prototypes.
+
+**Bug 1 — `arith_conv` UBSan out-of-bounds (sema.c):**
+`rank[]` array size was 13 (`TY_ULONGLONG + 1`) but guard was `< TY_COUNT`
+(21).  `TY_CONST` (kind 17) passed the guard and read past the array end.
+Fix: strip `TY_CONST` before the rank lookup (correct semantics) and use a
+proper size-based bound.
+
+**Bug 2 — Integer `U` suffix dropped (cg.c, cg_expr):**
+`cg_expr`'s `AST_INT_LIT` case emitted all unsigned values as `%llu` (no
+suffix), widening `2654435761U` from `unsigned int` to `unsigned long long`.
+lz4's hash function (`uint32_t * 2654435761U`) relies on 32-bit truncating
+multiplication; widening to 64 bits produced indices up to 10^13, causing
+out-of-bounds hash table writes.  Fix: emit full suffix table (`U`, `UL`,
+`ULL`, `L`, `LL`) matching the original literal's flags.
+
+**Bug 3 — Fix was initially applied to wrong function:**
+The `U`-suffix fix was first placed in `cg_const_expr` (array-size context,
+line 522) instead of `cg_expr` (expression context, line 705).  Corrected.
+
+**Files touched**: `ast.h`, `ast.c`, `parse.c`, `sema.c`, `cg.c`,
+`c_superset_probes/p73_attribute_passthrough.c`, `build_lz4_with_sharpfe.sh`.
+Zero changes to `sharp-cpp/`.
+
+**Suggested next phase: R7.**  Two directions:
+- **Seventh real-world target** (zstd, tinycc, or mcpp) — attribute
+  passthrough now working means any target depending on `always_inline` for
+  correctness will work.
+- **Integer constant hardening** — verify `long` promotion for values in
+  `(INT_MAX, UINT_MAX]` without explicit suffix, and signed/unsigned
+  comparison cases.
+
+
 
 **State**: clean.  R5 使用 lz4 4.4.5（pip 获取）作为第六个真实代码目标，
 surfaced 并修复了 5 个 C 超集 bug。

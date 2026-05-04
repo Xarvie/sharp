@@ -116,6 +116,16 @@ static void sema_err(SS *ss, CppLoc loc, const char *fmt, ...) {
  * arithmetic types.  Priority: double > float > unsigned > signed > bool. */
 static Type *arith_conv(TyStore *ts, Type *a, Type *b) {
     if (!ty_is_arithmetic(a) || !ty_is_arithmetic(b)) return a;
+    /* Strip type qualifiers: in arithmetic context, `const T` behaves as `T`.
+     * Without stripping, a TY_CONST node would slip past the early-return
+     * guards below and cause an out-of-bounds read in rank[] (TY_CONST is
+     * beyond TY_ULONGLONG which is the last index in the array).
+     * Note: TY_VOLATILE does not exist in the type system (volatile is an
+     * AST-level qualifier stripped by ty_from_ast); only TY_CONST needs
+     * peeling here. */
+    while (a && a->kind == TY_CONST) a = a->u.const_.base;
+    while (b && b->kind == TY_CONST) b = b->u.const_.base;
+    if (!a || !b) return ts ? ty_int(ts) : a;
     /* double wins */
     if (a->kind == TY_DOUBLE || b->kind == TY_DOUBLE) return ty_double(ts);
     if (a->kind == TY_FLOAT  || b->kind == TY_FLOAT)  return ty_float(ts);
@@ -125,8 +135,10 @@ static Type *arith_conv(TyStore *ts, Type *a, Type *b) {
         [TY_LONGLONG]=5,
         [TY_UCHAR]=1,[TY_USHORT]=2,[TY_UINT]=3,[TY_ULONG]=4,[TY_ULONGLONG]=5
     };
-    int ra = (a->kind < TY_COUNT) ? rank[a->kind] : 0;
-    int rb = (b->kind < TY_COUNT) ? rank[b->kind] : 0;
+    /* Bounds-safe: only index if kind is within the rank array. */
+    int max_rank_idx = (int)(sizeof rank / sizeof rank[0]) - 1;
+    int ra = (a->kind <= (TyKind)max_rank_idx) ? rank[a->kind] : 0;
+    int rb = (b->kind <= (TyKind)max_rank_idx) ? rank[b->kind] : 0;
     if (ty_is_unsigned(a) || ty_is_unsigned(b)) {
         /* If either operand is unsigned, result is unsigned of higher rank. */
         int r = ra > rb ? ra : rb;

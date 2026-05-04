@@ -530,7 +530,18 @@ static void cg_const_expr(CgCtx *ctx, const AstNode *e) {
             cg_printf(ctx, e->u.int_lit.is_unsigned ? "%luUL" : "%ldL",
                       (unsigned long)e->u.int_lit.val);
         else if (e->u.int_lit.is_unsigned)
-            cg_printf(ctx, "%lluU", (unsigned long long)e->u.int_lit.val);
+            /* Phase R6: plain `U` suffix (no L/LL) must emit `unsigned int`,
+             * NOT `unsigned long long`.  Hash functions (e.g. lz4's
+             * `sequence * 2654435761U`) rely on 32-bit wrapping truncation:
+             * `uint32_t * uint32_t → uint32_t`.  Emitting `%lluU` widens to
+             * `uint32_t * uint64_t → uint64_t`, destroying overflow semantics
+             * and producing hash indices that overflow the table.
+             * If the value overflows uint32_t (val > UINT_MAX), fall back to
+             * ULL to avoid silent truncation. */
+            if ((uint64_t)e->u.int_lit.val <= 0xFFFFFFFFULL)
+                cg_printf(ctx, "%uU", (unsigned int)e->u.int_lit.val);
+            else
+                cg_printf(ctx, "%lluULL", (unsigned long long)e->u.int_lit.val);
         else
             cg_printf(ctx, "%lld", (long long)e->u.int_lit.val);
         break;
@@ -696,8 +707,25 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
     switch (expr->kind) {
 
     case AST_INT_LIT:
-        if (expr->u.int_lit.is_unsigned)
-            cg_printf(ctx, "%llu", (unsigned long long)expr->u.int_lit.val);
+        /* Phase R6: emit integer literals with their original type suffix so
+         * that arithmetic uses the correct width.  Critically, a plain `U`
+         * literal (e.g. `2654435761U`) must remain `unsigned int` — not be
+         * widened to `unsigned long long` — so that `uint32_t * uint32_t`
+         * multiplication truncates to 32 bits as the author intended (lz4
+         * hash functions depend on this property). */
+        if (expr->u.int_lit.is_longlong)
+            cg_printf(ctx, expr->u.int_lit.is_unsigned ? "%lluULL" : "%lldLL",
+                      (unsigned long long)expr->u.int_lit.val);
+        else if (expr->u.int_lit.is_long)
+            cg_printf(ctx, expr->u.int_lit.is_unsigned ? "%luUL" : "%ldL",
+                      (unsigned long)expr->u.int_lit.val);
+        else if (expr->u.int_lit.is_unsigned)
+            /* val fits in uint32_t → `U` suffix (unsigned int);
+             * otherwise fall back to `ULL` to avoid silent truncation. */
+            if ((uint64_t)expr->u.int_lit.val <= 0xFFFFFFFFULL)
+                cg_printf(ctx, "%uU", (unsigned int)expr->u.int_lit.val);
+            else
+                cg_printf(ctx, "%lluULL", (unsigned long long)expr->u.int_lit.val);
         else
             cg_printf(ctx, "%lld", (long long)expr->u.int_lit.val);
         break;
@@ -1233,6 +1261,12 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
         } else {
             cg_decl(ctx, t, vd->u.var_decl.name);
         }
+        /* Phase R6: GCC attributes after the declarator, before `=` or `;`.
+         * Covers `int x __attribute__((aligned(16)));` and similar forms. */
+        if (vd->u.var_decl.gcc_attrs) {
+            cg_puts(ctx, " ");
+            cg_puts(ctx, vd->u.var_decl.gcc_attrs);
+        }
         if (vd->u.var_decl.init) {
             cg_puts(ctx, " = ");
             cg_expr(ctx, vd->u.var_decl.init);
@@ -1556,6 +1590,16 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
     /* Phase R2: C11 _Thread_local on function declarations is unusual
      * but ISO permits it; emit verbatim to preserve source intent. */
     if (fn->u.func_def.is_thread_local) cg_puts(ctx, "_Thread_local ");
+    /* Phase R6: GCC attributes in leading position — after storage-class
+     * specifiers, before the return type.  This is the canonical position
+     * accepted by all versions of GCC and Clang for both declarations and
+     * definitions.  GCC 8+ warns about trailing attributes on function
+     * definitions; leading position avoids the warning entirely.
+     * Example: `static inline __attribute__((always_inline)) int f(…)`. */
+    if (fn->u.func_def.gcc_attrs) {
+        cg_puts(ctx, fn->u.func_def.gcc_attrs);
+        cg_puts(ctx, " ");
+    }
 
     /* Return type */
     AstNode *ret_node = fn->u.func_def.ret_type;
@@ -2501,6 +2545,11 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
             }
         } else {
             cg_decl(ctx, t, d->u.var_decl.name);
+        }
+        /* Phase R6: GCC attributes after the declarator, before `=` or `;`. */
+        if (d->u.var_decl.gcc_attrs) {
+            cg_puts(ctx, " ");
+            cg_puts(ctx, d->u.var_decl.gcc_attrs);
         }
         if (d->u.var_decl.init) { cg_puts(ctx, " = "); cg_expr(ctx, d->u.var_decl.init); }
         cg_puts(ctx, ";\n");

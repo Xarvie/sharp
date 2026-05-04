@@ -80,6 +80,7 @@ void ast_node_free(AstNode *node) {
         ast_node_free(node->u.func_def.ret_type);
         astvec_deep_free(&node->u.func_def.params);
         ast_node_free(node->u.func_def.body);
+        free(node->u.func_def.gcc_attrs);  /* Phase R6 */
         break;
     case AST_TYPEDEF_DECL:
         free(node->u.typedef_decl.alias);
@@ -89,6 +90,7 @@ void ast_node_free(AstNode *node) {
         ast_node_free(node->u.var_decl.type);
         free(node->u.var_decl.name);
         ast_node_free(node->u.var_decl.init);
+        free(node->u.var_decl.gcc_attrs);  /* Phase R6 */
         break;
     case AST_ENUM_DEF:
         free(node->u.enum_def.name);

@@ -363,28 +363,74 @@ static AstNode *parse_init_list(PS *ps);
  *
  *   extern int foo(int) __asm__("__xpg_foo");
  *
- * Sharp's design (per S1 PHASE_S1_SUMMARY) treats GCC attributes as
- * ignorable decoration: they affect codegen on the C compiler side,
- * never sema or transpilation.  We accept them at every grammar
- * position they may appear at and silently discard.  asm-rename is
- * similarly discarded — sharp's transpiled output goes through cc
- * which will re-derive the real linker name from the source headers.
+ * Phase R6: `__attribute__((...))` text is now optionally captured rather
+ * than silently discarded.  When `out_attrs` is non-NULL, the full text
+ * of every `__attribute__((...))` found is appended to `*out_attrs`
+ * (a heap-allocated, space-separated string; NULL on first append).
+ * The text is reconstructed by concatenating the raw `.text` fields of
+ * the consumed tokens — no reformatting, so the result is semantically
+ * identical to the original source text.
+ *
+ * `__asm__("name")` linker-rename suffixes are always silently discarded
+ * regardless of `out_attrs`; they name linker symbols that the generated
+ * C resolves from its own headers and must not be re-emitted.
  *
  * Attribute syntax: `__attribute__` `(` `(` BALANCED `)` `)`
  * Asm-name syntax:  `__asm__` `(` BALANCED `)`
  * Both are eaten in any order, repeatedly, at the call site.
  *
  * Returns true if at least one specifier was eaten. */
-static bool eat_attribute_specifiers(PS *ps) {
+
+/* Append the raw text of tokens ps->toks[from..to) to *out, allocating
+ * or growing the heap string as needed.  A space separator is inserted
+ * between successive calls. */
+static void attrs_append_tokens(char **out, const PS *ps,
+                                size_t from, size_t to) {
+    /* Calculate total token-text length for this chunk. */
+    size_t chunk_len = 0;
+    for (size_t i = from; i < to; i++) chunk_len += ps->toks[i].len;
+    if (chunk_len == 0) return;
+
+    if (!*out) {
+        /* First chunk: allocate fresh. */
+        *out = malloc(chunk_len + 1);
+        size_t off = 0;
+        for (size_t i = from; i < to; i++) {
+            memcpy(*out + off, ps->toks[i].text, ps->toks[i].len);
+            off += ps->toks[i].len;
+        }
+        (*out)[off] = '\0';
+    } else {
+        /* Subsequent chunk: append space + chunk. */
+        size_t existing = strlen(*out);
+        *out = realloc(*out, existing + 1 + chunk_len + 1);
+        (*out)[existing] = ' ';
+        size_t off = existing + 1;
+        for (size_t i = from; i < to; i++) {
+            memcpy(*out + off, ps->toks[i].text, ps->toks[i].len);
+            off += ps->toks[i].len;
+        }
+        (*out)[off] = '\0';
+    }
+}
+
+static bool eat_attribute_specifiers(PS *ps, char **out_attrs) {
     bool ate_any = false;
     for (;;) {
         if (ps_at(ps, STOK_ATTRIBUTE)) {
+            size_t start = ps->pos;   /* Phase R6: record start for capture */
             ps_advance(ps);  /* eat __attribute__ */
             /* Expect double-open-paren.  If malformed, advance through what
              * we have and return — the surrounding parser will diagnose any
              * follow-on error. */
-            if (!ps_match(ps, STOK_LPAREN)) { ate_any = true; continue; }
-            if (!ps_match(ps, STOK_LPAREN)) { ate_any = true; continue; }
+            if (!ps_match(ps, STOK_LPAREN)) {
+                if (out_attrs) attrs_append_tokens(out_attrs, ps, start, ps->pos);
+                ate_any = true; continue;
+            }
+            if (!ps_match(ps, STOK_LPAREN)) {
+                if (out_attrs) attrs_append_tokens(out_attrs, ps, start, ps->pos);
+                ate_any = true; continue;
+            }
             /* Skip tokens until balanced double-close-paren. */
             int depth = 0;
             while (!ps_at(ps, STOK_EOF)) {
@@ -404,11 +450,14 @@ static bool eat_attribute_specifiers(PS *ps) {
                     ps_advance(ps);
                 }
             }
+            if (out_attrs) attrs_append_tokens(out_attrs, ps, start, ps->pos);
             ate_any = true;
             continue;
         }
         if (ps_at(ps, STOK_ASM)) {
-            /* `__asm__(<balanced>)` — symbol-rename declarator suffix. */
+            /* `__asm__(<balanced>)` — symbol-rename declarator suffix.
+             * Always discarded: the generated C resolves linker names
+             * from its own headers and must not re-declare them. */
             ps_advance(ps);
             if (!ps_match(ps, STOK_LPAREN)) { ate_any = true; continue; }
             int depth = 0;
@@ -432,6 +481,7 @@ static bool eat_attribute_specifiers(PS *ps) {
     }
     return ate_any;
 }
+
 
 /* =========================================================================
  * Type parsing
@@ -875,6 +925,12 @@ typedef struct {
     AstNode     *base_ty;        /* raw type-specifier AST                  */
     CppLoc       loc;            /* location of the first specifier token   */
     bool         empty;          /* true iff no decl-spec tokens consumed   */
+    /* Phase R6: GCC __attribute__((...)) text accumulated from the
+     * decl-specifier sequence (leading attributes such as
+     * `__attribute__((always_inline)) static inline`).  Heap-allocated,
+     * may be NULL.  Transferred to the produced AST node; caller must
+     * NOT free it separately once transferred. */
+    char        *gcc_attrs;
 } DeclSpecs;
 
 /* Type-specifier accumulator.  Combines repeated tokens into a single
@@ -1172,11 +1228,12 @@ static DeclSpecs parse_decl_specifiers(PS *ps) {
         if (t.kind == STOK_RESTRICT) { ds.empty = false; ps_advance(ps); continue; }
 
         /* GCC `__attribute__((…))` — accepted in any decl-specifier
-         * position (before, between, or after the type spec).  Eaten
-         * silently; does not toggle ds.empty since attributes never
-         * stand alone as a declaration. */
+         * position (before, between, or after the type spec).  Phase R6:
+         * captured into ds.gcc_attrs for passthrough to the AST node;
+         * does not toggle ds.empty since attributes never stand alone
+         * as a declaration. */
         if (t.kind == STOK_ATTRIBUTE) {
-            eat_attribute_specifiers(ps);
+            eat_attribute_specifiers(ps, &ds.gcc_attrs);
             continue;
         }
 
@@ -1685,7 +1742,9 @@ static AstNode *parse_struct_def(PS *ps) {
                 snprintf(buf, sizeof buf, "operator%.*s", (int)op_tok.len, op_tok.text);
             AstNode *fn = finish_func(ps, ty_for_method, op_tok, /*is_operator=*/true);
             free(fn->u.func_def.name);
-            fn->u.func_def.name = cpp_xstrndup(buf, strlen(buf));
+            fn->u.func_def.name      = cpp_xstrndup(buf, strlen(buf));
+            fn->u.func_def.gcc_attrs = fds.gcc_attrs; /* Phase R6 */
+            fds.gcc_attrs = NULL;
             astvec_push(&sd->u.struct_def.methods, fn);
             continue;
         }
@@ -1783,10 +1842,9 @@ static AstNode *parse_struct_def(PS *ps) {
         }
 
         /* S5: GCC `__attribute__((aligned(...))) ` etc. after a field
-         * declarator.  This is the form gcc's <stddef.h> uses for
-         * max_align_t.  Eat silently — alignment is the C compiler's
-         * concern, not ours. */
-        eat_attribute_specifiers(ps);
+         * declarator.  Alignment and packing are the C compiler's
+         * concern; we accept and discard (pass NULL to capture). */
+        eat_attribute_specifiers(ps, NULL);
 
         /* S4: bit-field width — `unsigned int a : 3;`.  The width is a
          * constant expression; we accept any expr-prec-2 (skips comma)
@@ -1799,7 +1857,11 @@ static AstNode *parse_struct_def(PS *ps) {
         }
 
         if (!is_method && (ps_at(ps, STOK_SEMI) || ps_at(ps, STOK_COMMA))) {
-            /* field declaration; supports comma list `int x, y, z;` */
+            /* field declaration; supports comma list `int x, y, z;`
+             * Phase R6: fds.gcc_attrs (leading attrs) are cc's concern
+             * for field declarations (alignment, packed, etc.); discard. */
+            free(fds.gcc_attrs);
+            fds.gcc_attrs = NULL;
             if (saw_method) {
                 ps_error(ps, name_tok.loc,
                     "field '%s' declared after method — fields must come first",
@@ -1821,7 +1883,7 @@ static AstNode *parse_struct_def(PS *ps) {
                 char    *next_name = NULL;
                 CppLoc   next_loc  = ps_peek(ps).loc;
                 AstNode *next_ty   = parse_declarator(ps, base_copy, &next_name);
-                eat_attribute_specifiers(ps);
+                eat_attribute_specifiers(ps, NULL); /* field attrs: cc's concern */
                 if (!next_name) {
                     ps_error(ps, next_loc, "field declaration is missing a name");
                     next_name = cpp_xstrdup("?");
@@ -1838,6 +1900,8 @@ static AstNode *parse_struct_def(PS *ps) {
             saw_method = true;
             AstNode *fn = finish_func(ps, base_ty, name_tok, false);
             free(field_name);  /* finish_func sets its own name */
+            fn->u.func_def.gcc_attrs = fds.gcc_attrs; /* Phase R6 */
+            fds.gcc_attrs = NULL;
             astvec_push(&sd->u.struct_def.methods, fn);
         } else {
             ps_error(ps, ps_peek(ps).loc,
@@ -1845,6 +1909,8 @@ static AstNode *parse_struct_def(PS *ps) {
             ps_advance(ps);
             ast_node_free(field_ty);
             free(field_name);
+            free(fds.gcc_attrs); /* Phase R6: avoid leak on error path */
+            fds.gcc_attrs = NULL;
         }
         continue;
     }
@@ -1935,9 +2001,30 @@ static AstNode *parse_init_declarator_list(PS *ps, const DeclSpecs *ds, bool stm
         char    *vname = NULL;
         CppLoc   vloc  = ps_peek(ps).loc;
         AstNode *vty   = parse_declarator(ps, base_copy, &vname);
-        /* GCC `__attribute__((…))` after declarator (e.g.
-         * `int x __attribute__((unused)) = 0;`).  Eaten silently. */
-        eat_attribute_specifiers(ps);
+        /* Phase R6: GCC `__attribute__((…))` after declarator (e.g.
+         * `int x __attribute__((unused)) = 0;`) — captured for passthrough.
+         * For the first declarator, merge with the leading attrs from
+         * ds->gcc_attrs (e.g. from `__attribute__((aligned(8))) int x`). */
+        char *trailing_attrs = NULL;
+        eat_attribute_specifiers(ps, &trailing_attrs);
+        /* Combine: leading attrs (from decl-specifiers) first, then trailing. */
+        char *var_gcc_attrs = NULL;
+        if (is_first && ds->gcc_attrs) {
+            var_gcc_attrs = cpp_xstrdup(ds->gcc_attrs);
+        }
+        if (trailing_attrs) {
+            if (var_gcc_attrs) {
+                /* append space + trailing_attrs */
+                size_t a = strlen(var_gcc_attrs), b = strlen(trailing_attrs);
+                var_gcc_attrs = realloc(var_gcc_attrs, a + 1 + b + 1);
+                var_gcc_attrs[a] = ' ';
+                memcpy(var_gcc_attrs + a + 1, trailing_attrs, b + 1);
+            } else {
+                var_gcc_attrs = trailing_attrs;
+                trailing_attrs = NULL;
+            }
+            free(trailing_attrs);
+        }
 
         if (!vname) {
             /* No declarator name.  If the next token is `;` and the
@@ -1991,11 +2078,13 @@ static AstNode *parse_init_declarator_list(PS *ps, const DeclSpecs *ds, bool stm
         }
 
         AstNode *vd = ast_node_new(AST_VAR_DECL, vloc);
-        vd->u.var_decl.type    = vty;
-        vd->u.var_decl.name    = vname;
-        vd->u.var_decl.storage = ds->storage;
+        vd->u.var_decl.type       = vty;
+        vd->u.var_decl.name       = vname;
+        vd->u.var_decl.storage    = ds->storage;
         /* Phase R2: propagate _Thread_local to the AST node. */
         vd->u.var_decl.is_thread_local = ds->is_thread_local;
+        /* Phase R6: GCC attribute text (leading + trailing). */
+        vd->u.var_decl.gcc_attrs  = var_gcc_attrs;
 
         if (ps_match(ps, STOK_EQ)) {
             /* S4: `T x = {...};` — braced initializer.  Without the
@@ -2209,6 +2298,7 @@ static AstNode *parse_top_decl(PS *ps) {
     DeclSpecs ds = parse_decl_specifiers(ps);
     if (ds.empty || !ds.base_ty) {
         ps_error(ps, t.loc, "missing declaration specifier");
+        free(ds.gcc_attrs); /* Phase R6: avoid leak on error path */
         ps_sync(ps);
         return NULL;
     }
@@ -2222,11 +2312,13 @@ static AstNode *parse_top_decl(PS *ps) {
         char buf[64];
         snprintf(buf, sizeof buf, "operator%.*s", (int)op_tok.len, op_tok.text);
         free(fn->u.func_def.name);
-        fn->u.func_def.name = cpp_xstrndup(buf, strlen(buf));
+        fn->u.func_def.name      = cpp_xstrndup(buf, strlen(buf));
         fn->u.func_def.storage   = ds.storage;
         fn->u.func_def.is_static = (ds.storage == SC_STATIC);
         fn->u.func_def.is_inline = ds.is_inline;
         fn->u.func_def.is_thread_local = ds.is_thread_local; /* Phase R2 */
+        fn->u.func_def.gcc_attrs = ds.gcc_attrs; /* Phase R6 */
+        ds.gcc_attrs = NULL;
         return fn;
     }
 
@@ -2242,6 +2334,8 @@ static AstNode *parse_top_decl(PS *ps) {
         fn->u.func_def.is_static = (ds.storage == SC_STATIC);
         fn->u.func_def.is_inline = ds.is_inline;
         fn->u.func_def.is_thread_local = ds.is_thread_local; /* Phase R2 */
+        fn->u.func_def.gcc_attrs = ds.gcc_attrs; /* Phase R6 */
+        ds.gcc_attrs = NULL;
         return fn;
     }
 
@@ -2249,10 +2343,27 @@ static AstNode *parse_top_decl(PS *ps) {
     char    *name      = NULL;
     CppLoc   first_loc = ps_peek(ps).loc;
     AstNode *full_ty   = parse_declarator(ps, ds.base_ty, &name);
-    /* `int x __attribute__((unused));`, `void foo() __attribute__((noreturn));` —
-     * GCC attributes after the declarator (and before `;`/`{`/`,`/`=`).
-     * Eat them silently. */
-    eat_attribute_specifiers(ps);
+    /* Phase R6: `int x __attribute__((unused));` and
+     * `void foo() __attribute__((noreturn));` — capture trailing attrs
+     * so they can be forwarded to the func/var AST node.
+     * Leading attrs are already in ds.gcc_attrs from parse_decl_specifiers. */
+    char *top_trailing_attrs = NULL;
+    eat_attribute_specifiers(ps, &top_trailing_attrs);
+    /* Merge leading + trailing into a single heap string. */
+    char *top_gcc_attrs = ds.gcc_attrs;
+    ds.gcc_attrs = NULL;  /* ownership transferred */
+    if (top_trailing_attrs) {
+        if (top_gcc_attrs) {
+            size_t a = strlen(top_gcc_attrs), b = strlen(top_trailing_attrs);
+            top_gcc_attrs = realloc(top_gcc_attrs, a + 1 + b + 1);
+            top_gcc_attrs[a] = ' ';
+            memcpy(top_gcc_attrs + a + 1, top_trailing_attrs, b + 1);
+            free(top_trailing_attrs);
+        } else {
+            top_gcc_attrs = top_trailing_attrs;
+        }
+        top_trailing_attrs = NULL;
+    }
 
     /* Function definition or prototype: outermost shape is FUNC and the
      * next token is either `{` (definition), `const` (Sharp const-method
@@ -2275,6 +2386,7 @@ static AstNode *parse_top_decl(PS *ps) {
         fn->u.func_def.is_static = (ds.storage == SC_STATIC);
         fn->u.func_def.is_inline = ds.is_inline;
         fn->u.func_def.is_thread_local = ds.is_thread_local; /* Phase R2 */
+        fn->u.func_def.gcc_attrs = top_gcc_attrs; /* Phase R6 */
         if (ps_match(ps, STOK_CONST)) fn->u.func_def.is_const_method = true;
         if (ps_at(ps, STOK_LBRACE)) {
             fn->u.func_def.body = parse_block(ps);
@@ -2294,6 +2406,7 @@ static AstNode *parse_top_decl(PS *ps) {
     AstNode *first = NULL;
 
     if (ds.storage == SC_TYPEDEF) {
+        free(top_gcc_attrs); /* typedefs don't propagate gcc_attrs */
         AstNode *td = ast_node_new(AST_TYPEDEF_DECL, first_loc);
         td->u.typedef_decl.alias  = name;
         td->u.typedef_decl.target = full_ty;
@@ -2307,11 +2420,13 @@ static AstNode *parse_top_decl(PS *ps) {
         first = td;
     } else {
         AstNode *vd = ast_node_new(AST_VAR_DECL, first_loc);
-        vd->u.var_decl.type    = full_ty;
-        vd->u.var_decl.name    = name;
-        vd->u.var_decl.storage = ds.storage;
+        vd->u.var_decl.type       = full_ty;
+        vd->u.var_decl.name       = name;
+        vd->u.var_decl.storage    = ds.storage;
         /* Phase R2: propagate _Thread_local to the AST node. */
         vd->u.var_decl.is_thread_local = ds.is_thread_local;
+        /* Phase R6: GCC attribute text. */
+        vd->u.var_decl.gcc_attrs  = top_gcc_attrs;
         if (ps_match(ps, STOK_EQ)) {
             vd->u.var_decl.init = ps_at(ps, STOK_LBRACE)
                                 ? parse_init_list(ps)
@@ -2329,13 +2444,15 @@ static AstNode *parse_top_decl(PS *ps) {
         char    *next_name = NULL;
         CppLoc   next_loc  = ps_peek(ps).loc;
         AstNode *next_ty   = parse_declarator(ps, base_copy, &next_name);
-        eat_attribute_specifiers(ps);
+        char *next_trailing = NULL;
+        eat_attribute_specifiers(ps, &next_trailing); /* Phase R6: capture */
         if (!next_name) {
             ps_error(ps, next_loc, "declaration is missing a name");
             next_name = cpp_xstrdup("?");
         }
         AstNode *out = NULL;
         if (ds.storage == SC_TYPEDEF) {
+            free(next_trailing); /* typedefs don't propagate gcc_attrs */
             AstNode *td = ast_node_new(AST_TYPEDEF_DECL, next_loc);
             td->u.typedef_decl.alias  = next_name;
             td->u.typedef_decl.target = next_ty;
@@ -2343,11 +2460,14 @@ static AstNode *parse_top_decl(PS *ps) {
             out = td;
         } else {
             AstNode *vd = ast_node_new(AST_VAR_DECL, next_loc);
-            vd->u.var_decl.type    = next_ty;
-            vd->u.var_decl.name    = next_name;
-            vd->u.var_decl.storage = ds.storage;
+            vd->u.var_decl.type       = next_ty;
+            vd->u.var_decl.name       = next_name;
+            vd->u.var_decl.storage    = ds.storage;
             /* Phase R2: propagate _Thread_local. */
             vd->u.var_decl.is_thread_local = ds.is_thread_local;
+            /* Phase R6: trailing attrs only (no leading for extra decls). */
+            vd->u.var_decl.gcc_attrs  = next_trailing;
+            next_trailing = NULL;
             if (ps_match(ps, STOK_EQ)) {
                 vd->u.var_decl.init = ps_at(ps, STOK_LBRACE)
                                     ? parse_init_list(ps)
@@ -3042,9 +3162,10 @@ static AstNode *parse_stmt(PS *ps) {
      * fallthrough marker (`__attribute__((fallthrough));` in switch
      * case fall-through positions, sqlite uses it heavily) and other
      * statement-attached attributes appear unbound.  Eat the attribute
-     * spec and the trailing `;`, return NULL (block loop skips). */
+     * spec and the trailing `;`, return NULL (block loop skips).
+     * These are not attached to any decl so we pass NULL (discard). */
     if (t.kind == STOK_ATTRIBUTE) {
-        eat_attribute_specifiers(ps);
+        eat_attribute_specifiers(ps, NULL);
         if (ps_at(ps, STOK_SEMI)) {
             ps_advance(ps);
             return NULL;
