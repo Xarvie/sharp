@@ -32,38 +32,6 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
 
-# ── Sharp.toml config reader ──────────────────────────────────────────
-
-def _read_sharp_toml(cfg_path: Path) -> dict:
-    """Parse Sharp.toml and return key->value dict for the current platform."""
-    cfg: dict = {}
-    if not cfg_path.is_file():
-        return cfg
-    plat_key = None
-    if sys.platform == "win32":
-        plat_key = "windows"
-    elif sys.platform == "darwin":
-        plat_key = "macos"
-    elif sys.platform.startswith("linux"):
-        plat_key = "linux"
-    with open(cfg_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            if '=' in line:
-                key, val = line.split('=', 1)
-                key = key.strip()
-                val = val.strip().strip('"').strip("'")
-                # Prefer platform-specific key, fallback to generic key
-                if plat_key and key.endswith(f".{plat_key}"):
-                    base = key.rsplit(".", 1)[0]
-                    cfg[base] = val
-                elif "." not in key:
-                    cfg.setdefault(key, val)
-    return cfg
-
-
 # ── 环境配置 ────────────────────────────────────────────────────────────
 
 def _platform_defaults():
@@ -80,13 +48,6 @@ def find_cmake_in_env() -> str:
             candidate = Path(p) / name
             if candidate.is_file():
                 return str(candidate)
-    if sys.platform == "win32":
-        for p in [
-            r"C:\Program Files\CMake\bin\cmake.exe",
-            r"C:\Program Files (x86)\CMake\bin\cmake.exe",
-        ]:
-            if Path(p).is_file():
-                return p
     raise SystemExit("ERROR: cannot find cmake binary")
 
 
@@ -394,8 +355,8 @@ def strip_builtin_preamble(text: str) -> str:
 def _get_sharpc_env() -> dict:
     env = os.environ.copy()
     if sys.platform == "win32":
-        zig_home = os.environ.get("ZIG_HOME", "C:\\env\\zig")
-        if os.path.isdir(zig_home):
+        zig_home = os.environ.get("ZIG_HOME", "")
+        if zig_home and os.path.isdir(zig_home):
             env["PATH"] = zig_home + os.pathsep + env.get("PATH", "")
     return env
 
@@ -699,14 +660,6 @@ def main():
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
-    project_root = script_dir.parent
-    cfg_path = project_root / "Sharp.toml"
-    cfg = _read_sharp_toml(cfg_path)
-
-    # Resolve std_dir from config or default
-    std_dir_from_cfg = cfg.get("std_dir", "")
-    if std_dir_from_cfg:
-        os.environ["SHARP_STD_DIR"] = std_dir_from_cfg
 
     sharpc_path, build_info = ensure_sharpc(script_dir, args.sharpc)
     print(f"[build] sharpc = {sharpc_path} ({build_info})")
