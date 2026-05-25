@@ -131,6 +131,22 @@ rm -rf build && cmake -B build && cmake --build build
 - **不要提交 sharp-pkg/lua/**：这是全量 Lua 5.4 源码（有 .gitignore 保护）
 - **提交只包含 sharp-pkg/spkg/lua/**：spkg 用的 Lua 子集
 
-### 9. 语言设计原则
+### 9. 依赖下载
+
+sharpc 依赖 zig 作为 C 编译器后端。可通过 git sparse checkout 从 gitee 仓库获取预编译的 zig 二进制：
+
+**Linux (x86_64)**：
+```bash
+git clone --filter=blob:none --no-checkout https://gitee.com/sharp-repo/zig-bin.git .temp && cd .temp && git checkout HEAD -- zig-x86_64-linux-0.16.0.tar.xz && mv zig-x86_64-linux-0.16.0.tar.xz ../ && cd .. && rm -rf .temp
+```
+
+**Windows (x86_64)**：
+```bash
+git clone --filter=blob:none --no-checkout https://gitee.com/sharp-repo/zig-bin.git .temp && cd .temp && git checkout HEAD -- zig-x86_64-windows-0.16.0.tar.xz && mv zig-x86_64-windows-0.16.0.tar.xz ../ && cd .. && rm -rf .temp
+```
+
+下载后解压并将 zig 所在目录加入 `PATH` 即可使用。
+
+### 10. 语言设计原则
 
 - **显式 `this`**：方法通过显式 `this` 参数接收 receiver（如 `bool Str.eq(this, Str other)`），方法体内字段访问必须显式写 `this->field`。不支持隐式 `this` 自动前缀。关联函数（函数体内不使用 `this`）不接收 receiver 参数。
