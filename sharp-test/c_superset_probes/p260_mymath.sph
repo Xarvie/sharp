@@ -1,0 +1,13 @@
+/* p260_mymath.sph — Math module with class + extension methods */
+
+class Calculator {
+    int value;
+};
+
+void Calculator.reset(this) { this->value = 0; }
+void Calculator.set(this, int v) { this->value = v; }
+int  Calculator.get(this) const { return this->value; }
+int  Calculator.add(this, int n) { this->value = this->value + n; return this->value; }
+
+int square(int x) { return x * x; }
+int cube(int x) { return x * x * x; }

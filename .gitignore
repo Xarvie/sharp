@@ -1,0 +1,58 @@
+# === 编译产物 ===
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# === 可执行文件 ===
+sharpc
+sharp-fe/sharpc
+sharp-fe/sharpc.exe
+sharp-fe/sharpc_dbg
+sharp-fe/sharpc_test
+sharp-fe/build/
+sharp-test/sharpc
+sharp-cpp/sharp_cli
+
+# === 构建产物 ===
+build*/
+cmake-build-*/
+out/
+
+# === 模块接口缓存 (自动生成) ===
+*.smi
+smp_cache/
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# === 临时文件 ===
+*.tmp
+*.bak
+*.log
+
+NUL

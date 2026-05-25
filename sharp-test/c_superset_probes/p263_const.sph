@@ -1,0 +1,11 @@
+/* p263_const.sph — Constants and constexpr module */
+
+const int MAX_SIZE   = 256;
+const int MIN_SIZE   = 16;
+const float PI       = 3.14f;
+
+constexpr int compute_limit(int base) {
+    return base * 2 + 10;
+}
+
+constexpr int LIMIT = compute_limit(100);  /* 210 */

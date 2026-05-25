@@ -1,0 +1,8 @@
+/* p162_types.h — p162 type definitions */
+
+typedef double fsize;
+
+struct Point {
+    isize x;
+    isize y;
+};

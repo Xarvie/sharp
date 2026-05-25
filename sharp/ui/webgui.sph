@@ -1,0 +1,253 @@
+/*
+ * webgui.h — A C GUI library with browser-based rendering.
+ *
+ * Standard: C11
+ * Dependencies (build-time, bundled, not exposed in this header):
+ *   - ws.h / ws.c   (WebSocket server)
+ *   - cjson.h       (JSON)
+ *
+ * Threading:
+ *   All wg_* functions except wg_post are NOT thread-safe. They must be
+ *   called on the event-loop thread: the thread that called wg_run, or
+ *   from within an event callback, timer callback, or wg_post function.
+ *
+ *   wg_post is the only cross-thread entry point.
+ *
+ * Memory ownership:
+ *   - Constructor functions allocate; the caller owns the result until
+ *     it is attached with wg_append/wg_insert (ownership transfers to
+ *     the parent) or freed with wg_free.
+ *   - wg_app_create takes ownership of the root tree. wg_app_destroy
+ *     releases everything reachable.
+ *   - Strings returned from wg_get_* and from the event callback are
+ *     valid only until the next mutation / until the callback returns,
+ *     respectively. Copy if you need to keep them.
+ */
+
+#ifndef WEBGUI_H
+#define WEBGUI_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ========================================================================
+ * Opaque types
+ * ======================================================================== */
+
+typedef struct wg_app  wg_app_t;
+typedef struct wg_node wg_node_t;
+
+/* ========================================================================
+ * Event
+ * ======================================================================== */
+
+typedef struct wg_event {
+    wg_app_t   *app;        /* the app that fired the event             */
+    const char *id;         /* id of the triggering node                */
+    const char *event;      /* "click" | "input" | "change" | "submit"  */
+    const char *value;      /* current value of the node, or NULL       */
+    void       *userdata;   /* whatever was passed to wg_on             */
+} wg_event_t;
+
+typedef void (*wg_callback_fn)(const wg_event_t *ev);
+
+/* ========================================================================
+ * Error codes
+ * ======================================================================== */
+
+#define WG_OK         0
+#define WG_ENOMEM    -1   /* out of memory                          */
+#define WG_ENOENT    -2   /* node / id / callback not found         */
+#define WG_EINVAL    -3   /* invalid argument                       */
+#define WG_ENOTSUP   -4   /* operation not supported on this build  */
+#define WG_EIO       -5   /* transport / network error              */
+#define WG_EAGAIN    -6   /* operation should be retried            */
+#define WG_EEXIST    -7   /* id already in use                      */
+
+const char *wg_strerror(int err);
+
+/* Last error from the most recent failing constructor (thread-local). */
+int  wg_errno(void);
+
+/* ========================================================================
+ * Node construction
+ *
+ * `id` must be non-NULL, non-empty, and unique within an app once mounted.
+ * String parameters may be NULL (treated as empty).
+ * On failure, return NULL and set wg_errno.
+ * ======================================================================== */
+
+wg_node_t *wg_container(const char *id);
+wg_node_t *wg_text     (const char *id, const char *text);
+wg_node_t *wg_heading  (const char *id, int level, const char *text);
+wg_node_t *wg_button   (const char *id, const char *text);
+wg_node_t *wg_input    (const char *id);
+wg_node_t *wg_checkbox (const char *id, const char *label);
+wg_node_t *wg_select   (const char *id, const char *const *options, size_t n);
+wg_node_t *wg_image    (const char *id, const char *src);
+wg_node_t *wg_separator(const char *id);
+wg_node_t *wg_form     (const char *id);
+
+/* ========================================================================
+ * Properties
+ *
+ * These operate on either unmounted or mounted nodes. Mounted nodes are
+ * synchronized to the browser automatically.
+ *
+ * wg_set_attr accepts any key. Standardized keys with cross-backend
+ * semantics: "type", "placeholder", "role", "min", "max", "step",
+ * "class", "style", "src".
+ *
+ * For wg_input, set "type" to one of:
+ *   "text" (default), "password", "number", "multiline"
+ *
+ * For wg_button inside a wg_form, set "role" to "submit" to mark it as
+ * the form's submit button.
+ * ======================================================================== */
+
+int wg_set_text    (wg_node_t *n, const char *text);
+int wg_set_value   (wg_node_t *n, const char *value);
+int wg_set_disabled(wg_node_t *n, int disabled);
+int wg_set_visible (wg_node_t *n, int visible);
+int wg_set_attr    (wg_node_t *n, const char *key, const char *value);
+
+const char *wg_get_text    (const wg_node_t *n);
+const char *wg_get_value   (const wg_node_t *n);
+int         wg_get_disabled(const wg_node_t *n);
+int         wg_get_visible (const wg_node_t *n);
+const char *wg_get_attr    (const wg_node_t *n, const char *key);
+
+/* ========================================================================
+ * Tree
+ * ======================================================================== */
+
+int  wg_append  (wg_node_t *parent, wg_node_t *child);
+int  wg_append_n(wg_node_t *parent, wg_node_t *const *children, size_t n);
+int  wg_insert  (wg_node_t *parent, wg_node_t *child, int index);
+int  wg_remove  (wg_node_t *parent, wg_node_t *child);
+void wg_remove_self(wg_node_t *n);
+int  wg_clear_children(wg_node_t *parent);
+void wg_free    (wg_node_t *n);
+
+/* Look up a node by id. Returns NULL if not mounted in `app`. */
+wg_node_t *wg_find(wg_app_t *app, const char *id);
+
+/* Introspection. */
+const char *wg_get_id(const wg_node_t *n);
+
+/* ========================================================================
+ * Render — triggers virtual DOM diff and incremental push.
+ * Called automatically at the end of each event-loop iteration.
+ * May also be called manually (e.g. from wg_post callbacks).
+ * ======================================================================== */
+
+int wg_render(wg_app_t *app);
+
+/* ========================================================================
+ * Application
+ * ======================================================================== */
+
+/* Create an app from a root node. Takes ownership of `root`. */
+wg_app_t *wg_app_create (wg_node_t *root);
+void      wg_app_destroy(wg_app_t *app);
+
+/* Run the event loop. Blocks until wg_stop is called. */
+int  wg_run (wg_app_t *app);
+void wg_stop(wg_app_t *app);
+
+/* Bind a TCP listener for browser connections.
+ *   host: NULL or "" -> bind to all interfaces.
+ * Returns WG_OK or a negative error code.
+ */
+int wg_bind_tcp(wg_app_t *app, const char *host, uint16_t port);
+
+/* Optional metadata. */
+int wg_set_title(wg_app_t *app, const char *title);
+int wg_set_icon (wg_app_t *app, const char *url);
+int wg_set_debug(wg_app_t *app, int enabled);
+
+/* Custom frontend HTML. If set, served instead of the built-in page. */
+int wg_set_html_file(wg_app_t *app, const char *path);
+int wg_set_html     (wg_app_t *app, const char *html);
+
+/* ========================================================================
+ * Events
+ *
+ * Each (id, event) pair holds at most one callback. Re-registering on
+ * the same pair replaces the previous callback.
+ * ======================================================================== */
+
+int wg_on (wg_app_t *app, const char *id, const char *event,
+           wg_callback_fn cb, void *userdata);
+int wg_off(wg_app_t *app, const char *id, const char *event);
+
+/* Programmatically fire an event for a node (triggers the registered
+ * callback without going through the WebSocket layer). */
+int wg_emit(wg_app_t *app, const char *id, const char *event,
+            const char *value);
+
+/* Form-submit accessors. Valid only during the submit callback. */
+const char *wg_form_get (const wg_event_t *ev, const char *key);
+
+/* Iterate (key, value) pairs. *cursor starts at 0; advance by the call.
+ * Returns 1 while more pairs are available, 0 when exhausted. */
+int         wg_form_iter(const wg_event_t *ev, size_t *cursor,
+                         const char **key, const char **value);
+
+/* ========================================================================
+ * Timers
+ *
+ * delay_ms: first fire after this many milliseconds.
+ * repeat:   0 = single-shot; non-zero = repeat every delay_ms.
+ *
+ * Returns a non-negative timer id on success, or a negative error code.
+ * ======================================================================== */
+
+typedef void (*wg_timer_fn)(wg_app_t *app, void *userdata);
+
+int wg_set_timer  (wg_app_t *app, int delay_ms, int repeat,
+                   wg_timer_fn fn, void *userdata);
+int wg_clear_timer(wg_app_t *app, int timer_id);
+
+/* ========================================================================
+ * Cross-thread dispatch
+ *
+ * Enqueue `fn` to run on the event-loop thread. The only wg_* call that
+ * is safe from any thread.
+ * ======================================================================== */
+
+typedef void (*wg_post_fn)(wg_app_t *app, void *userdata);
+
+int wg_post(wg_app_t *app, wg_post_fn fn, void *userdata);
+
+/* ========================================================================
+ * Custom components
+ *
+ * Register a new node type, then create instances with wg_create().
+ * The type persists for the lifetime of the process.
+ * ======================================================================== */
+
+typedef struct wg_component_ops {
+    void (*on_destroy)(wg_node_t *n);  /* free non-standard resources */
+} wg_component_ops_t;
+
+int         wg_register_type(const char *type_name, const wg_component_ops_t *ops);
+wg_node_t  *wg_create(const char *type_name, const char *id);
+
+/* ========================================================================
+ * Lifecycle
+ * ======================================================================== */
+
+typedef void (*wg_lifecycle_fn)(wg_node_t *n, void *ud);
+
+int wg_on_destroy(wg_node_t *n, wg_lifecycle_fn fn, void *ud);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* WEBGUI_H */

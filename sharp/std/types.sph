@@ -1,0 +1,4 @@
+#include <stdbool.h>
+
+typedef long isize;
+typedef unsigned long usize;

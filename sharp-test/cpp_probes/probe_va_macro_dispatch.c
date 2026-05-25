@@ -1,0 +1,11 @@
+#define GET_MACRO_16(_0,_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,NAME,...) NAME
+
+#define V0  V0_selected
+#define V1  V1_selected
+#define V2  V2_selected
+
+#define DISPATCH(...) GET_MACRO_16(__VA_ARGS__, V15, V14, V13, V12, V11, V10, V9, V8, V7, V6, V5, V4, V3, V2, V1, V0, SENTINEL)(__VA_ARGS__)
+
+DISPATCH(X)
+DISPATCH(X,Y)
+DISPATCH()

@@ -1,0 +1,192 @@
+#include "types.sph"
+#include <stdlib.h>
+#include <string.h>
+
+/*
+ * HashMap — generic open-addressing hash table.
+ *
+ * Zero-runtime: {0}-initialised, no per-instance allocation until first
+ * insert.  Open addressing with linear probing + tombstones.
+ */
+
+const isize HASHMAP_EMPTY     = 0;
+const isize HASHMAP_OCCUPIED  = 1;
+const isize HASHMAP_TOMBSTONE = 2;
+
+struct HashMapEntry<K, V> {
+    K              key;
+    V              value;
+    unsigned char  state;
+}
+
+class HashMapCursor<K, V> {
+    HashMapEntry<K, V>* entries;
+    isize cap;
+    isize idx;     /* -1 = before-first, otherwise current OCCUPIED index */
+}
+
+static inline bool HashMapCursor<K,V>.valid(this) const {
+    return this->idx >= 0 && this->idx < this->cap;
+}
+
+static inline K* HashMapCursor<K,V>.key(this) const {
+    if (!this->valid()) return (K*)0;
+    return &this->entries[this->idx].key;
+}
+
+static inline V* HashMapCursor<K,V>.value(this) const {
+    if (!this->valid()) return (V*)0;
+    return &this->entries[this->idx].value;
+}
+
+static inline void HashMapCursor<K,V>.next(this) {
+    this->_advance();
+}
+
+static inline void HashMapCursor<K,V>._advance(this) {
+    this->idx = this->idx + 1;
+    while (this->idx < this->cap &&
+           this->entries[this->idx].state != (unsigned char)1) {
+        this->idx = this->idx + 1;
+    }
+}
+
+class HashMap<K, V> {
+    HashMapEntry<K, V>* entries;
+    isize cap;
+    isize len;
+    isize tombstones;
+}
+
+static inline bool HashMap<K,V>.insert(this, K key, V value) {
+    this->_grow_if_needed();
+    isize i = this->_probe_for_insert(key);
+    bool is_new = (this->entries[i].state != (unsigned char)1);
+    this->entries[i].key   = key;
+    this->entries[i].value = value;
+    this->entries[i].state = (unsigned char)1;
+    if (is_new) this->len = this->len + 1;
+    return is_new;
+}
+
+static inline V* HashMap<K,V>.get(this, K key) {
+    if (this->cap == 0) return (V*)0;
+    isize i = this->_probe_for_lookup(key);
+    if (i < 0) return (V*)0;
+    return &this->entries[i].value;
+}
+
+static inline bool HashMap<K,V>.remove(this, K key) {
+    if (this->cap == 0) return false;
+    isize i = this->_probe_for_lookup(key);
+    if (i < 0) return false;
+    this->entries[i].state = (unsigned char)2;
+    this->len = this->len - 1;
+    this->tombstones = this->tombstones + 1;
+    return true;
+}
+
+static inline bool HashMap<K,V>.contains(this, K key) {
+    return this->get(key) != (V*)0;
+}
+
+static inline isize HashMap<K,V>.size(this) const {
+    return this->len;
+}
+
+static inline bool HashMap<K,V>.is_empty(this) const {
+    return this->len == 0;
+}
+
+static inline void HashMap<K,V>.clear(this) {
+    if (this->cap > 0 && this->entries != (HashMapEntry<K,V>*)0) {
+        memset(this->entries, 0,
+               (unsigned long)this->cap * sizeof(HashMapEntry<K, V>));
+    }
+    this->len = 0;
+    this->tombstones = 0;
+}
+
+static inline void HashMap<K,V>.destroy(this) {
+    free(this->entries);
+    this->entries = (HashMapEntry<K, V>*)0;
+    this->cap = 0;
+    this->len = 0;
+    this->tombstones = 0;
+}
+
+static inline HashMapCursor<K, V> HashMap<K,V>.iter(this) const {
+    HashMapCursor<K, V> c;
+    c.entries = this->entries;
+    c.cap     = this->cap;
+    c.idx     = -1;
+    c._advance();
+    return c;
+}
+
+static inline isize HashMap<K,V>._probe_for_insert(this, K key) const {
+    usize h = key.hash();
+    isize mask = this->cap - 1;
+    isize i = (isize)(h & (usize)mask);
+    isize first_tomb = -1;
+    while (true) {
+        unsigned char st = this->entries[i].state;
+        if (st == (unsigned char)0) {
+            return first_tomb >= 0 ? first_tomb : i;
+        }
+        if (st == (unsigned char)2) {
+            if (first_tomb < 0) first_tomb = i;
+        } else {
+            if (this->entries[i].key == key) return i;
+        }
+        i = (i + 1) & mask;
+    }
+}
+
+static inline isize HashMap<K,V>._probe_for_lookup(this, K key) const {
+    usize h = key.hash();
+    isize mask = this->cap - 1;
+    isize i = (isize)(h & (usize)mask);
+    while (true) {
+        unsigned char st = this->entries[i].state;
+        if (st == (unsigned char)0) return -1;
+        if (st == (unsigned char)1 && this->entries[i].key == key) return i;
+        i = (i + 1) & mask;
+    }
+}
+
+static inline void HashMap<K,V>._grow_if_needed(this) {
+    isize used = this->len + this->tombstones;
+    if ((used + 1) * 4 <= this->cap * 3 && this->cap > 0) return;
+    isize new_cap = this->cap > 0 ? this->cap * 2 : 8;
+    this->_rehash(new_cap);
+}
+
+static inline void HashMap<K,V>._rehash(this, isize new_cap) {
+    HashMapEntry<K, V>* nbuf = (HashMapEntry<K, V>*)
+        calloc((unsigned long)new_cap, sizeof(HashMapEntry<K, V>));
+    if (!nbuf) __builtin_trap();
+
+    isize old_cap = this->cap;
+    HashMapEntry<K, V>* old_buf = this->entries;
+
+    this->entries = nbuf;
+    this->cap = new_cap;
+    this->len = 0;
+    this->tombstones = 0;
+
+    if (old_buf != (HashMapEntry<K, V>*)0) {
+        isize j = 0;
+        while (j < old_cap) {
+            if (old_buf[j].state == (unsigned char)1) {
+                isize i = this->_probe_for_insert(old_buf[j].key);
+                this->entries[i].key   = old_buf[j].key;
+                this->entries[i].value = old_buf[j].value;
+                this->entries[i].state = (unsigned char)1;
+                this->len = this->len + 1;
+            }
+            j = j + 1;
+        }
+        free(old_buf);
+    }
+}

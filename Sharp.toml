@@ -1,0 +1,6 @@
+# sharp project configuration
+
+# standard library directory (platform-specific)
+std_dir.windows = "C:/Users/ftp/Desktop/sharp/sharp/std"
+std_dir.macos = "/Users/ddy101haojiqi/Desktop/sharp/sharp/std"
+std_dir.linux = "/home/ftp/Desktop/sharp/sharp/std"

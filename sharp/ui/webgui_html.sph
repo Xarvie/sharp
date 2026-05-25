@@ -1,0 +1,497 @@
+/*
+ * webgui_html.h — Embedded frontend page.
+ *
+ * Served via ws.h's HTTP fallback when a non-WebSocket request hits the
+ * server root. Connects back to the same host as a WebSocket client.
+ */
+
+#ifndef WEBGUI_HTML_H
+#define WEBGUI_HTML_H
+
+static const char wg__html_page[] =
+r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WebGUI</title>
+<style>
+
+/* =================================================================== */
+/* CSS custom properties — theme override points                     */
+/* To customize, add a <style> before the <script> and set:          */
+/*   :root { --wg-bg: #fff; --wg-fg: #111; --wg-primary: #0055cc; } */
+/* =================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  /* Colors */
+  --wg-bg: Canvas;
+  --wg-fg: CanvasText;
+  --wg-muted: color-mix(in srgb, CanvasText 55%, transparent);
+  --wg-border: color-mix(in srgb, CanvasText 18%, transparent);
+  --wg-border-focus: color-mix(in srgb, CanvasText 40%, transparent);
+  --wg-primary: AccentColor;
+  --wg-primary-hover: color-mix(in srgb, AccentColor 85%, black);
+  --wg-primary-fg: AccentColorText;
+  --wg-danger: #c0392b;
+
+  /* Surfaces */
+  --wg-surface: color-mix(in srgb, CanvasText 4%, Canvas);
+  --wg-surface-hover: color-mix(in srgb, CanvasText 8%, Canvas);
+
+  /* Typography */
+  --wg-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+             'Helvetica Neue', Arial, sans-serif;
+  --wg-font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  --wg-text-sm: 0.875rem;
+  --wg-text-base: 1rem;
+  --wg-text-lg: 1.25rem;
+  --wg-text-xl: 1.5rem;
+
+  /* Spacing */
+  --wg-gap: 8px;
+  --wg-pad: 12px 16px;
+
+  /* Shape */
+  --wg-radius: 8px;
+  --wg-radius-sm: 6px;
+
+  /* Motion */
+  --wg-transition: 0.15s ease;
+}
+
+/* Reset & base */
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  font-family: var(--wg-font);
+  font-size: var(--wg-text-base);
+  margin: 0; padding: 20px;
+  background: var(--wg-bg);
+  color: var(--wg-fg);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Headings */
+h1 { font-size: var(--wg-text-xl); font-weight: 700; margin: 0.5em 0 0.3em; }
+h2 { font-size: var(--wg-text-lg); font-weight: 600; margin: 0.5em 0 0.3em; }
+h3 { font-size: 1.125rem; font-weight: 600; margin: 0.4em 0 0.2em; }
+h4,h5,h6 { font-weight: 600; margin: 0.4em 0 0.2em; }
+
+/* Forms */
+button, input, textarea, select {
+  font: inherit;
+  padding: var(--wg-pad);
+  border-radius: var(--wg-radius-sm);
+  border: 1px solid var(--wg-border);
+  background: var(--wg-bg);
+  color: var(--wg-fg);
+  transition: border-color var(--wg-transition),
+              box-shadow var(--wg-transition),
+              background var(--wg-transition);
+}
+button:focus-visible, input:focus-visible,
+textarea:focus-visible, select:focus-visible {
+  outline: none;
+  border-color: var(--wg-border-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--wg-primary) 25%, transparent);
+}
+
+/* Buttons */
+button {
+  cursor: pointer;
+  font-weight: 500;
+  background: var(--wg-surface);
+}
+button:hover:not(:disabled) {
+  background: var(--wg-surface-hover);
+}
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+button:disabled, input:disabled, textarea:disabled, select:disabled {
+  opacity: 0.5; cursor: not-allowed;
+}
+
+/* Inputs */
+input[type="text"], input[type="number"],
+input[type="password"], input[type="email"],
+input[type="tel"], input[type="url"],
+textarea {
+  width: 100%;
+}
+textarea { min-width: 200px; min-height: 60px; resize: vertical; }
+
+/* Checkbox */
+input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--wg-primary);
+}
+
+/* Select */
+select {
+  appearance: auto;
+}
+
+/* Separator */
+hr {
+  border: 0;
+  border-top: 1px solid var(--wg-border);
+  margin: 12px 0;
+}
+
+/* Containers — default flex layout */
+[data-wg-kind="container"] {
+  display: flex;
+  gap: var(--wg-gap);
+}
+
+/* Form — inline layout by default */
+[data-wg-form] {
+  display: contents;
+}
+
+/* Images */
+img { max-width: 100%; height: auto; }
+
+/* Status indicator */
+#__wg_status__ {
+  position: fixed; top: 8px; right: 8px;
+  padding: 4px 10px; border-radius: var(--wg-radius-sm);
+  background: var(--wg-danger); color: #fff;
+  font-size: var(--wg-text-sm); font-weight: 500;
+  display: none;
+}
+</style>
+</head>
+<body>
+<div id="__wg_root__"></div>
+<div id="__wg_status__">disconnected</div>
+<script>
+(function(){
+  'use strict';
+  var elements = new Map();   // id -> wrapper {dom, control, kind, ...}
+  var ws = null;
+  var status = document.getElementById('__wg_status__');
+  var rootEl = document.getElementById('__wg_root__');
+
+  function showStatus(msg) {
+    if (msg) { status.textContent = msg; status.style.display = 'block'; }
+    else { status.style.display = 'none'; }
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  }
+
+  function findForm(el) {
+    while (el && el !== rootEl) {
+      if (el.__wg && el.__wg.kind === 'form') return el.__wg;
+      el = el.parentNode;
+    }
+    return null;
+  }
+
+  function collectForm(form) {
+    var out = {};
+    function walk(rec) {
+      var d = rec.dom;
+      if (rec !== form) {
+        if (rec.kind === 'input') out[rec.id] = rec.control.value;
+        else if (rec.kind === 'checkbox') out[rec.id] = rec.control.checked ? 'true' : 'false';
+        else if (rec.kind === 'select') out[rec.id] = rec.control.value;
+      }
+      for (var i=0;i<d.childNodes.length;i++) {
+        var c = d.childNodes[i];
+        if (c.__wg) walk(c.__wg);
+      }
+    }
+    walk(form);
+    return out;
+  }
+
+  function wireEvents(rec) {
+    var id = rec.id;
+    if (rec.kind === 'button') {
+      rec.dom.addEventListener('click', function(e){
+        e.preventDefault();
+        if (rec.attrs.role === 'submit') {
+          var form = findForm(rec.dom);
+          if (form) {
+            send({type:'event', id:form.id, event:'submit', form_data:collectForm(form)});
+            return;
+          }
+        }
+        send({type:'event', id:id, event:'click'});
+      });
+    } else if (rec.kind === 'input') {
+      rec.control.addEventListener('input', function(){
+        send({type:'event', id:id, event:'input', value:rec.control.value});
+      });
+      rec.control.addEventListener('change', function(){
+        send({type:'event', id:id, event:'change', value:rec.control.value});
+      });
+      rec.control.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' && rec.attrs && rec.attrs.type !== 'multiline') {
+          var form = findForm(rec.dom);
+          if (form) {
+            e.preventDefault();
+            send({type:'event', id:form.id, event:'submit', form_data:collectForm(form)});
+          }
+        }
+      });
+    } else if (rec.kind === 'checkbox') {
+      rec.control.addEventListener('change', function(){
+        send({type:'event', id:id, event:'change', value:rec.control.checked?'true':'false'});
+      });
+    } else if (rec.kind === 'select') {
+      rec.control.addEventListener('change', function(){
+        send({type:'event', id:id, event:'change', value:rec.control.value});
+      });
+    }
+  }
+
+  function applyAttr(rec, key, val) {
+    rec.attrs[key] = val;
+    var dom = rec.dom, ctl = rec.control;
+    if (key === 'class') { dom.className = val; return; }
+    if (key === 'style') { dom.setAttribute('style', val); return; }
+    if (key === 'placeholder' && 'placeholder' in ctl) { ctl.placeholder = val; return; }
+    if (key === 'src' && rec.kind === 'image') { dom.src = val; return; }
+    if (key === 'role') { dom.setAttribute('role', val); return; }
+    if (key === 'min' || key === 'max' || key === 'step') {
+      if (ctl.setAttribute) ctl.setAttribute(key, val);
+      return;
+    }
+    if (key === 'type') {
+      // Type is already set during build; skip.
+      // retypeInput is only needed for runtime type changes via set_attr.
+      if (rec.attrs.type && rec.attrs.type !== val) retypeInput(rec, val);
+      return;
+    }
+    if (key[0] === '_') return;  // reserved for client-side flags
+    dom.setAttribute(key, val);
+  }
+
+  function retypeInput(rec, type) {
+    var oldCtl = rec.control;
+    var oldVal = oldCtl ? oldCtl.value : '';
+    var oldPH  = oldCtl ? oldCtl.placeholder : '';
+    var oldDis = oldCtl ? oldCtl.disabled : false;
+    var newCtl;
+    if (type === 'multiline') {
+      newCtl = document.createElement('textarea');
+      newCtl.rows = oldCtl && oldCtl.rows ? oldCtl.rows : 3;
+    } else {
+      newCtl = document.createElement('input');
+      newCtl.type = (type==='password'||type==='number'||type==='text'||
+                     type==='email'||type==='tel'||type==='url') ? type : 'text';
+    }
+    newCtl.value = oldVal;
+    if (oldPH) newCtl.placeholder = oldPH;
+    newCtl.disabled = oldDis;
+    if (oldCtl.parentNode) oldCtl.parentNode.replaceChild(newCtl, oldCtl);
+    rec.control = newCtl;
+    wireEvents(rec);
+  }
+
+  function build(node) {
+    var dom, ctl;
+    var attrs = node.attrs || {};
+    switch (node.kind) {
+      case 'container': dom = document.createElement('div'); ctl = dom; break;
+      case 'text':      dom = document.createElement('span'); ctl = dom; break;
+      case 'heading': {
+        var lvl = node.level|0; if (lvl<1) lvl=1; if (lvl>6) lvl=6;
+        dom = document.createElement('h'+lvl); ctl = dom; break;
+      }
+      case 'button': dom = document.createElement('button'); ctl = dom;
+                     dom.type = 'button'; break;
+      case 'input': {
+        var t = attrs.type || 'text';
+        if (t === 'multiline') { ctl = document.createElement('textarea'); }
+        else {
+          ctl = document.createElement('input');
+          ctl.type = (t==='password'||t==='number') ? t : 'text';
+        }
+        dom = ctl;
+        break;
+      }
+      case 'checkbox': {
+        dom = document.createElement('label');
+        ctl = document.createElement('input'); ctl.type = 'checkbox';
+        dom.appendChild(ctl);
+        var lbl = document.createElement('span');
+        lbl.textContent = node.text || '';
+        lbl.style.marginLeft = '6px';
+        dom.appendChild(lbl);
+        dom.__wg_label = lbl;
+        break;
+      }
+      case 'select': {
+        ctl = document.createElement('select');
+        var opts = node.options || [];
+        for (var i=0;i<opts.length;i++) {
+          var o = document.createElement('option');
+          o.value = o.textContent = String(opts[i]);
+          ctl.appendChild(o);
+        }
+        dom = ctl;
+        break;
+      }
+      case 'image': dom = document.createElement('img'); ctl = dom;
+                    if (attrs.src) dom.src = attrs.src;
+                    break;
+      case 'separator': dom = document.createElement('hr'); ctl = dom; break;
+      case 'form': dom = document.createElement('div');
+                   dom.setAttribute('data-wg-form','1'); ctl = dom; break;
+      default: dom = document.createElement('div'); ctl = dom; break;
+    }
+    var rec = {
+      id: node.id, kind: node.kind, dom: dom, control: ctl,
+      attrs: {}, level: node.level || 0
+    };
+    dom.__wg = rec;
+    dom.setAttribute('data-wg-kind', node.kind);
+    dom.setAttribute('data-wg-id', node.id);
+    if (node.kind !== 'checkbox' && node.text != null) {
+      if (rec.kind === 'image') dom.alt = node.text;
+      else if (rec.kind === 'text' || rec.kind === 'heading' || rec.kind === 'button') {
+        dom.textContent = node.text;
+      }
+    }
+    if (node.value != null && 'value' in ctl) ctl.value = node.value;
+    if (node.disabled) { if ('disabled' in ctl) ctl.disabled = true; }
+    if (node.visible === false) dom.style.display = 'none';
+    Object.keys(attrs).forEach(function(k){ applyAttr(rec, k, attrs[k]); });
+    wireEvents(rec);
+    elements.set(node.id, rec);
+    var children = node.children || [];
+    for (var i=0;i<children.length;i++) dom.appendChild(build(children[i]).dom);
+    return rec;
+  }
+
+  function unregister(rec) {
+    elements.delete(rec.id);
+    var d = rec.dom;
+    for (var i=0;i<d.childNodes.length;i++) {
+      var c = d.childNodes[i];
+      if (c.__wg) unregister(c.__wg);
+    }
+  }
+
+  function apply(msg) {
+    if (msg.type === 'render') {
+      if (msg.title) document.title = msg.title;
+      if (msg.icon) setIcon(msg.icon);
+      rootEl.innerHTML = '';
+      elements.clear();
+      if (msg.tree) rootEl.appendChild(build(msg.tree).dom);
+      return;
+    }
+    if (msg.type === 'meta') {
+      if (msg.title) document.title = msg.title;
+      if (msg.icon) setIcon(msg.icon);
+      return;
+    }
+    var rec = elements.get(msg.id || msg.parent);
+    if (msg.type === 'set_text' || msg.type === 'update' || msg.op === 'update') {
+      if (!rec) return;
+      if (msg.prop === 'text') {
+        if (rec.kind === 'checkbox') rec.dom.__wg_label.textContent = msg.value || '';
+        else if (rec.kind === 'image') rec.dom.alt = msg.value || '';
+        else rec.dom.textContent = msg.value || '';
+      } else if (msg.prop === 'value') {
+        if ('value' in rec.control) rec.control.value = msg.value || '';
+      } else if (msg.prop === 'disabled') {
+        if ('disabled' in rec.control) rec.control.disabled = !!msg.value;
+      } else if (msg.prop === 'visible') {
+        rec.dom.style.display = msg.value ? '' : 'none';
+      } else if (msg.prop === 'level') {
+        if (rec.kind === 'heading') {
+          var lvl = msg.value|0; if(lvl<1) lvl=1; if(lvl>6) lvl=6;
+          var newDom = document.createElement('h'+lvl);
+          while (rec.dom.childNodes.length) newDom.appendChild(rec.dom.childNodes[0]);
+          rec.dom.parentNode.replaceChild(newDom, rec.dom);
+          rec.dom = newDom; newDom.__wg = rec; rec.level = lvl;
+        }
+      }
+    } else if (msg.type === 'set_value' || msg.op === 'set_value') {
+      if (!rec) return;
+      if ('value' in rec.control) rec.control.value = msg.value || '';
+    } else if (msg.type === 'set_disabled' || msg.op === 'set_disabled') {
+      if (!rec) return;
+      if ('disabled' in rec.control) rec.control.disabled = !!msg.value;
+    } else if (msg.type === 'set_visible' || msg.op === 'set_visible') {
+      if (!rec) return;
+      rec.dom.style.display = msg.value ? '' : 'none';
+    } else if (msg.type === 'set_attr' || msg.type === 'attr' || msg.op === 'attr') {
+      if (!rec) return;
+      applyAttr(rec, msg.key, msg.value);
+    } else if (msg.type === 'options' || msg.op === 'options') {
+      if (!rec) return;
+      if (rec.kind === 'select') {
+        rec.control.innerHTML = '';
+        var opts = msg.options || [];
+        for (var i=0;i<opts.length;i++) {
+          var o = document.createElement('option');
+          o.value = o.textContent = String(opts[i]);
+          rec.control.appendChild(o);
+        }
+      }
+    } else if (msg.type === 'append' || msg.op === 'append') {
+      var p = elements.get(msg.parent);
+      if (!p) return;
+      p.dom.appendChild(build(msg.node).dom);
+    } else if (msg.type === 'insert' || msg.op === 'insert') {
+      var p2 = elements.get(msg.parent || msg.id);
+      if (!p2) return;
+      var nrec = build(msg.node);
+      var idx = msg.index|0;
+      var ref = p2.dom.children[idx];
+      if (ref) p2.dom.insertBefore(nrec.dom, ref);
+      else p2.dom.appendChild(nrec.dom);
+    } else if (msg.type === 'remove' || msg.op === 'remove') {
+      var ch = elements.get(msg.child || msg.id);
+      if (!ch) return;
+      if (ch.dom.parentNode) ch.dom.parentNode.removeChild(ch.dom);
+      unregister(ch);
+    } else if (msg.type === 'children' || msg.op === 'children') {
+      var p3 = elements.get(msg.id);
+      if (!p3) return;
+      p3.dom.innerHTML = '';
+      var chs = msg.children || [];
+      for (var i=0;i<chs.length;i++) p3.dom.appendChild(build(chs[i]).dom);
+    } else if (msg.type === 'patch') {
+      var ops = msg.ops || [];
+      for (var i=0;i<ops.length;i++) apply(ops[i]);
+    }
+  }
+
+  function setIcon(url) {
+    var link = document.querySelector("link[rel='icon']");
+    if (!link) { link = document.createElement('link'); link.rel='icon'; document.head.appendChild(link); }
+    link.href = url;
+  }
+
+  function connect() {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/');
+    ws.onopen = function(){ showStatus(''); };
+    ws.onmessage = function(ev){
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch(e) { return; }
+      apply(msg);
+    };
+    ws.onclose = function(){ showStatus('disconnected'); setTimeout(connect, 1000); };
+    ws.onerror = function(){ /* onclose follows */ };
+  }
+  connect();
+})();
+</script>
+</body>
+</html>"#";
+
+#endif /* WEBGUI_HTML_H */

@@ -1,0 +1,115 @@
+/* Settings Panel — test: checkbox, select, input, attr, disabled, visible */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "webgui.sph"
+
+static wg_node_t *preview = NULL;
+static wg_node_t *info    = NULL;
+
+static void on_change(const wg_event_t *ev) {
+    /* Sync all settings and update the preview */
+    int font_size = 14;
+    const char *theme = "light";
+    int bold = 0;
+
+    wg_node_t *fs = wg_find(ev->app, "font_size");
+    if (fs) {
+        const char *v = wg_get_value(fs);
+        if (v && *v) font_size = atoi(v);
+    }
+
+    wg_node_t *th = wg_find(ev->app, "theme");
+    if (th) {
+        const char *v = wg_get_value(th);
+        if (v && *v) theme = v;
+    }
+
+    wg_node_t *bl = wg_find(ev->app, "bold");
+    if (bl) {
+        const char *v = wg_get_value(bl);
+        if (v) bold = (strcmp(v, "true") == 0);
+    }
+
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%s, %dpx%s", theme, font_size, bold ? ", bold" : "");
+    wg_set_text(preview, buf);
+
+    /* Show info only when font_size > 16 */
+    wg_set_visible(info, font_size > 16);
+}
+
+static void on_reset(const wg_event_t *ev) {
+    wg_set_value(wg_find(ev->app, "font_size"), "14");
+    wg_set_value(wg_find(ev->app, "theme"), "light");
+    wg_set_value(wg_find(ev->app, "bold"), "");
+    on_change(ev);
+}
+
+int main(void) {
+    wg_node_t *root = wg_container("root");
+    wg_set_attr(root, "style", "max-width:500px;margin:20px auto;");
+
+    wg_append(root, wg_heading("title", 2, "Settings Panel"));
+
+    /* Font size */
+    wg_node_t *fs_label = wg_text("fs_label", "Font Size:");
+    wg_node_t *fs_input = wg_input("font_size");
+    wg_set_attr(fs_input, "type", "number");
+    wg_set_value(fs_input, "14");
+    wg_node_t *fs_row = wg_container("fs_row");
+    wg_set_attr(fs_row, "style", "display:flex;gap:8px;align-items:center;");
+    wg_append(fs_row, fs_label);
+    wg_append(fs_row, fs_input);
+    wg_append(root, fs_row);
+
+    /* Theme select */
+    const char *themes[] = {"light", "dark", "auto"};
+    wg_node_t *th_select = wg_select("theme", themes, 3);
+    wg_set_value(th_select, "light");
+    wg_node_t *th_label = wg_text("th_label", "Theme:");
+    wg_node_t *th_row = wg_container("th_row");
+    wg_set_attr(th_row, "style", "display:flex;gap:8px;align-items:center;");
+    wg_append(th_row, th_label);
+    wg_append(th_row, th_select);
+    wg_append(root, th_row);
+
+    /* Bold checkbox */
+    wg_node_t *bold_cb = wg_checkbox("bold", "Enable Bold");
+    wg_append(root, bold_cb);
+
+    /* Preview text */
+    wg_node_t *prev_label = wg_text("prev_label", "Preview:");
+    preview = wg_text("preview", "light, 14px");
+    wg_append(root, prev_label);
+    wg_append(root, preview);
+
+    /* Info text (visible only when font_size > 16) */
+    info = wg_text("info", "Large font detected!");
+    wg_set_visible(info, 0);
+    wg_append(root, info);
+
+    /* Reset button */
+    wg_node_t *reset = wg_button("reset", "Reset");
+    wg_append(root, reset);
+
+    wg_app_t *app = wg_app_create(root);
+    if (!app) { fprintf(stderr, "wg_app_create failed\n"); return 1; }
+    wg_bind_tcp(app, NULL, 9003);
+
+    wg_set_title(app, "Settings Panel Demo");
+
+    /* Register change handler on all interactive controls */
+    wg_on(app, "font_size", "change", on_change, NULL);
+    wg_on(app, "font_size", "input", on_change, NULL);
+    wg_on(app, "theme", "change", on_change, NULL);
+    wg_on(app, "bold", "change", on_change, NULL);
+    wg_on(app, "reset", "click", on_reset, NULL);
+
+    printf("Open http://localhost:9003 in a browser.\n");
+    wg_run(app);
+    wg_app_destroy(app);
+    return 0;
+}

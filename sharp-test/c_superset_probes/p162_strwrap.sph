@@ -1,0 +1,14 @@
+/* p162_strwrap.h — p162 WrappedPoint definitions */
+
+class WrappedPoint {
+    isize x;
+    isize y;
+    const char *name;
+};
+
+Point WrappedPoint.get_offset(this) const {
+    Point p;
+    p.x = this->x;
+    p.y = this->y;
+    return p;
+}

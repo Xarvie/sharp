@@ -1,0 +1,80 @@
+name: CI
+
+# Cross-platform CI for the Sharp/C preprocessor.
+#
+# Matrix:
+#   - Linux  (Ubuntu latest):  GCC + Clang, both with -std=c99 and -std=c11
+#   - macOS  (latest):         Clang (Apple), -std=c11
+#   - Windows (latest):        MSYS2/MinGW-w64 GCC, -std=c11
+#
+# Each job runs:
+#   1. Build all nine test binaries (test_phase1..8 + test_lua_includes + test_sharp_cpp)
+#   2. Run all suites — must report 0 failed
+#   3. Re-build with ASan + UBSan and re-run
+#   4. Re-build with -Werror -Wpedantic -Wshadow -Wstrict-prototypes
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  linux:
+    name: Linux / ${{ matrix.compiler }} / ${{ matrix.std }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [ gcc, clang ]
+        std:      [ c99, c11 ]
+    env:
+      CC:   ${{ matrix.compiler }}
+      CSTD: -std=${{ matrix.std }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.compiler }}
+      - name: build & test
+        run: make test
+      - name: build & test (ASan + UBSan)
+        run: make asan
+      - name: build with strict warnings
+        run: make strict
+
+  macos:
+    name: macOS / Apple clang
+    runs-on: macos-latest
+    env:
+      CC:   clang
+      CSTD: -std=c11
+    steps:
+      - uses: actions/checkout@v4
+      - name: build & test
+        run: make test
+      - name: build & test (ASan + UBSan)
+        run: make asan
+      - name: build with strict warnings
+        run: make strict
+
+  windows:
+    name: Windows / MSYS2 GCC
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: >-
+            base-devel
+            mingw-w64-x86_64-gcc
+            make
+      - name: build & test
+        run: make test
+      # ASan on MinGW is best-effort; skip strict on Windows because
+      # the shipped headers may emit warnings under -Wpedantic.

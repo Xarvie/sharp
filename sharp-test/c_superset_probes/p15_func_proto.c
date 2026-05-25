@@ -1,0 +1,3 @@
+int square(int x);
+int square(int x) { return x * x; }
+int main() { return square(5) - 25; }

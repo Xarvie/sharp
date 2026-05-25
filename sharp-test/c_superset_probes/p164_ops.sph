@@ -1,0 +1,22 @@
+/* p164_ops.h — p164 Counter definitions */
+
+class Counter {
+    int count;
+    int max;
+};
+
+void Counter.inc(this) {
+    if (this->count < this->max) this->count = this->count + 1;
+}
+
+void Counter.dec(this) {
+    if (this->count > 0) this->count = this->count - 1;
+}
+
+int Counter.value(this) const {
+    return this->count;
+}
+
+void Counter.reset(this) {
+    this->count = 0;
+}

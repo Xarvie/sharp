@@ -1,0 +1,108 @@
+/* p218_str.h — p218 Str definitions */
+#include <stdbool.h>
+
+class Str {
+    const char* ptr;
+    isize       len;
+};
+
+isize Str.size(this) const {
+    return this->len;
+}
+
+bool Str.eq(this, Str other) const {
+    if (this->len != other.len) return false;
+    isize i = 0;
+    while (i < this->len) {
+        if (this->ptr[i] != other.ptr[i]) return false;
+        i = i + 1;
+    }
+    return true;
+}
+
+bool Str.starts_with(this, Str prefix) const {
+    if (prefix.len > this->len) return false;
+    isize i = 0;
+    while (i < prefix.len) {
+        if (this->ptr[i] != prefix.ptr[i]) return false;
+        i = i + 1;
+    }
+    return true;
+}
+
+bool Str.ends_with(this, Str suffix) const {
+    if (suffix.len > this->len) return false;
+    isize off = this->len - suffix.len;
+    isize i = 0;
+    while (i < suffix.len) {
+        if (this->ptr[off + i] != suffix.ptr[i]) return false;
+        i = i + 1;
+    }
+    return true;
+}
+
+Str Str.slice(this, isize start, isize end) const {
+    if (start < 0 || end < start || end > this->len) __builtin_trap();
+    Str r;
+    r.ptr = this->ptr + start;
+    r.len = end - start;
+    return r;
+}
+
+isize Str.find_byte(this, char c) const {
+    isize i = 0;
+    while (i < this->len) {
+        if (this->ptr[i] == c) return i;
+        i = i + 1;
+    }
+    return -1;
+}
+
+bool Str.operator==(this, Str other) const {
+    return this->eq(other);
+}
+
+struct Str str_from_lit(const char* lit) {
+    struct Str s;
+    s.ptr = lit;
+    s.len = 0;
+    while (lit[s.len] != 0) s.len = s.len + 1;
+    return s;
+}
+
+struct Str str_from_parts(const char* p, isize len) {
+    struct Str s;
+    s.ptr = p;
+    s.len = len;
+    return s;
+}
+
+struct StrSplit {
+    struct Str  left;
+    struct Str  right;
+    bool found;
+};
+
+struct Str str_slice(struct Str s, isize start, isize end) {
+    return s.slice(start, end);
+}
+
+isize str_find_byte(struct Str s, char c) {
+    return s.find_byte(c);
+}
+
+struct StrSplit str_split_once(struct Str s, char sep) {
+    isize idx = s.find_byte(sep);
+    if (idx < 0) {
+        struct StrSplit r;
+        r.left  = s;
+        r.right = str_from_parts(s.ptr + s.len, 0);
+        r.found = false;
+        return r;
+    }
+    struct StrSplit r;
+    r.left  = str_from_parts(s.ptr, idx);
+    r.right = str_from_parts(s.ptr + idx + 1, s.len - idx - 1);
+    r.found = true;
+    return r;
+}
