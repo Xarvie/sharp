@@ -21,6 +21,8 @@
  *   2 = I/O error or bad command line
  *   3 = link failure
  */
+#define _POSIX_C_SOURCE 200809L  /* strdup, readlink */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,6 +34,9 @@
   #include <unistd.h>
   #include <sys/wait.h>
   #include <pthread.h>
+  #ifdef __APPLE__
+    #include <mach-o/dyld.h>
+  #endif
 #else
   #include <windows.h>
   #include <io.h>
@@ -47,54 +52,95 @@
 #include "cpp_sys_paths.h"
 #include "sharp_internal.h"
 
-/* ── Sharp.toml config reader ─────────────────────────────────────── */
-
-/* Returns the value for a given key, preferring platform-specific key,
- * then generic key, then returns NULL.  Caller must not free.          */
-static const char *sharp_config_get(const char *cfg_path, const char *key) {
-    /* Platform suffix mapping */
+/* ── Std library path: derived from sharpc executable location ────── */
+/*
+ * Finds {sharp_root}/sharp/std/ by locating the directory of the
+ * sharpc executable and walking up to its project root.
+ *
+ * Resolution order (first found wins):
+ *   1. <exe_dir>/../sharp/std/
+ *   2. <exe_dir>/sharp/std/               (exe is at repo root)
+ *   3. SHARP_ROOT environment variable
+ *
+ * Returns a malloc'd string (caller frees), or NULL if not found.
+ * Returns an allocated path even if the directory doesn't exist —
+ * callers can create it or warn.
+ */
+static char *sharp_find_std_dir(void) {
 #ifdef _WIN32
-    const char *plat = "windows";
+    char exe_path[MAX_PATH];
+    DWORD len = GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
+    if (len == 0 || len >= sizeof(exe_path)) return NULL;
 #elif defined(__APPLE__)
-    const char *plat = "macos";
+    char exe_path[4096];
+    uint32_t size = sizeof(exe_path);
+    if (_NSGetExecutablePath(exe_path, &size) != 0) return NULL;
+    char *rp = realpath(exe_path, NULL);
+    if (!rp) return NULL;
+    /* copy to stack since we need to free rp */
+    size_t rplen = strlen(rp);
+    if (rplen >= sizeof(exe_path)) { free(rp); return NULL; }
+    memcpy(exe_path, rp, rplen + 1);
+    free(rp);
 #else
-    const char *plat = "linux";
+    char exe_path[4096];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len <= 0 || (size_t)len >= sizeof(exe_path)) return NULL;
+    exe_path[len] = '\0';
 #endif
 
-    static char fallback_buf[256];
-    fallback_buf[0] = '\0';
-    char plat_key[128];
-    snprintf(plat_key, sizeof plat_key, "%s.%s", key, plat);
+    /* Get the directory containing the executable */
+    char exe_dir[4096];
+    {
+        /* Find last separator */
+        const char *sep = NULL;
+#ifdef _WIN32
+        const char *bs = strrchr(exe_path, '\\');
+        const char *fs = strrchr(exe_path, '/');
+        sep = (bs > fs) ? bs : fs;
+#else
+        sep = strrchr(exe_path, '/');
+#endif
+        if (!sep) return NULL;
+        size_t dirlen = (size_t)(sep - exe_path);
+        if (dirlen >= sizeof(exe_dir)) return NULL;
+        memcpy(exe_dir, exe_path, dirlen);
+        exe_dir[dirlen] = '\0';
+    }
 
-    FILE *cfg = fopen(cfg_path, "r");
-    if (!cfg) return NULL;
+    /* Candidate paths to try */
+    const char *candidates[] = {
+        "sharp/std",      /* <exe_dir>/sharp/std/ */
+        "../sharp/std",   /* <exe_dir>/../sharp/std/ */
+    };
 
-    char line[512];
-    while (fgets(line, sizeof line, cfg)) {
-        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
-        char k[64], val[256];
-        if (sscanf(line, " %63[^=]= %255[^\n\r]", k, val) != 2) continue;
-        /* Strip quotes */
-        size_t vl = strlen(val);
-        if (vl >= 2 && val[0] == '"' && val[vl - 1] == '"') {
-            val[vl - 1] = '\0';
-            memmove(val, val + 1, vl - 1);
-            vl -= 2;
-        }
-        while (vl > 0 && (val[vl - 1] == ' ' || val[vl - 1] == '\t')) val[--vl] = '\0';
-        /* Platform-specific key takes precedence */
-        if (strcmp(k, plat_key) == 0) {
-            fclose(cfg);
-            strncpy(fallback_buf, val, sizeof fallback_buf - 1);
-            return fallback_buf;
-        }
-        if (strcmp(k, key) == 0) {
-            strncpy(fallback_buf, val, sizeof fallback_buf - 1);
-            /* Keep reading in case a platform-specific override follows */
+    for (int i = 0; i < 2; i++) {
+        char candidate[4096];
+        int n = snprintf(candidate, sizeof(candidate),
+                        "%s/%s", exe_dir, candidates[i]);
+        if (n <= 0 || (size_t)n >= sizeof(candidate)) continue;
+#ifdef _WIN32
+        DWORD attr = GetFileAttributesA(candidate);
+        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+#else
+        struct stat st;
+        if (stat(candidate, &st) == 0 && S_ISDIR(st.st_mode)) {
+#endif
+            return strdup(candidate);
         }
     }
-    fclose(cfg);
-    return fallback_buf[0] ? fallback_buf : NULL;
+
+    /* SHARP_ROOT env var fallback */
+    const char *env = getenv("SHARP_ROOT");
+    if (env && env[0]) {
+        char candidate[4096];
+        int n = snprintf(candidate, sizeof(candidate), "%s/sharp/std", env);
+        if (n > 0 && (size_t)n < sizeof(candidate)) {
+            return strdup(candidate);
+        }
+    }
+
+    return NULL;
 }
 
 /* ── Compilation action ────────────────────────────────────────────── */
@@ -1272,6 +1318,19 @@ int main(int argc, char *argv[]) {
                 "  Then add the zig directory to your PATH.\n");
             ret = 3;
             goto cleanup;
+        }
+    }
+
+    /* Find sharp/std/ relative to the sharpc executable */
+    {
+        char *std_dir = sharp_find_std_dir();
+        if (std_dir) {
+            sv_push(&user_inc, std_dir);
+        } else {
+            fprintf(stderr,
+                "sharpc: warning: cannot locate sharp/std/ directory.\n"
+                "  Set SHARP_ROOT env var pointing to your sharp repository root.\n"
+                "  Example: export SHARP_ROOT=/path/to/sharp\n");
         }
     }
 
