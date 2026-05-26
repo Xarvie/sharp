@@ -629,6 +629,15 @@ static void build_struct(Scope *file_scope, AstNode *sd, FeDiagArr *diags) {
             }
         }
     }
+
+    /* Pass 3: register methods as SYM_METHOD in struct scope.
+     * This is required for @has_method(T, name) to find class methods
+     * at both template-definition time and specialization time. */
+    for (size_t i = 0; i < sd->u.struct_def.methods.len; i++) {
+        AstNode *md = sd->u.struct_def.methods.data[i];
+        if (!md || !md->u.func_def.name) continue;
+        scope_define(ss, SYM_METHOD, md->u.func_def.name, md, diags);
+    }
 }
 
 /* Recursive scope building forward decls */

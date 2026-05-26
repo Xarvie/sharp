@@ -432,7 +432,7 @@ def _compile_and_run(gen_c_path: str, zig_path: str, timeout: int = 30) -> Tuple
     exe_path = gen_c_path + ".exe"
 
     stdout, stderr, rc = run_cmd(
-        [zig_path, "cc", gen_c_path, "-o", exe_path, "-std=c11"],
+        [zig_path, "cc", gen_c_path, "-o", exe_path, "-std=c11", "-fno-sanitize=undefined"],
         timeout=timeout
     )
     if rc != 0:

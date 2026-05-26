@@ -5654,7 +5654,28 @@ static AstNode *parse_stmt(PS *ps) {
         ps_expect(ps, STOK_LPAREN, "switch '('");
         n->u.switch_.cond = parse_expr(ps);
         ps_expect(ps, STOK_RPAREN, "switch ')'");
-        n->u.switch_.body = parse_stmt(ps);
+        AstNode *body = parse_stmt(ps);
+        /* Duff's device / switch-without-braces: when the body is a case
+         * or default label (not wrapped in {}), the statements that follow
+         * — including cascade labels (case 0: case 1: stmt;) and mixed
+         * case/body sequences — belong inside the switch.  We collect them
+         * into a synthetic block so codegen wraps them correctly. */
+        if (body && (body->kind == AST_CASE || body->kind == AST_DEFAULT)) {
+            AstNode *block = ast_node_new(AST_BLOCK, body->loc);
+            astvec_push(&block->u.block.stmts, body);
+            int had_body = 0;
+            while (!ps_at(ps, STOK_EOF)) {
+                SharpTok peek = ps_peek(ps);
+                if (had_body && peek.kind != STOK_CASE && peek.kind != STOK_DEFAULT)
+                    break;
+                AstNode *stmt = parse_stmt(ps);
+                if (!stmt) break;
+                astvec_push(&block->u.block.stmts, stmt);
+                had_body = (stmt->kind != AST_CASE && stmt->kind != AST_DEFAULT);
+        }
+        body = block;
+    }
+        n->u.switch_.body = body;
         return n;
     }
 

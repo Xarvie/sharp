@@ -144,6 +144,42 @@ _Bool Point__op_eq(Point * this, Point other) {
     return this->x == other.x && this->y == other.y;
 }
 
+#line 55 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 59 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 64 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 69 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 73 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 88 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 104 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 113 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 125 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 129 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 130 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 132 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 141 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 149 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 158 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 177 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 189 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
+#line 196 "sharp-test/c_superset_probes/p220_hashmap.sp"
+
 #line 226 "sharp-test/c_superset_probes/p220_hashmap.sp"
 int main() {
 
@@ -392,10 +428,10 @@ __attribute__((weak)) _Bool HashMap__Point__int__is_empty(HashMap__Point__int * 
 __attribute__((weak)) _Bool HashMap__Point__int__insert(HashMap__Point__int * this, Point key, int value) {
 
 #line 89 "sharp-test/c_superset_probes/p220_hashmap.sp"
-    _Static_assert(0, "HashMap key type must define `usize hash() const`");
+    /* @static_assert */ 1;
 
 #line 91 "sharp-test/c_superset_probes/p220_hashmap.sp"
-    _Static_assert(0, "HashMap key type must define `bool operator==(K) const`");
+    /* @static_assert */ 1;
 
 #line 94 "sharp-test/c_superset_probes/p220_hashmap.sp"
     HashMap__Point__int___grow_if_needed(this);
@@ -428,10 +464,10 @@ __attribute__((weak)) _Bool HashMap__Point__int__insert(HashMap__Point__int * th
 __attribute__((weak)) int * HashMap__Point__int__get(HashMap__Point__int * this, Point key) {
 
 #line 105 "sharp-test/c_superset_probes/p220_hashmap.sp"
-    _Static_assert(0, "K needs hash()");
+    /* @static_assert */ 1;
 
 #line 106 "sharp-test/c_superset_probes/p220_hashmap.sp"
-    _Static_assert(0, "K needs operator==");
+    /* @static_assert */ 1;
 
 #line 107 "sharp-test/c_superset_probes/p220_hashmap.sp"
     if (this->cap == 0) 
@@ -461,10 +497,10 @@ __attribute__((weak)) _Bool HashMap__Point__int__contains(HashMap__Point__int * 
 __attribute__((weak)) _Bool HashMap__Point__int__remove(HashMap__Point__int * this, Point key) {
 
 #line 114 "sharp-test/c_superset_probes/p220_hashmap.sp"
-    _Static_assert(0, "K needs hash()");
+    /* @static_assert */ 1;
 
 #line 115 "sharp-test/c_superset_probes/p220_hashmap.sp"
-    _Static_assert(0, "K needs operator==");
+    /* @static_assert */ 1;
 
 #line 116 "sharp-test/c_superset_probes/p220_hashmap.sp"
     if (this->cap == 0) 

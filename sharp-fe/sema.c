@@ -2419,7 +2419,11 @@ static int eval_has_operator(SS *ss, const AstNode *expr) {
     /* Extension method fallback: search file scope for operator defined
      * as top-level `RetType StructName.operator+(params) { ... }`. */
     if (ss->ctx && ss->ctx->file_scope && t->u.struct_.name) {
+        /* Walk up to SCOPE_FILE — during specialization re-eval,
+         * ctx->file_scope may be a function-local scope. */
         Scope *fs = ss->ctx->file_scope;
+        while (fs && fs->kind != SCOPE_FILE) fs = fs->parent;
+        if (!fs) return 0;
         const char *sname = t->u.struct_.name;
         for (size_t b = 0; b < fs->nbuckets; b++) {
             Symbol *es = fs->buckets[b];
@@ -2523,7 +2527,12 @@ static int eval_has_method(SS *ss, const AstNode *expr) {
     /* Extension method fallback: search file scope for SYM_FUNC with
      * matching struct_name (non-operator, non-static methods). */
     if (!sym && ss->ctx && ss->ctx->file_scope && t->u.struct_.name) {
+        /* Walk up to the SCOPE_FILE scope — during generic
+         * specialization, ss->ctx->file_scope may be a function-local
+         * scope rather than the actual file scope. */
         Scope *fs = ss->ctx->file_scope;
+        while (fs && fs->kind != SCOPE_FILE) fs = fs->parent;
+        if (!fs) return 0;
         const char *sname = t->u.struct_.name;
         for (size_t b = 0; b < fs->nbuckets; b++) {
             Symbol *es = fs->buckets[b];
