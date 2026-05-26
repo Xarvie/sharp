@@ -4,7 +4,7 @@ class Arr<T> {
     long len;
 }
 
-long Arr<T>.size(this) const { return len; }
+long Arr<T>.size(this) const { return this->len; }
 
 int main(void) {
     long buf[3] = { 10, 20, 30 };

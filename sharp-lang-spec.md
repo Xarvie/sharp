@@ -491,9 +491,9 @@ Sharp 编译器生成 **C11** 代码（`-std=c11`）。生成的 C 文件可被�
 class Vec3 {
     float x; float y; float z;
 
-    // 糖：等价于 Vec3 operator+(Vec3 this, Vec3 rhs) { ... }
+    // 糖：等价于 Vec3 operator+(this, Vec3 rhs) { ... }
     Vec3 operator+(Vec3 rhs) {
-        return Vec3 { .x = this.x+rhs.x, .y = this.y+rhs.y, .z = this.z+rhs.z };
+        return Vec3 { .x = this->x+rhs.x, .y = this->y+rhs.y, .z = this->z+rhs.z };
     }
 
     float operator[](long i) const {
@@ -501,12 +501,10 @@ class Vec3 {
     }
 
     Vec3 operator-() {
-        return Vec3 { .x = -this.x, .y = -this.y, .z = -this.z };
+        return Vec3 { .x = -this->x, .y = -this->y, .z = -this->z };
     }
 }
 ```
-
-**糖规则:** class 体内的 `R operator<op>(Args)` 脱糖为 `R operator<op>(T this, Args)`（值传 `this`）。带 `const` 后缀时脱糖为 `R operator<op>(const T* this, Args)`。
 
 ### 自由函数形式
 

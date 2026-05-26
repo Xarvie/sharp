@@ -3,10 +3,10 @@ class Counter {
 };
 
 /* non-const method: T* this, can mutate */
-void Counter.inc(this) { count = count + 1; }
+void Counter.inc(this) { this->count = this->count + 1; }
 
 /* const method: const T* this, read-only */
-long Counter.get(this) const { return count; }
+long Counter.get(this) const { return this->count; }
 
 int main(void) {
     Counter c = { 0 };

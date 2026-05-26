@@ -3,14 +3,14 @@ class BBox {
 };
 
 /* const method with params */
-long BBox.area(this) const { return w * h; }
+long BBox.area(this) const { return this->w * this->h; }
 
 /* non-const setter */
-void BBox.move(this, long dx, long dy) { x = x + dx; y = y + dy; }
+void BBox.move(this, long dx, long dy) { this->x = this->x + dx; this->y = this->y + dy; }
 
 /* const getter with this check */
-long BBox.at_x(this) const { return x; }
-long BBox.at_y(this) const { return y; }
+long BBox.at_x(this) const { return this->x; }
+long BBox.at_y(this) const { return this->y; }
 
 int main(void) {
     BBox b = { 1, 2, 10, 20 };
