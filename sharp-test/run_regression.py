@@ -36,19 +36,10 @@ from typing import List, Tuple, Optional, Dict
 
 def _platform_defaults():
     if sys.platform == "win32":
-        return "build-mingw64", "sharpc.exe", "MinGW Makefiles"
-    return "build", "sharpc", "Unix Makefiles"
+        return "build", "sharpc.exe"
+    return "build", "sharpc"
 
-BUILD_DIR_NAME, SHARPC_NAME, CMAKE_GENERATOR = _platform_defaults()
-
-
-def find_cmake_in_env() -> str:
-    for p in os.environ.get("PATH", "").split(os.pathsep):
-        for name in ("cmake", "cmake.exe"):
-            candidate = Path(p) / name
-            if candidate.is_file():
-                return str(candidate)
-    raise SystemExit("ERROR: cannot find cmake binary")
+BUILD_DIR_NAME, SHARPC_NAME = _platform_defaults()
 
 
 def find_file_in_path(name: str, paths_str: str) -> Optional[str]:
@@ -191,16 +182,13 @@ BACKENDS: Dict[str, type] = {"zig": ZigBackend}
 
 def find_project_root(base_dir: Path) -> Optional[Path]:
     candidate = base_dir.parent
-    if (candidate / "CMakeLists.txt").is_file():
+    if (candidate / "build.py").is_file():
         return candidate
     return None
 
 
-def find_build_dir(project_root: Path) -> Optional[Path]:
-    d = project_root / BUILD_DIR_NAME
-    if d.is_dir() and (d / "CMakeCache.txt").is_file():
-        return d
-    return d
+def find_build_dir(project_root: Path) -> Path:
+    return project_root / BUILD_DIR_NAME
 
 
 def needs_rebuild(sharpc_path: Path, project_root: Path) -> bool:
@@ -220,26 +208,10 @@ def needs_rebuild(sharpc_path: Path, project_root: Path) -> bool:
 
 
 def build_sharpc(build_dir: Path, project_root: Path) -> Tuple[bool, str]:
-    cmake_bin = find_cmake_in_env()
-    zig_path, _ = ZigBackend.find()
-
-    if not (build_dir / "CMakeCache.txt").is_file():
-        print(f"[build] configuring in {build_dir} ...")
-        build_dir.mkdir(parents=True, exist_ok=True)
-        stdout, stderr, rc = run_cmd(
-            [cmake_bin, str(project_root),
-             f"-DCMAKE_C_COMPILER={zig_path}",
-             "-DCMAKE_C_COMPILER_ARG1=cc",
-             "-G", CMAKE_GENERATOR],
-            timeout=120
-        )
-        if rc != 0:
-            return False, f"cmake configure failed: {(stderr or stdout).strip()}"
-        print("[build] configure done.")
-
-    print("[build] compiling sharpc ...")
+    build_py = project_root / "build.py"
+    print("[build] python build.py sharpc ...")
     stdout, stderr, rc = run_cmd(
-        [cmake_bin, "--build", str(build_dir), "--target", "sharpc"],
+        [sys.executable, str(build_py), "sharpc"],
         timeout=120
     )
     if rc != 0:
