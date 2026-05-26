@@ -463,8 +463,7 @@ static int apply_define(CppCtx *ctx, const char *spec) {
 /* Recognise compilation-only flags that the driver should accept and
  * ignore (so `sharpc` can be substituted for `cc` without the build
  * system having to filter them out).
- * Returns number of args to skip (0 = not ignored, 1 = skip just flag,
- * 2 = skip flag + its argument). */
+ * Returns: 0 = not ignored, 1 = skip just this flag. */
 static int is_ignored_flag(const char *a) {
     if (strncmp(a, "-W", 2) == 0)    return 1;   /* any -W... */
     if (strncmp(a, "-f", 2) == 0)    return 1;   /* any -f... */
@@ -774,10 +773,7 @@ static char *compile_one_file(const char *input,
     cpp_emit_linemarkers(cctx, false);
     if (lang_std >= 0) cpp_set_lang_std(cctx, lang_std);
 
-    /* Auto-detect system include paths by querying zig cc directly.
-     * Returns the compiler's built-in search directories with correct
-     * priority for the given target. */
-    cpp_detect_zig_sys_paths(cctx, target);
+    /* ── Auto-detect system paths are already in sys_inc from main() ── */
 
     for (size_t i = 0; i < user_inc->len; i++)
         cpp_add_user_include(cctx, user_inc->data[i]);
@@ -825,72 +821,7 @@ static char *compile_one_file(const char *input,
     AstNode *ast = parse_file_with_typedefs(toks, ntoks, input, &pd,
                                             NULL);
 
-    /* Extract #include directives from the original source file */
-    if (ast && toks && ntoks > 0) {
-        const char **_seen = NULL;
-        size_t _nseen = 0, _seen_cap = 0;
-        for (size_t _ti = 0; _ti < ntoks; _ti++) {
-            const char *_f = toks[_ti].loc.file;
-            if (!_f || !*_f || *_f == '<' || strcmp(_f, input) == 0) continue;
-            bool _dup = false;
-            for (size_t _k = 0; _k < _nseen && !_dup; _k++)
-                if (_seen[_k] == _f) _dup = true;
-            if (_dup) continue;
-            if (_nseen >= _seen_cap) {
-                _seen_cap = _seen_cap ? _seen_cap * 2 : 64;
-                _seen = realloc(_seen, _seen_cap * sizeof *_seen);
-            }
-            _seen[_nseen++] = _f;
-        }
-
-        FILE *_src_fp = fopen(input, "r");
-        if (_src_fp) {
-            char _line[1024];
-            while (fgets(_line, sizeof _line, _src_fp)) {
-                char *_p = _line;
-                while (*_p == ' ' || *_p == '\t') _p++;
-                if (*_p != '#') continue;
-                _p++;
-                while (*_p == ' ' || *_p == '\t') _p++;
-                if (strncmp(_p, "include", 7) != 0) continue;
-                _p += 7;
-                while (*_p == ' ' || *_p == '\t') _p++;
-                if (*_p != '<' && *_p != '"') continue;
-
-                char _fname[512];
-                char _delim_end = (*_p == '<') ? '>' : '"';
-                const char *_s = _p + 1;
-                const char *_e = strchr(_s, _delim_end);
-                if (!_e) continue;
-                size_t _flen = (size_t)(_e - _s);
-                if (_flen == 0 || _flen >= sizeof _fname) continue;
-                memcpy(_fname, _s, _flen); _fname[_flen] = '\0';
-
-                const char *_bn = strrchr(_fname, '/');
-                _bn = _bn ? _bn + 1 : _fname;
-
-                bool _found = false;
-                for (size_t _k = 0; _k < _nseen && !_found; _k++) {
-                    const char *_sbn = strrchr(_seen[_k], '/');
-                    _sbn = _sbn ? _sbn + 1 : _seen[_k];
-                    if (strcmp(_sbn, _bn) == 0) _found = true;
-                }
-                if (!_found) continue;
-
-                char *_end2 = _p + strlen(_p) - 1;
-                while (_end2 > _p && (*_end2 == '\n' || *_end2 == '\r' ||
-                                      *_end2 == ' '  || *_end2 == '\t'))
-                    *_end2-- = '\0';
-                char _inc[1024];
-                snprintf(_inc, sizeof _inc, "#include %s", _p);
-                file_add_include(ast, _inc);
-            }
-            fclose(_src_fp);
-        }
-        free(_seen);
-    }
-
-    /* Linemarkers */
+    /* ── Extract #include lines from preprocessor linemarkers ────── */
     if (ast && r.text) {
         const char *p = r.text;
         const char *stk[256];
@@ -1310,16 +1241,11 @@ int main(int argc, char *argv[]) {
             f->path = a;
 
         /* ── Silently accepted no-ops ────────────────────────────── */
-        } else {
-            int skip = is_ignored_flag(a);
-            if (skip) {
-                if (skip >= 2 && i + 1 < argc) i++;   /* skip flag's argument */
-            } else {
+        } else if (!is_ignored_flag(a)) {
             fprintf(stderr, "sharpc: unknown option '%s'\n", a);
             usage(stderr);
             ret = 2;
             goto cleanup;
-        }
         }
     }
 
