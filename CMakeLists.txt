@@ -13,8 +13,8 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-set(CMAKE_C_FLAGS_DEBUG "-g -O0 -Wall -Wextra -DDEBUG")
-set(CMAKE_C_FLAGS_RELEASE "-O2 -Wall -Wextra -DNDEBUG")
+set(CMAKE_C_FLAGS_DEBUG "-g -O0 -Wall -Wextra -Wno-deprecated-declarations -DDEBUG")
+set(CMAKE_C_FLAGS_RELEASE "-O2 -Wall -Wextra -Wno-deprecated-declarations -DNDEBUG")
 
 # -------------------------------------------------------------------
 # Preprocessor / compiler sources

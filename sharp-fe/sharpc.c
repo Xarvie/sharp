@@ -197,23 +197,24 @@ static InputFile *iv_push(InputVec *v) {
     return &v->data[v->len++];
 }
 
-/* ── Temp file cleanup ────────────────────────────────────────────── */
+/* ── Global session ─────────────────────────────────────────────── */
 
-static const char **tmp_files = NULL;
-static size_t       n_tmp_files = 0;
+SharpSess g_sess = {0};
+
+/* ── Temp file cleanup ────────────────────────────────────────────── */
 
 static void register_tmp(const char *path) {
     if (!path) return;
-    tmp_files = realloc(tmp_files, (n_tmp_files + 1) * sizeof *tmp_files);
-    if (!tmp_files) return;
-    tmp_files[n_tmp_files++] = path;
+    g_sess.tmp_files = realloc(g_sess.tmp_files, (g_sess.n_tmp_files + 1) * sizeof *g_sess.tmp_files);
+    if (!g_sess.tmp_files) return;
+    g_sess.tmp_files[g_sess.n_tmp_files++] = path;
 }
 
 static void cleanup_tmp_files(void) {
     const char *keep_env = getenv("SHARPC_KEEP_TMP");
-    for (size_t i = 0; i < n_tmp_files; i++) {
+    for (size_t i = 0; i < g_sess.n_tmp_files; i++) {
         if (keep_env) {
-            const char *src = tmp_files[i];
+            const char *src = g_sess.tmp_files[i];
             FILE *sf = fopen(src, "r");
             if (sf) {
                 /* Find basename for the kept file */
@@ -231,12 +232,12 @@ static void cleanup_tmp_files(void) {
                 fclose(sf);
             }
         }
-        unlink(tmp_files[i]);
-        free((void *)tmp_files[i]);
+        unlink(g_sess.tmp_files[i]);
+        free((void *)g_sess.tmp_files[i]);
     }
-    free(tmp_files);
-    tmp_files = NULL;
-    n_tmp_files = 0;
+    free(g_sess.tmp_files);
+    g_sess.tmp_files = NULL;
+    g_sess.n_tmp_files = 0;
 }
 
 #ifndef _WIN32
@@ -301,7 +302,6 @@ static char *make_tmp_name(const char *prefix, const char *suffix) {
  * zig cc spawns sub-processes (compiler_rt) that inherit pipe handles;
  * with system(), all output goes through a temp file — no pipes.      */
 static int run_cmd(const char **argv) {
-    extern int g_verbose;
 
     /* Build command line string from argv */
     char cmd[4096];
@@ -336,7 +336,7 @@ static int run_cmd(const char **argv) {
 #endif
 
     char full[8192];
-    if (g_verbose)
+    if (g_sess.verbose)
         snprintf(full, sizeof(full), "%s 2> \"%s\"", cmd, err_path);
     else
         snprintf(full, sizeof(full), "%s > NUL 2> \"%s\"", cmd, err_path);
@@ -355,8 +355,6 @@ static int run_cmd(const char **argv) {
     remove(err_path);
     return rc;
 }
-
-int g_verbose = 0;
 
 /* ── File I/O ────────────────────────────────────────────────────────── */
 
@@ -1204,7 +1202,7 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
             usage(stdout); goto cleanup;
         } else if (strcmp(a, "-v") == 0) {
-            g_verbose = 1;
+            g_sess.verbose = 1;
 
         /* ── Target ──────────────────────────────────────────────── */
         } else if (strcmp(a, "--target") == 0 && i + 1 < argc) {
@@ -1386,7 +1384,7 @@ int main(int argc, char *argv[]) {
                                    replace_ext(inf->path, ".s");
 
             const char *zig_argv[] = {zig_exe, "cc", "-S", tmp_c, "-o", out_file, NULL};
-            if (g_verbose) {
+            if (g_sess.verbose) {
                 fprintf(stderr, "%s", zig_argv[0]);
                 for (int ai = 1; zig_argv[ai]; ai++) fprintf(stderr, " %s", zig_argv[ai]);
                 fprintf(stderr, "\n");
@@ -1396,7 +1394,7 @@ int main(int argc, char *argv[]) {
                 ret = 3;
                 goto cleanup;
             }
-            if (g_verbose)
+            if (g_sess.verbose)
                 fprintf(stderr, "sharpc: wrote %s\n", out_file);
             if (inputs.len != 1 || !output)
                 free((void *)out_file);
@@ -1423,7 +1421,7 @@ int main(int argc, char *argv[]) {
             if (!f) { perror(output); ret = 2; goto cleanup; }
             fputs(inputs.data[0].tmp_c, f);
             fclose(f);
-            if (g_verbose)
+            if (g_sess.verbose)
                 fprintf(stderr, "sharpc: wrote %s\n", output);
             goto cleanup;
         }
@@ -1456,7 +1454,7 @@ int main(int argc, char *argv[]) {
                 sv_push(&zig_args, link_other.data[li]);
             sv_push(&zig_args, NULL);
 
-            if (g_verbose) {
+            if (g_sess.verbose) {
                 fprintf(stderr, "%s", zig_args.data[0]);
                 for (int ai = 1; zig_args.data[ai]; ai++) fprintf(stderr, " %s", zig_args.data[ai]);
                 fprintf(stderr, "\n");
@@ -1467,7 +1465,7 @@ int main(int argc, char *argv[]) {
                 ret = 3;
                 goto cleanup;
             }
-            if (g_verbose)
+            if (g_sess.verbose)
                 fprintf(stderr, "sharpc: wrote %s\n", obj_out);
             if (inputs.len != 1 || !output)
                 free((void *)obj_out);
@@ -1508,7 +1506,7 @@ int main(int argc, char *argv[]) {
             sv_push(&zig_args, link_other.data[li]);
         sv_push(&zig_args, NULL);
 
-        if (g_verbose) {
+        if (g_sess.verbose) {
             fprintf(stderr, "[sharpc] ");
             for (int ai = 0; zig_args.data[ai]; ai++) fprintf(stderr, "%s ", zig_args.data[ai]);
             fprintf(stderr, "\n");
@@ -1548,7 +1546,7 @@ int main(int argc, char *argv[]) {
         sv_push(&ld_args, link_other.data[li]);
     sv_push(&ld_args, NULL);
 
-    if (g_verbose) {
+    if (g_sess.verbose) {
         fprintf(stderr, "[sharpc] ");
         for (int ai = 0; ld_args.data[ai]; ai++) fprintf(stderr, "%s ", ld_args.data[ai]);
         fprintf(stderr, "\n");
@@ -1562,7 +1560,7 @@ int main(int argc, char *argv[]) {
     free(ld_args.data);
     free(obj_files.data);
 
-    if (g_verbose)
+    if (g_sess.verbose)
         fprintf(stderr, "sharpc: wrote %s\n", output);
 
 cleanup:

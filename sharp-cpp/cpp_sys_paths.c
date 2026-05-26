@@ -66,6 +66,35 @@ static void add_sys_path_if_valid(CppCtx *ctx, const char *path) {
  * Returns the dir path in out_buf (size MAX_PATH), or NULL on failure. */
 static const char *try_find_zig_dir(char *out_buf, size_t buf_size) {
 #ifdef _WIN32
+    /* Priority 1: same directory as the running sharpc.exe */
+    char sharpc_path[MAX_PATH];
+    DWORD sharpc_len = GetModuleFileNameA(NULL, sharpc_path, sizeof(sharpc_path));
+    if (sharpc_len > 0 && sharpc_len < sizeof(sharpc_path)) {
+        char *sep = strrchr(sharpc_path, '\\');
+        if (!sep) sep = strrchr(sharpc_path, '/');
+        if (sep) {
+            *sep = '\0';
+            char test[MAX_PATH];
+            snprintf(test, sizeof test, "%s\\zig\\lib\\libc", sharpc_path);
+            if (PathIsDirectoryA(test)) {
+                snprintf(out_buf, buf_size, "%s\\zig", sharpc_path);
+                return out_buf;
+            }
+            /* Also check parent directory */
+            sep = strrchr(sharpc_path, '\\');
+            if (!sep) sep = strrchr(sharpc_path, '/');
+            if (sep) {
+                *sep = '\0';
+                snprintf(test, sizeof test, "%s\\zig\\lib\\libc", sharpc_path);
+                if (PathIsDirectoryA(test)) {
+                    snprintf(out_buf, buf_size, "%s\\zig", sharpc_path);
+                    return out_buf;
+                }
+            }
+        }
+    }
+
+    /* Priority 2: PATH search */
     if (!SearchPathA(NULL, "zig.exe", NULL, (DWORD)buf_size, out_buf, NULL))
         return NULL;
     char *last_sep = strrchr(out_buf, '\\');
@@ -1058,8 +1087,6 @@ void cpp_detect_zig_sys_paths(CppCtx *ctx, const char *target) {
         add_sys_path_if_valid(ctx, p);
         snprintf(p, sizeof p, "%s\\lib\\libc\\mingw\\include", zig_dir);
         add_sys_path_if_valid(ctx, p);
-        detect_msvc_paths(ctx);
-        detect_windows_sdk_paths(ctx);
         return;
     }
 
@@ -1068,8 +1095,6 @@ void cpp_detect_zig_sys_paths(CppCtx *ctx, const char *target) {
         add_sys_path_if_valid(ctx, p);
         snprintf(p, sizeof p, "%s\\lib\\libc\\mingw\\include", zig_dir);
         add_sys_path_if_valid(ctx, p);
-        detect_msvc_paths(ctx);
-        detect_windows_sdk_paths(ctx);
     } else if (strcmp(target_os, "linux") == 0) {
         int is_x86 = target && (strncmp(target, "x86_64", 6) == 0 ||
                                 strncmp(target, "x86-", 4) == 0);
