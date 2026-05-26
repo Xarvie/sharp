@@ -4486,7 +4486,6 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
     case SC_EXTERN:   cg_puts(ctx, "extern ");   break;
     case SC_REGISTER: cg_puts(ctx, "register "); break;
     case SC_TYPEDEF:  break;
-    case SC_AUTO_C:   break;
     case SC_NONE:     break;
     }
     /* C11 _Noreturn -- emitted after storage class, before return type */

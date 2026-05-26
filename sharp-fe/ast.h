@@ -80,8 +80,6 @@ void astvec_free(AstVec *v);               /* frees .data; nodes freed separatel
  *   SC_TYPEDEF is a storage class in the C grammar even though it semantically
  *   creates a type alias rather than a variable; we produce AST_TYPEDEF_DECL
  *   in that case and never carry SC_TYPEDEF on a VAR_DECL or FUNC_DEF.
- *   SC_AUTO_C is C's `auto` storage class — distinct from Sharp's
- *   AST_TYPE_AUTO (type deduction).  Modern C code never uses it.
  * ---------------------------------------------------------------------- */
 typedef enum {
     SC_NONE     = 0,
@@ -89,7 +87,6 @@ typedef enum {
     SC_EXTERN,
     SC_TYPEDEF,
     SC_REGISTER,
-    SC_AUTO_C,
 } StorageClass;
 
 /* -------------------------------------------------------------------------
