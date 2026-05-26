@@ -2406,7 +2406,7 @@ static void process_buf(CppState *st, CppReader *rd) {
              * below when checking is_func.  Previously this loop did two
              * separate hash+strcmp passes ({lookup, then lookup_is_func})
              * for every identifier in the source — gprof showed
-             * macro_lookup_is_func at 20%+ self-time after Phase 9.  The
+             * macro_def_is_func at 20%+ self-time after Phase 9.  The
              * cached pointer lets us drop the second pass to a single
              * memory read (def->is_func).                                */
             MacroDef *_macdef = !t.hide ? macro_lookup(st->macros, name) : NULL;
@@ -2761,9 +2761,6 @@ size_t       cpp_state_ntokens(const CppState *st)  { return st->out_tokens.len;
 /* Transfer ownership of the raw output text buffer to the caller.
  * After this call, st->out_text is empty (will not be double-freed).      */
 char *cpp_state_take_text(CppState *st) { return sb_take(&st->out_text); }
-
-/* Bridge used by cpp.c */
-MacroTable *macro_state_table(CppState *st) { return st->macros; }
 
 /* parse_int_literal_pub is now defined in expr.c — Phase 3 unified the
  * integer-literal parsing under one Value-typed implementation, and this

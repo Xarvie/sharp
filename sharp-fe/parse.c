@@ -28,7 +28,7 @@
  *
  * Scope is per parse_file invocation; the set lives on the PS and is
  * pushed-into every time a `typedef ... NAME;` declarator is built (see
- * parse_top_decl and parse_var_decl_list).  We do not pop on block
+ * parse_top_decl and parse_init_declarator_list).  We do not pop on block
  * exit — once a typedef name is seen at file scope it stays valid for
  * the rest of the translation unit, which is the only context where
  * this disambiguation matters in practice.  Block-scope typedefs are
@@ -151,7 +151,7 @@ typedef struct {
     FeDiagArr      *diags;
     bool            in_defer;      /* true while inside a defer body       */
     int             pending_close; /* leftover '>' from a split '>>'       */
-    /* Multi-variable declarations: parse_var_decl_list pushes the *first*
+    /* Multi-variable declarations: parse_init_declarator_list pushes the *first*
      * decl as the function's "return value" and queues the rest here.
      * parse_file / parse_block / for-init drain this before re-entering
      * the recogniser.  This lets multi-decls work without changing every
@@ -3041,9 +3041,9 @@ static AstNode *parse_array_suffix(PS *ps, AstNode *inner_ty) {
 }
 
 /* =========================================================================
- * S1: parse_init_declarator_list
+ * parse_init_declarator_list — the code:gen:line:markers:rework S1 pass.
  *
- * Replaces the old type-prefix `parse_var_decl_list`.  The caller has
+ * Replaces the old type-prefix declarator-list parser.  The caller has
  * already consumed the decl-specifiers (storage class + type qualifiers
  * + base type-specifier).  This function loops over comma-separated
  * declarators; each can have its own pointer prefix and array/function
