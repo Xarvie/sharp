@@ -29,6 +29,28 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* -------------------------------------------------------------------------
+ * Session-global state — initialised once at process startup.
+ * Both sharp-cpp and sharp-fe access it without cross-module coupling.
+ * ---------------------------------------------------------------------- */
+#ifndef MAX_PATH
+  #ifdef _WIN32
+    #define MAX_PATH 260
+  #else
+    #define MAX_PATH 4096
+  #endif
+#endif
+
+typedef struct {
+    char        zig_exe[MAX_PATH];
+    int         zig_found;
+    const char **tmp_files;
+    size_t      n_tmp_files;
+    int         verbose;
+} SharpSess;
+
+extern SharpSess g_sess;
+
 #ifdef __cplusplus
 extern "C" {
 #endif

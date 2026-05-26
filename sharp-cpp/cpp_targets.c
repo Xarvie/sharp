@@ -8,7 +8,6 @@
  */
 #include "cpp.h"
 #include "macro.h"
-#include "../sharp-fe/sharp_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

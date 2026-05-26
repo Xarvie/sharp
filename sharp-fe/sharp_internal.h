@@ -77,26 +77,6 @@ struct SharpCtx {
 };
 
 /* =========================================================================
- * SharpSess — global session state initialised once at startup.
- *
- * Holds all mutable process-wide state (zig path, temp-file list,
- * verbosity) so no hidden file-scope statics are needed.
- * ====================================================================== */
-#ifndef MAX_PATH
-#define MAX_PATH 260
-#endif
-typedef struct {
-    char        zig_exe[MAX_PATH];
-    int         zig_found;
-    char        zig_dir[MAX_PATH];
-    const char **tmp_files;
-    size_t      n_tmp_files;
-    int         verbose;
-} SharpSess;
-
-extern SharpSess g_sess;
-
-/* =========================================================================
  * Null-location sentinel (for internal errors without a source position)
  * ====================================================================== */
 static inline CppLoc fe_noloc(void) {
