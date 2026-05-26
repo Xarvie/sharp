@@ -456,7 +456,9 @@ static int apply_define(CppCtx *ctx, const char *spec) {
 
 /* Recognise compilation-only flags that the driver should accept and
  * ignore (so `sharpc` can be substituted for `cc` without the build
- * system having to filter them out). */
+ * system having to filter them out).
+ * Returns number of args to skip (0 = not ignored, 1 = skip just flag,
+ * 2 = skip flag + its argument). */
 static int is_ignored_flag(const char *a) {
     if (strncmp(a, "-W", 2) == 0)    return 1;   /* any -W... */
     if (strncmp(a, "-f", 2) == 0)    return 1;   /* any -f... */
@@ -464,6 +466,12 @@ static int is_ignored_flag(const char *a) {
     if (strcmp(a, "-pedantic")        == 0) return 1;
     if (strcmp(a, "-pedantic-errors") == 0) return 1;
     if (strcmp(a, "-ansi")            == 0) return 1;
+
+    /* CMake dependency tracking flags — accept+skip arg */
+    if (strcmp(a, "-MD")  == 0) return 1;
+    if (strcmp(a, "-MMD") == 0) return 1;
+    if (strcmp(a, "-MT")  == 0) return 2;   /* -MT <target> */
+    if (strcmp(a, "-MF")  == 0) return 2;   /* -MF <depfile> */
     return 0;
 }
 
@@ -1198,9 +1206,12 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(a, "-o") == 0 && i + 1 < argc) {
             output = argv[++i];
 
-        /* ── Help / verbose ──────────────────────────────────────── */
+        /* ── Help / version / verbose ──────────────────────────────── */
         } else if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
             usage(stdout); goto cleanup;
+        } else if (strcmp(a, "--version") == 0) {
+            fprintf(stdout, "sharpc %s\n", SHARP_VERSION);
+            goto cleanup;
         } else if (strcmp(a, "-v") == 0) {
             g_sess.verbose = 1;
 
@@ -1268,14 +1279,16 @@ int main(int argc, char *argv[]) {
             f->path = a;
 
         /* ── Silently accepted no-ops ────────────────────────────── */
-        } else if (is_ignored_flag(a)) {
-            /* drop */
-
         } else {
+            int skip = is_ignored_flag(a);
+            if (skip) {
+                if (skip >= 2 && i + 1 < argc) i++;   /* skip flag's argument */
+            } else {
             fprintf(stderr, "sharpc: unknown option '%s'\n", a);
             usage(stderr);
             ret = 2;
             goto cleanup;
+        }
         }
     }
 
@@ -1337,6 +1350,9 @@ int main(int argc, char *argv[]) {
     int had_error = 0;
     for (size_t fi = 0; fi < inputs.len; fi++) {
         InputFile *inf = &inputs.data[fi];
+
+        /* .o / .obj files are pre-built objects — skip preprocessing */
+        if (strcmp(file_ext(inf->path), ".o") == 0 || strcmp(file_ext(inf->path), ".obj") == 0) continue;
 
         if (action == ACTION_PREPROCESS) {
             /* -E: preprocess and output to stdout or -o file */
@@ -1483,6 +1499,13 @@ int main(int argc, char *argv[]) {
     StrVec obj_files = {0};
     for (size_t fi = 0; fi < inputs.len; fi++) {
         InputFile *inf = &inputs.data[fi];
+
+        /* Pre-built object files — add directly to link list */
+        if (strcmp(file_ext(inf->path), ".o") == 0 || strcmp(file_ext(inf->path), ".obj") == 0) {
+            sv_push(&obj_files, inf->path);
+            continue;
+        }
+
         if (!inf->tmp_c) continue;
         char *tmp_c = make_tmp_name(inf->path, ".c");
         if (!tmp_c) { ret = 2; goto cleanup; }

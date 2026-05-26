@@ -5,6 +5,8 @@ project(sharp
   DESCRIPTION "Sharp language compiler"
   LANGUAGES C)
 
+add_compile_definitions(SHARP_VERSION="${PROJECT_VERSION}")
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
