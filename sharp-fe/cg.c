@@ -5047,7 +5047,12 @@ static void cg_struct(CgCtx *ctx, const AstNode *sd) {
         cg_puts(ctx, "    ");
         cg_field_decl_from_ast(ctx, fd);
     }
-    cg_printf(ctx, "};\n\n");
+    /* Emit leading attrs (from 'struct __attribute__((...)) Tag') as
+     * trailing attrs after '}'.  C treats both positions identically. */
+    if (sd->u.struct_def.leading_attrs)
+        cg_printf(ctx, "} %s;\n\n", sd->u.struct_def.leading_attrs);
+    else
+        cg_printf(ctx, "};\n\n");
 
     /* Static member globals (file-scope C static variables) */
     for (size_t i = 0; i < sd->u.struct_def.fields.len; i++) {
@@ -7784,7 +7789,10 @@ static void cg_emit_decl_sharp(CgCtx *ctx, AstNode *d) {
                 cg_puts(ctx, "    ");
                 cg_field_decl_from_ast(ctx, d->u.struct_def.fields.data[i]);
             }
-            cg_puts(ctx, "};\n");
+            if (d->u.struct_def.leading_attrs)
+                cg_printf(ctx, "} %s;\n", d->u.struct_def.leading_attrs);
+            else
+                cg_puts(ctx, "};\n");
             cg_emit_methods(ctx, d);
         }
         break;
@@ -8326,7 +8334,10 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                     cg_puts(ctx, "    ");
                     cg_field_decl_from_ast(ctx, uw->u.struct_def.fields.data[fi]);
                 }
-                cg_puts(ctx, "};\n");
+                if (uw->u.struct_def.leading_attrs)
+                    cg_printf(ctx, "} %s;\n", uw->u.struct_def.leading_attrs);
+                else
+                    cg_puts(ctx, "};\n");
             }
             /* Forward-declare every method so spec bodies (Phase 3.5)
              * can call them.  cg_func_decl emits `RetType S__method(...)
