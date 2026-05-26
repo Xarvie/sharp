@@ -48,7 +48,6 @@ SHARP_SOURCES = [
     "sharp-fe/parse.c",
     "sharp-fe/scope.c",
     "sharp-fe/sema.c",
-    "sharp-fe/sharp.c",
     "sharp-fe/sharpc.c",
     "sharp-fe/type.c",
 ]

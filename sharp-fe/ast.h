@@ -684,10 +684,6 @@ AstNode *ast_clone_type(const AstNode *node);
  * Printing (debug / test)
  * ---------------------------------------------------------------------- */
 
-/** Print a human-readable S-expression representation of node to fp.
- *  indent controls the initial indentation depth (0 = top-level).        */
-void ast_print(const AstNode *node, int indent, FILE *fp);
-
 /** Return the name string for a kind (e.g. "AST_BINOP"). */
 const char *ast_kind_name(AstKind k);
 

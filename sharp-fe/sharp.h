@@ -72,58 +72,6 @@ typedef struct {
 
 typedef struct SharpCtx SharpCtx;
 
-/* -------------------------------------------------------------------------
- * Lifecycle
- * ---------------------------------------------------------------------- */
-
-/** Allocate a new frontend context with default settings. */
-SharpCtx *sharp_ctx_new(void);
-
-/** Free a context and all memory it owns. */
-void      sharp_ctx_free(SharpCtx *ctx);
-
-/* -------------------------------------------------------------------------
- * Configuration (call before sharp_compile_*)
- * ---------------------------------------------------------------------- */
-
-/**
- * Set the target triple used for platform-specific type sizes.
- * Recognised triples match those accepted by cpp_probe_zig_macros().
- * Default: "x86_64-linux-gnu".
- */
-void sharp_set_target(SharpCtx *ctx, const char *triple);
-
-/* -------------------------------------------------------------------------
- * Compilation entry points
- * ---------------------------------------------------------------------- */
-
-/**
- * Compile a Sharp source file end-to-end (runs cpp internally, then
- * the front-end on its output).
- */
-SharpResult sharp_compile_file(SharpCtx *ctx, const char *path);
-
-/**
- * Compile from a pre-tokenised stream produced by cpp_run() / cpp_run_buf().
- * 'filename' is used for diagnostics and #line directives.
- *
- * The caller retains ownership of the tokens array; the frontend does not
- * free it.
- */
-SharpResult sharp_compile_tokens(SharpCtx *ctx,
-                                 const CppTok *tokens, size_t ntokens,
-                                 const char *filename);
-
-/* -------------------------------------------------------------------------
- * Result helpers
- * ---------------------------------------------------------------------- */
-
-/** Free all heap memory inside a SharpResult (does NOT free the struct). */
-void sharp_result_free(SharpResult *res);
-
-/** Print all diagnostics to stderr in a clang-style format. */
-void sharp_print_diags(const SharpResult *res);
-
 #ifdef __cplusplus
 }
 #endif
