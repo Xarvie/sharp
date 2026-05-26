@@ -41,7 +41,4 @@ size_t      cpp_state_ntokens(const CppState *st);
  * without the full eval machinery. */
 long parse_int_literal_pub(const char *sp, bool *is_unsigned);
 
-/** Bridge: return the MacroTable owned by a CppState. */
-MacroTable *macro_state_table(CppState *st);
-
 #endif /* SHARP_CPP_DIRECTIVE_H */

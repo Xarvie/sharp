@@ -34,9 +34,6 @@ void reader_set_file(CppReader *rd, const char *filename);
 
 void reader_set_trigraphs(CppReader *rd, bool on);
 
-/** Return the reader's column number (1-based). */
-int reader_current_col(const CppReader *rd);
-
 /**
  * Produce the next preprocessing token.
  *

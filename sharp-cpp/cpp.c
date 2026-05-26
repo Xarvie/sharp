@@ -554,9 +554,5 @@ void cpp_print_diags(const CppResult *res) {
     }
 }
 
-/* =========================================================================
- * Bridge: macro_state_table — lets cpp.c get the MacroTable from CppState
- * without exposing CppState's internals in the header.
- * Defined here rather than directive.h to keep the coupling local.
- * ====================================================================== */
+
 
