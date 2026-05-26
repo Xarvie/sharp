@@ -60,6 +60,7 @@ CFLAGS = [
     "-O2",
     "-Wall", "-Wextra", "-Wno-deprecated-declarations",
     "-DNDEBUG",
+    '-DSHARP_VERSION="1.0.0"',
     "-I", str(ROOT / "sharp-fe"),
     "-I", str(ROOT / "sharp-cpp"),
 ]

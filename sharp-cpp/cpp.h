@@ -164,6 +164,15 @@ typedef struct {
     /* Non-NULL on fatal error: brief description (also appears in diags). */
     const char *error;
 
+    /* Included file paths — heap-allocated copies. Populated during
+     * preprocessing by handle_include.  Owned by the result; freed by
+     * cpp_result_free.  Used for dependency file generation (-MD).     */
+    char   **included_files;
+    size_t    nincluded;
+    /* Parallel to included_files: true if found via system include path.
+     * NULL if nincluded == 0.  Used to filter system headers for -MMD. */
+    bool     *included_is_sys;
+
     /* Raw pre-phase-6 text buffer.  CppTok.text pointers point into here.
      * Kept alive until cpp_result_free() so that token text is accessible. */
     char    *_raw_text;

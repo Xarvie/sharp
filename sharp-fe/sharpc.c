@@ -178,6 +178,9 @@ static char *xstrdup(const char *s) {
 typedef struct {
     const char *path;          /* original path (or "-" for stdin) */
     char       *tmp_c;         /* generated .c text (NULL if not yet generated) */
+    char      **included_files; /* files opened via #include (owned, freed on cleanup) */
+    size_t      nincluded;
+    bool       *included_is_sys; /* parallel to included_files, true = system header */
 } InputFile;
 
 typedef struct {
@@ -194,6 +197,9 @@ static InputFile *iv_push(InputVec *v) {
     }
     v->data[v->len].path = NULL;
     v->data[v->len].tmp_c = NULL;
+    v->data[v->len].included_files = NULL;
+    v->data[v->len].nincluded = 0;
+    v->data[v->len].included_is_sys = NULL;
     return &v->data[v->len++];
 }
 
@@ -398,7 +404,7 @@ static const char *file_ext(const char *p) {
     return dot ? dot : "";
 }
 
-static const char *replace_ext(const char *path, const char *new_ext) {
+static char *replace_ext(const char *path, const char *new_ext) {
     /* e.g. /a/b/foo.sp → /a/b/foo.o */
     const char *dot = strrchr(path, '.');
     if (!dot) {
@@ -466,12 +472,6 @@ static int is_ignored_flag(const char *a) {
     if (strcmp(a, "-pedantic")        == 0) return 1;
     if (strcmp(a, "-pedantic-errors") == 0) return 1;
     if (strcmp(a, "-ansi")            == 0) return 1;
-
-    /* CMake dependency tracking flags — accept+skip arg */
-    if (strcmp(a, "-MD")  == 0) return 1;
-    if (strcmp(a, "-MMD") == 0) return 1;
-    if (strcmp(a, "-MT")  == 0) return 2;   /* -MT <target> */
-    if (strcmp(a, "-MF")  == 0) return 2;   /* -MF <depfile> */
     return 0;
 }
 
@@ -680,7 +680,8 @@ static char *convert_raw_strings(const char *src, const char *input) {
 static char *preprocess_one_file(const char *input,
                                  StrVec *user_inc, StrVec *sys_inc,
                                  MacroVec *macros, long lang_std,
-                                 const char *target) {
+                                 const char *target,
+                                 InputFile *inf) {
     char *src = read_file(input);
     if (!src) return NULL;
 
@@ -726,15 +727,20 @@ static char *preprocess_one_file(const char *input,
             cpp_had_error = true;
     }
     if (cpp_had_error) {
+        if (inf) { inf->included_files = r.included_files; inf->nincluded = r.nincluded; inf->included_is_sys = r.included_is_sys; r.included_files = NULL; r.nincluded = 0; r.included_is_sys = NULL; }
         cpp_result_free(&r);
         cpp_ctx_free(cctx);
         return NULL;
     }
 
     char *out = malloc(r.text_len + 1);
-    if (!out) { cpp_result_free(&r); cpp_ctx_free(cctx); return NULL; }
+    if (!out) {
+        if (inf) { inf->included_files = r.included_files; inf->nincluded = r.nincluded; inf->included_is_sys = r.included_is_sys; r.included_files = NULL; r.nincluded = 0; r.included_is_sys = NULL; }
+        cpp_result_free(&r); cpp_ctx_free(cctx); return NULL;
+    }
     if (r.text_len) memcpy(out, r.text, r.text_len);
     out[r.text_len] = '\0';
+    if (inf) { inf->included_files = r.included_files; inf->nincluded = r.nincluded; inf->included_is_sys = r.included_is_sys; r.included_files = NULL; r.nincluded = 0; r.included_is_sys = NULL; }
     cpp_result_free(&r);
     cpp_ctx_free(cctx);
     return out;
@@ -746,7 +752,8 @@ static char *compile_one_file(const char *input,
                               StrVec *user_inc, StrVec *sys_inc,
                               MacroVec *macros, long lang_std,
                               const char *target,
-                              const char *output) {
+                              const char *output,
+                              InputFile *inf) {
     char *src = read_file(input);
     if (!src) return NULL;
 
@@ -804,6 +811,7 @@ static char *compile_one_file(const char *input,
             cpp_had_error = true;
     }
     if (cpp_had_error) {
+        if (inf) { inf->included_files = r.included_files; inf->nincluded = r.nincluded; inf->included_is_sys = r.included_is_sys; r.included_files = NULL; r.nincluded = 0; r.included_is_sys = NULL; }
         cpp_result_free(&r);
         cpp_ctx_free(cctx);
         return NULL;
@@ -1161,6 +1169,7 @@ static char *compile_one_file(const char *input,
     /* Cleanup */
     sema_ctx_free(sema); ty_store_free(ts);
     scope_free_chain(scope); ast_node_free(ast); lex_free(toks);
+    if (inf) { inf->included_files = r.included_files; inf->nincluded = r.nincluded; inf->included_is_sys = r.included_is_sys; r.included_files = NULL; r.nincluded = 0; r.included_is_sys = NULL; }
     cpp_result_free(&r);
     for (int a = 0; a < 4; a++) {
         for (size_t ii = 0; ii < all_diag[a]->len; ii++) free(all_diag[a]->data[ii].msg);
@@ -1174,8 +1183,13 @@ static char *compile_one_file(const char *input,
 /* ── Main driver ──────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
-    Action      action      = ACTION_LINK;
-    const char *output      = NULL;
+    Action      action          = ACTION_LINK;
+    const char *output          = NULL;
+    const char *optimize        = NULL;
+    int         gen_deps        = 0;
+    int         gen_deps_no_sys = 0;   /* -MMD: exclude system headers */
+    const char *depfile         = NULL;
+    const char *dep_target      = NULL; /* -MT <target> */
 #if defined(_WIN32)
     const char *target      = "x86_64-windows-gnu";
 #elif defined(__APPLE__)
@@ -1219,6 +1233,12 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(a, "--target") == 0 && i + 1 < argc) {
             target = argv[++i];
 
+        /* ── --optimize=<mode> ──────────────────────────────────── */
+        } else if (strcmp(a, "--optimize") == 0 && i + 1 < argc) {
+            optimize = argv[++i];
+        } else if (strncmp(a, "--optimize=", 11) == 0) {
+            optimize = a + 11;
+
         /* ── -I ──────────────────────────────────────────────────── */
         } else if (strcmp(a, "-I") == 0 && i + 1 < argc) {
             if (sv_push(&user_inc, argv[++i]) < 0) goto oom;
@@ -1244,6 +1264,17 @@ int main(int argc, char *argv[]) {
         /* ── -P (suppress linemarkers) ───────────────────────────── */
         } else if (strcmp(a, "-P") == 0) {
             /* sharpc always emits -P-style output; no-op */
+
+        /* ── Dependency generation ────────────────────────────────── */
+        } else if (strcmp(a, "-MD") == 0) {
+            gen_deps = 1;
+        } else if (strcmp(a, "-MMD") == 0) {
+            gen_deps = 1;
+            gen_deps_no_sys = 1;
+        } else if (strcmp(a, "-MF") == 0 && i + 1 < argc) {
+            depfile = argv[++i];
+        } else if (strcmp(a, "-MT") == 0 && i + 1 < argc) {
+            dep_target = argv[++i];
 
         /* ── -std=... ────────────────────────────────────────────── */
         } else if (strncmp(a, "-std=", 5) == 0) {
@@ -1289,6 +1320,43 @@ int main(int argc, char *argv[]) {
             ret = 2;
             goto cleanup;
         }
+        }
+    }
+
+    /* Apply --optimize=<mode> overrides */
+    if (optimize) {
+        /* Remove existing -g/-O flags from link_other */
+        StrVec cleaned = {0};
+        for (size_t li = 0; li < link_other.len; li++) {
+            const char *f = link_other.data[li];
+            if (strcmp(f, "-g") == 0 || strcmp(f, "-gdwarf-4") == 0 ||
+                (strncmp(f, "-O", 2) == 0 && f[2] >= '0' && f[2] <= '9')) {
+                /* drop */
+            } else {
+                sv_push(&cleaned, f);
+            }
+        }
+        free(link_other.data);
+        link_other = cleaned;
+
+        if (strcmp(optimize, "Debug") == 0) {
+            sv_push(&link_other, "-g");
+            sv_push(&link_other, "-gdwarf-4");
+            sv_push(&link_other, "-O0");
+        } else if (strcmp(optimize, "ReleaseFast") == 0) {
+            sv_push(&link_other, "-O2");
+            sv_push(&link_other, "-DNDEBUG");
+        } else if (strcmp(optimize, "ReleaseSafe") == 0) {
+            sv_push(&link_other, "-O2");
+        } else if (strcmp(optimize, "ReleaseSmall") == 0) {
+            sv_push(&link_other, "-Os");
+            sv_push(&link_other, "-DNDEBUG");
+        } else {
+            fprintf(stderr,
+                "sharpc: unknown --optimize mode '%s'\n"
+                "  Valid modes: Debug, ReleaseFast, ReleaseSafe, ReleaseSmall\n",
+                optimize);
+            ret = 2; goto cleanup;
         }
     }
 
@@ -1357,7 +1425,7 @@ int main(int argc, char *argv[]) {
         if (action == ACTION_PREPROCESS) {
             /* -E: preprocess and output to stdout or -o file */
             char *pp_out = preprocess_one_file(inf->path, &user_inc, &sys_inc,
-                                               &macros, lang_std, target);
+                                               &macros, lang_std, target, inf);
             if (!pp_out) { had_error = 1; continue; }
             FILE *out = output ? fopen(output, "w") : stdout;
             if (!out) { perror(output ? output : "stdout"); free(pp_out); ret = 2; goto cleanup; }
@@ -1369,11 +1437,62 @@ int main(int argc, char *argv[]) {
 
         char *c_out = compile_one_file(inf->path, &user_inc, &sys_inc,
                                        &macros, lang_std, target,
-                                       output);
+                                       output, inf);
         if (!c_out) { had_error = 1; continue; }
         inf->tmp_c = c_out;
     }
     if (had_error) { ret = 1; goto cleanup; }
+
+    /* ── Write -MD/-MMD dependency files ────────────────────────── */
+    if (gen_deps) {
+        for (size_t fi = 0; fi < inputs.len; fi++) {
+            InputFile *inf = &inputs.data[fi];
+            if (!inf->included_files) continue;
+
+            /* Target name: use -MT arg, or derive .o from path */
+            char *target_name;
+            char *target_owned = NULL;
+            if (dep_target) {
+                target_name = (char *)dep_target;
+            } else {
+                target_owned = replace_ext(inf->path, ".o");
+                target_name = target_owned;
+            }
+            if (!target_name) continue;
+
+            /* Resolve depfile name: use -MF arg, or derive from target */
+            const char *dfname = depfile;
+            char       *df_owned = NULL;
+            if (!dfname) {
+                df_owned = replace_ext(target_name, ".d");
+                dfname = df_owned;
+            }
+
+            FILE *df = fopen(dfname, "w");
+            if (!df) {
+                perror(dfname);
+                free(df_owned); free(target_owned);
+                continue;
+            }
+            fprintf(df, "%s: %s", target_name, inf->path);
+            for (size_t di = 0; di < inf->nincluded; di++) {
+                /* -MMD: skip system headers */
+                if (gen_deps_no_sys && inf->included_is_sys &&
+                    inf->included_is_sys[di])
+                    continue;
+                fprintf(df, " %s", inf->included_files[di]);
+            }
+            fprintf(df, "\n");
+            fclose(df);
+
+            free(df_owned);
+            free(target_owned);
+
+            /* Prevent cleanup from double-freeing */
+            inf->included_files = NULL;
+            inf->nincluded = 0;
+        }
+    }
 
     if (action == ACTION_ASSEMBLY) {
         /* -S: emit .s for each input via zig cc -S */
@@ -1593,8 +1712,16 @@ cleanup:
     free(link_libs.data);
     free(link_paths.data);
     free(link_other.data);
-    for (size_t i = 0; i < inputs.len; i++)
+    for (size_t i = 0; i < inputs.len; i++) {
         free(inputs.data[i].tmp_c);
+        /* included_files may be NULL if depfile block transferred ownership */
+        if (inputs.data[i].included_files) {
+            for (size_t j = 0; j < inputs.data[i].nincluded; j++)
+                free(inputs.data[i].included_files[j]);
+            free(inputs.data[i].included_files);
+        }
+        free(inputs.data[i].included_is_sys);
+    }
     free(inputs.data);
     cleanup_tmp_files();
     return ret;
@@ -1607,8 +1734,15 @@ oom:
     free(link_libs.data);
     free(link_paths.data);
     free(link_other.data);
-    for (size_t i = 0; i < inputs.len; i++)
+    for (size_t i = 0; i < inputs.len; i++) {
         free(inputs.data[i].tmp_c);
+        if (inputs.data[i].included_files) {
+            for (size_t j = 0; j < inputs.data[i].nincluded; j++)
+                free(inputs.data[i].included_files[j]);
+            free(inputs.data[i].included_files);
+        }
+        free(inputs.data[i].included_is_sys);
+    }
     free(inputs.data);
     cleanup_tmp_files();
     return 2;

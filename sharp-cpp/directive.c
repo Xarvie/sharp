@@ -801,6 +801,16 @@ static void handle_include(CppState *st, TokList *line, CppLoc loc,
     const char *found_interned = intern_cstr(st->interns, found);
     free(found);
 
+    /* Record this include for dependency tracking (-MD) */
+    strarr_push(&st->included, (char *)found_interned);
+
+    /* Parallel: mark system vs user for -MMD filtering */
+    {
+        size_t n = st->included.len;
+        bool *tmp = realloc(st->included_is_sys, n * sizeof(bool));
+        if (tmp) { st->included_is_sys = tmp; st->included_is_sys[n - 1] = found_in_sys; }
+    }
+
     /* Second guard check with the resolved absolute path.
      * The first check (above) uses the raw #include name; this one uses the
      * canonical path so that #pragma once guards stored under the absolute
@@ -2706,6 +2716,8 @@ void cpp_state_free(CppState *st) {
         GuardEntry *e = st->guards[i];
         while (e) { GuardEntry *nx = e->next; free(e); e = nx; }
     }
+    free(st->included_is_sys);  /* may be NULL if transferred to result */
+    free(st->included.data);   /* may be NULL if transferred to result */
     free(st);
 }
 

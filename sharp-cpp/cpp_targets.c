@@ -6,11 +6,16 @@
  * macro set that Zig reports for that target.  This guarantees
  * correctness without manual maintenance.
  */
+#define _GNU_SOURCE
 #include "cpp.h"
 #include "macro.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>

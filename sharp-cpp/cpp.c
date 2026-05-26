@@ -436,6 +436,28 @@ static CppResult build_result(CppState *st, CppCtx *ctx, CppDiagArr *diags) {
     res.diags  = diags->data;
     res.ndiags = diags->len;
 
+    /* Transfer included files for -MD dependency tracking.
+     * Make independent copies: the originals point into the intern
+     * table which is freed by cpp_state_free below. */
+    res.nincluded = st->included.len;
+    if (st->included.len > 0) {
+        res.included_files = malloc(st->included.len * sizeof(char *));
+        if (res.included_files) {
+            for (size_t i = 0; i < st->included.len; i++)
+                res.included_files[i] = cpp_xstrdup(st->included.data[i]);
+        }
+        res.nincluded = res.included_files ? st->included.len : 0;
+
+        /* Transfer system-header flag array for -MMD filtering */
+        res.included_is_sys = malloc(st->included.len * sizeof(bool));
+        if (res.included_is_sys && st->included_is_sys)
+            memcpy(res.included_is_sys, st->included_is_sys,
+                   st->included.len * sizeof(bool));
+    } else {
+        res.included_files = NULL;
+        res.included_is_sys = NULL;
+    }
+
     /* Set top-level error pointer if any error-level diag exists */
     for (size_t i = 0; i < res.ndiags; i++) {
         if (res.diags[i].level >= CPP_DIAG_ERROR) {
@@ -488,6 +510,12 @@ void cpp_result_free(CppResult *res) {
     for (size_t i = 0; i < res->ndiags; i++)
         free(res->diags[i].msg);
     free(res->diags);
+    if (res->included_files) {
+        for (size_t i = 0; i < res->nincluded; i++)
+            free(res->included_files[i]);
+        free(res->included_files);
+    }
+    free(res->included_is_sys);
     memset(res, 0, sizeof *res);
 }
 

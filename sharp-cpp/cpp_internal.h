@@ -341,6 +341,13 @@ struct CppState {
      * includes by handle_include.                                       */
     bool         cur_file_is_sys;
 
+    /* All files opened via #include (absolute paths, interned).
+     * Populated by handle_include.  Transferred to CppResult after run. */
+    StrArr       included;
+    /* Parallel to included: true if found via system include path
+     * (-isystem or <>).  Same length as included.len. */
+    bool        *included_is_sys;
+
     /* Include guard map */
     GuardEntry  *guards[GUARD_BUCKETS];
 
