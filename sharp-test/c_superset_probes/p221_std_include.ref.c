@@ -469,7 +469,7 @@ int main(void) {
         return 14;
 
 #line 52 "sharp-test/c_superset_probes/p221_std_include.sp"
-    if (sp.left.len != 0) 
+    if (sp.left.len != 2) 
         return 15;
 
 #line 55 "sharp-test/c_superset_probes/p221_std_include.sp"

@@ -22,3 +22,10 @@ CIface *create_c_iface(void) {
     p->next = 0;
     return p;
 }
+
+int main(void) {
+    CIface *c = create_c_iface();
+    reset_refcount(c);
+    free(c);
+    return 0;
+}

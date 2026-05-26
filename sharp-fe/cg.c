@@ -78,6 +78,7 @@ struct CgCtx {
     const AstNode *file_ast;     /* root AST node (AST_FILE)                */
     const AstVec  *local_block_stmts;/* block stmts for local struct lookup */
     const char    *cur_struct;   /* struct name being emitted (mangling)    */
+    const AstNode *cur_struct_def;/* struct AST node for field lookup       */
 
     /* ── Group C: Generic specialization ───────────────────────────── */
     /* Active substitution context (set while emitting one specialization) */
@@ -1579,6 +1580,24 @@ static void cg_const_expr(CgCtx *ctx, const AstNode *e) {
             cg_printf(ctx, "%lld", (long long)e->u.int_lit.val);
         break;
     case AST_IDENT:
+        /* If inside a struct method body, implicit struct field access
+         * must be emitted as `this->count`. */
+        if (ctx->cur_struct_def && e->u.ident.name) {
+            const AstNode *sd = ctx->cur_struct_def;
+            int matched = 0;
+            for (size_t i = 0; i < sd->u.struct_def.fields.len; i++) {
+                const AstNode *f = sd->u.struct_def.fields.data[i];
+                if (f && f->kind == AST_FIELD_DECL &&
+                    f->u.field_decl.name &&
+                    strcmp(f->u.field_decl.name, e->u.ident.name) == 0) {
+                    cg_puts(ctx, "this->");
+                    cg_puts(ctx, e->u.ident.name);
+                    matched = 1;
+                    break;
+                }
+            }
+            if (matched) break;
+        }
         cg_puts(ctx, e->u.ident.name ? e->u.ident.name : "0");
         break;
     case AST_PAREN:   /* C8 */
@@ -2274,6 +2293,23 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
         break;
     }
     case AST_IDENT:
+        /* Implicit `this->field` inside struct method bodies. */
+        if (ctx->cur_struct_def && expr->u.ident.name) {
+            const AstNode *sd = ctx->cur_struct_def;
+            int matched = 0;
+            for (size_t i = 0; i < sd->u.struct_def.fields.len; i++) {
+                const AstNode *f = sd->u.struct_def.fields.data[i];
+                if (f && f->kind == AST_FIELD_DECL &&
+                    f->u.field_decl.name &&
+                    strcmp(f->u.field_decl.name, expr->u.ident.name) == 0) {
+                    cg_puts(ctx, "this->");
+                    cg_puts(ctx, expr->u.ident.name);
+                    matched = 1;
+                    break;
+                }
+            }
+            if (matched) break;
+        }
         cg_puts(ctx, cg_resolve_name(ctx, expr->u.ident.name));
         break;
 
@@ -4432,6 +4468,23 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
     /* Generic functions: skip -- specialized versions emitted by Phase 11 pass. */
     if (fn->u.func_def.generic_params.len > 0) return;
 
+    /* Set cur_struct/cur_struct_def for struct method bodies so that
+     * implicit `this->field` accesses are emitted correctly. */
+    const char *prev_st = ctx->cur_struct;
+    const AstNode *prev_sd = ctx->cur_struct_def;
+    if (sname && ctx->file_scope) {
+        ctx->cur_struct = sname;
+        Symbol *ss = scope_lookup_type(ctx->file_scope, sname);
+        ctx->cur_struct_def = NULL;
+        for (Symbol *s = ss; s; s = s->next) {
+            if (s->kind == SYM_TYPE && s->decl &&
+                s->decl->kind == AST_STRUCT_DEF) {
+                ctx->cur_struct_def = s->decl;
+                break;
+            }
+        }
+    }
+
     cg_set_loc(ctx, fn->loc);
     StorageClass sc = fn->u.func_def.storage;
     /* p43/p45: leading attributes and keywords before storage class */
@@ -4922,6 +4975,11 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
     ctx->cur_fn_ret = ret_t;
     cg_block(ctx, fn->u.func_def.body);
     ctx->cur_fn_ret = NULL;
+    /* Restore cur_struct/cur_struct_def if we set them for a method body. */
+    if (sname && ctx->file_scope) {
+        ctx->cur_struct = prev_st;
+        ctx->cur_struct_def = prev_sd;
+    }
 }
 
 /* =========================================================================
@@ -6595,18 +6653,23 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                     anon_sd = dd; break;
                 }
             }
-            if (anon_sd && anon_sd->u.struct_def.fields.len > 0) {
+            if (anon_sd) {
                 const char *kw = anon_sd->u.struct_def.is_union ? "union" : "struct";
-                cg_printf(ctx, "typedef %s {\n", kw);
-                for (size_t i = 0; i < anon_sd->u.struct_def.fields.len; i++) {
-                    const AstNode *fi = anon_sd->u.struct_def.fields.data[i];
-                    if (fi && fi->kind == AST_FIELD_DECL &&
-                        fi->u.field_decl.is_comma_cont) continue;
-                    cg_puts(ctx, "    ");
-                    if (!cg_emit_field_maybe_inline(ctx, anon_sd, &anon_sd->u.struct_def.fields, i))
-                        cg_emit_field_group(ctx, &anon_sd->u.struct_def.fields, i);
+                if (anon_sd->u.struct_def.fields.len > 0) {
+                    cg_printf(ctx, "typedef %s {\n", kw);
+                    for (size_t i = 0; i < anon_sd->u.struct_def.fields.len; i++) {
+                        const AstNode *fi = anon_sd->u.struct_def.fields.data[i];
+                        if (fi && fi->kind == AST_FIELD_DECL &&
+                            fi->u.field_decl.is_comma_cont) continue;
+                        cg_puts(ctx, "    ");
+                        if (!cg_emit_field_maybe_inline(ctx, anon_sd, &anon_sd->u.struct_def.fields, i))
+                            cg_emit_field_group(ctx, &anon_sd->u.struct_def.fields, i);
+                    }
+                    { if (d->u.typedef_decl.gcc_attrs) cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs); else cg_printf(ctx, "} %s;\n", cname); };
+                } else {
+                    /* Empty struct body: emit typedef struct/union {} alias; */
+                    { if (d->u.typedef_decl.gcc_attrs) cg_printf(ctx, "typedef %s {} %s %s;\n", kw, cname, d->u.typedef_decl.gcc_attrs); else cg_printf(ctx, "typedef %s {} %s;\n", kw, cname); };
                 }
-                { if (d->u.typedef_decl.gcc_attrs) cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs); else cg_printf(ctx, "} %s;\n", cname); };
             } else {
                 /* Fallback: emit the tag reference */
                 Type *t = ty_from_ast(ctx->ts, target, cg_type_scope(ctx), NULL);
@@ -7009,6 +7072,10 @@ static void cg_emit_comma_cont_declarator(CgCtx *ctx,
 
 static void cg_var_c(CgCtx *ctx, const AstNode *d) {
     if (!d || d->kind != AST_VAR_DECL) return;
+    /* Comma-continuation vars are emitted inline by the primary
+     * (non-comma-cont) declaration node via the comma group logic
+     * below (see file-scope comma-continuation emission). */
+    if (d->u.var_decl.is_comma_cont) return;
     cg_set_loc(ctx, d->loc);
     StorageClass sc = d->u.var_decl.storage;
     /* p43: leading attribute must come BEFORE storage class */
@@ -7619,6 +7686,15 @@ static bool cg_expr_uses_name(const AstNode *expr, const char *name) {
             if (cg_expr_uses_name(expr->u.struct_lit.field_vals.data[i], name)) return true;
         return false;
     }
+    case AST_INIT_LIST: {
+        for (size_t i = 0; i < expr->u.init_list.items.len; i++)
+            if (cg_expr_uses_name(expr->u.init_list.items.data[i], name)) return true;
+        return false;
+    }
+    case AST_DESIGNATED_INIT:
+        return cg_expr_uses_name(expr->u.designated_init.value, name);
+    case AST_COMPOUND_LIT:
+        return cg_expr_uses_name(expr->u.compound_lit.init, name);
     default: return false;
     }
 }
@@ -7689,10 +7765,13 @@ static void cg_emit_decl_sharp(CgCtx *ctx, AstNode *d) {
          * `typedef struct X { ... } X;` form, so skip standalone emission here
          * to avoid emitting the body twice. */
         if (d->u.struct_def.from_inline_typedef) return;
+        /* Nested structs defined inside another struct body are already
+         * emitted inline when the parent struct is emitted. */
+        if (d->u.struct_def.is_nested_in_struct) return;
         const char *kw = d->u.struct_def.is_union ? "union" : "struct";
         const char *nm = d->u.struct_def.name;
         const char *enm = cg_resolve_name(ctx, nm);
-        bool has_body = d->u.struct_def.fields.len > 0 ||
+        bool has_body = d->u.struct_def.has_body ||
                         d->u.struct_def.methods.len > 0;
 
         /* class: emit `typedef struct X X;` before body so bare name works */
@@ -8238,10 +8317,10 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
             const char *enm = cg_resolve_name(ctx, sname);
             const char *kw = uw->u.struct_def.is_union ? "union" : "struct";
             /* class: emit typedef first so bare name works */
-            if (uw->u.struct_def.is_class && uw->u.struct_def.fields.len > 0 && enm) {
+            if (uw->u.struct_def.is_class && uw->u.struct_def.has_body && enm) {
                 cg_printf(ctx, "typedef %s %s %s;\n", kw, enm, enm);
             }
-            if (uw->u.struct_def.fields.len > 0) {
+            if (uw->u.struct_def.has_body || uw->u.struct_def.fields.len > 0) {
                 cg_printf(ctx, "%s %s {\n", kw, enm);
                 for (size_t fi = 0; fi < uw->u.struct_def.fields.len; fi++) {
                     cg_puts(ctx, "    ");
@@ -8253,6 +8332,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
              * can call them.  cg_func_decl emits `RetType S__method(...)
              * ;` without the body. */
             ctx->cur_struct = enm;
+            ctx->cur_struct_def = uw;
             for (size_t mi = 0; mi < uw->u.struct_def.methods.len; mi++) {
                 AstNode *m = uw->u.struct_def.methods.data[mi];
                 if (!m || m->kind != AST_FUNC_DEF) continue;
@@ -8260,6 +8340,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                 cg_func_decl(ctx, m, enm);
             }
             ctx->cur_struct = NULL;
+            ctx->cur_struct_def = NULL;
             continue;
         }
         if (uw->kind == AST_TYPEDEF_DECL && uw->u.typedef_decl.target) {
@@ -8330,17 +8411,29 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
         if (!decl_is_user(ctx, d)) continue;
         AstNode *uw = cg_unwrap_decl(d);
         if (uw && uw->kind == AST_FUNC_DEF) {
-            /* Skip extension methods of generic structs —
+            /* Skip extension methods of generic structs --
              * Phase 11 handles their specializations. */
+            const AstNode *method_struct_def = NULL;
             if (uw->u.func_def.struct_name && ctx->file_scope) {
                 Symbol *ss = scope_lookup_type(ctx->file_scope,
                     uw->u.func_def.struct_name);
-                if (ss && ss->decl &&
-                    ss->decl->kind == AST_STRUCT_DEF &&
-                    ss->decl->u.struct_def.generic_params.len > 0)
-                    continue;
+                for (Symbol *s = ss; s; s = s->next) {
+                    if (s->kind != SYM_TYPE || !s->decl) continue;
+                    if (s->decl->kind == AST_STRUCT_DEF) {
+                        if (s->decl->u.struct_def.generic_params.len > 0)
+                            continue;
+                        method_struct_def = s->decl;
+                        break;
+                    }
+                }
             }
+            const char *prev_struct = ctx->cur_struct;
+            const AstNode *prev_struct_def = ctx->cur_struct_def;
+            ctx->cur_struct = uw->u.func_def.struct_name;
+            ctx->cur_struct_def = method_struct_def;
             cg_emit_decl_sharp(ctx, d);
+            ctx->cur_struct = prev_struct;
+            ctx->cur_struct_def = prev_struct_def;
         } else if (uw && uw->kind == AST_STRUCT_DEF &&
                    uw->u.struct_def.methods.len > 0) {
             /* Skip generic templates and synthetic structs entirely. */
@@ -8349,6 +8442,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
             const char *sname = uw->u.struct_def.name;
             const char *enm = cg_resolve_name(ctx, sname);
             ctx->cur_struct = enm;
+            ctx->cur_struct_def = uw;
             for (size_t mi = 0; mi < uw->u.struct_def.methods.len; mi++) {
                 AstNode *m = uw->u.struct_def.methods.data[mi];
                 if (!m || m->kind != AST_FUNC_DEF) continue;
@@ -8357,6 +8451,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                 cg_nl(ctx);
             }
             ctx->cur_struct = NULL;
+            ctx->cur_struct_def = NULL;
         }
     }
 

@@ -8,9 +8,6 @@
  *
  * This verifies the std library headers are self-contained and correct.
  */
-/* FIXED: generic Vec operator[] instantiation forward-declared.
-   NOTE: still fails at runtime (exit 15) — pre-existing logic issue, likely
-   str_split_once / left.len != 0 check in test. */
 #include "../../sharp/std/types.sph"
 #include "../../sharp/std/vec.sph"
 #include "../../sharp/std/str.sph"
@@ -51,7 +48,7 @@ int main(void) {
 
     StrSplit sp = str_split_once(hello, 'l');
     if (!sp.found) return 14;
-    if (sp.left.len != 0) return 15;        /* "He" before first 'l' */
+    if (sp.left.len != 2) return 15;        /* "He" before first 'l' */
 
     /* ── Test hashmap.sph ── */
     Str key = str_from_lit("answer");

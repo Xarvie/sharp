@@ -1016,6 +1016,17 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                 sema_err(ss, expr->loc, "'%s' is a type, not a value", name);
                 t = ty_error(ts);
                 break;
+            case SYM_FIELD: {
+                /* Plain field name used inside a struct method body --
+                 * implicit `this->field` access.  Resolve the field type. */
+                AstNode *fd = sym->decl;
+                if (fd && fd->kind == AST_FIELD_DECL && fd->u.field_decl.type) {
+                    t = ty_from_ast(ts, fd->u.field_decl.type,
+                                    ss->scope, ss->ctx->diags);
+                }
+                if (!t) t = ty_int(ts);
+                break;
+            }
             default:
                 t = ty_error(ts);
                 break;

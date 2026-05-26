@@ -369,6 +369,20 @@ def _cleanup_gen_file(tmp_out: str) -> None:
             pass
 
 
+def _cleanup_files(*paths: str) -> None:
+    """Remove generated files.  Silently skips missing paths."""
+    for p in paths:
+        _cleanup_gen_file(p)
+
+
+def _find_zig(project_root: Path) -> Optional[str]:
+    """Find zig binary: project's zig/ first, then PATH."""
+    candidate = project_root / "zig" / "zig"
+    if candidate.is_file():
+        return str(candidate)
+    return find_file_in_path("zig", os.environ.get("PATH", ""))
+
+
 def _compare_gen_with_ref(tmp_out: str, ref_path: str) -> Tuple[int, str]:
     """Compare generated file against reference. Returns (rc, detail)."""
     try:
@@ -412,26 +426,61 @@ def _compare_gen_with_ref(tmp_out: str, ref_path: str) -> Tuple[int, str]:
         return 2, f"compare error: {e}"
 
 
-def test_c_probe(c_path: str, sharpc_path: str, timeout: int = 30,
-                  extra_args: Optional[List[str]] = None) -> Tuple[int, str]:
+def _compile_and_run(gen_c_path: str, zig_path: str, timeout: int = 30) -> Tuple[int, str]:
+    """Compile generated .gen.c with zig cc, link to executable, and run it.
+    Returns (rc, detail): 0=pass, 1=fail (non-zero exit), 2=error (compile/link fail)."""
+    exe_path = gen_c_path + ".exe"
+
+    stdout, stderr, rc = run_cmd(
+        [zig_path, "cc", gen_c_path, "-o", exe_path, "-std=c11"],
+        timeout=timeout
+    )
+    if rc != 0:
+        detail = (stderr or stdout).strip()
+        if len(detail) > 300:
+            detail = detail[:300] + "..."
+        _cleanup_files(exe_path)
+        return 2, f"zig cc failed: {detail}"
+
+    stdout, stderr, rc = run_cmd([exe_path], timeout=timeout)
+    _cleanup_files(exe_path)
+    if rc != 0:
+        detail = f"exit code {rc}"
+        if stderr.strip():
+            detail += f" (stderr: {stderr.strip()[:100]})"
+        return 1, detail
+    return 0, "pass"
+
+
+def test_c_probe(c_path: str, sharpc_path: str, zig_path: str = "",
+                 timeout: int = 30,
+                 extra_args: Optional[List[str]] = None) -> Tuple[int, str]:
     ok, tmp_out, err = _run_sharpc_codegen(c_path, sharpc_path, timeout, extra_args)
-    _cleanup_gen_file(tmp_out)
-    return (0, "pass") if ok else (2, err)
+    if not ok:
+        _cleanup_files(tmp_out)
+        return 2, err
+    rc, detail = _compile_and_run(tmp_out, zig_path, timeout)
+    _cleanup_files(tmp_out)
+    return rc, detail
 
 
 def test_sp_probe(sp_path: str, sharpc_path: str, ref_path: Optional[str] = None,
+                  zig_path: str = "",
                   timeout: int = 30,
                   extra_args: Optional[List[str]] = None) -> Tuple[int, str]:
     ok, tmp_out, err = _run_sharpc_codegen(sp_path, sharpc_path, timeout, extra_args)
     if not ok:
-        _cleanup_gen_file(tmp_out)
+        _cleanup_files(tmp_out)
         return 2, err
     if ref_path and os.path.isfile(ref_path):
         rc, detail = _compare_gen_with_ref(tmp_out, ref_path)
-        _cleanup_gen_file(tmp_out)
-        return rc, detail
-    _cleanup_gen_file(tmp_out)
-    return 0, "pass"
+        if rc != 0:
+            _cleanup_files(tmp_out)
+            return rc, detail
+    # Compile generated C and run
+    rc, detail = _compile_and_run(tmp_out, zig_path, timeout)
+    _cleanup_files(tmp_out)
+    return rc, detail
 
 
 # ── 并行探针测试引擎 ─────────────────────────────────────────────────────
@@ -439,6 +488,7 @@ def test_sp_probe(sp_path: str, sharpc_path: str, ref_path: Optional[str] = None
 def run_all_probe_tests(
     base_dir: Path,
     sharpc_path: str,
+    zig_path: str = "",
     verbose: bool = False,
     timeout: int = 30,
     jobs: int = 1,
@@ -506,7 +556,7 @@ def run_all_probe_tests(
 
         # A: C 探针 + standalone SP
         c_futures: Dict = {
-            ex.submit(test_c_probe, str(probes_dir / f), sharpc_path, timeout): f
+            ex.submit(test_c_probe, str(probes_dir / f), sharpc_path, zig_path, timeout): f
             for f in c_files
         }
 
@@ -515,6 +565,7 @@ def run_all_probe_tests(
                 test_sp_probe,
                 str(probes_dir / f), sharpc_path,
                 str(probes_dir / f"{f[:-3]}.ref.c"),
+                zig_path,
                 timeout
             ): f
             for f in sp_files
@@ -545,6 +596,7 @@ def run_all_probe_tests(
 
 
 def run_special_probe_tests(base_dir: Path, sharpc_path: str,
+                            zig_path: str = "",
                             verbose: bool = False, timeout: int = 60,
                             jobs: int = 1) -> Tuple[int, int, int, Dict[str, Tuple[int, str]]]:
     """Run cross-compile / special probes from the 'special/' directory."""
@@ -581,7 +633,7 @@ def run_special_probe_tests(base_dir: Path, sharpc_path: str,
         futures = {}
         for c_file in c_files:
             full_path = str(special_dir / c_file)
-            fut = ex.submit(test_c_probe, full_path, sharpc_path, timeout,
+            fut = ex.submit(test_c_probe, full_path, sharpc_path, zig_path, timeout,
                            CROSS_COMPILE_ARGS)
             futures[fut] = c_file
 
@@ -636,6 +688,13 @@ def main():
     sharpc_path, build_info = ensure_sharpc(script_dir, args.sharpc)
     print(f"[build] sharpc = {sharpc_path} ({build_info})")
 
+    # Find zig for compile+run phase
+    project_root = find_project_root(script_dir)
+    zig_path = _find_zig(project_root) if project_root else None
+    if not zig_path:
+        raise SystemExit("ERROR: cannot find zig (checked project's zig/ and PATH)")
+    print(f"[build] zig    = {zig_path}")
+
     total_pass = total_fail = total_error = 0
     results: Dict = {}
 
@@ -643,7 +702,7 @@ def main():
     print()
     print("[sp] Running ALL superset probe tests (C + SP codegen) ...")
     sp_pass, sp_fail, sp_error, sp_files = run_all_probe_tests(
-        script_dir, str(sharpc_path), args.verbose, args.timeout, args.jobs
+        script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
     )
     results["sp"] = {
         "pass": sp_pass, "fail": sp_fail, "error": sp_error,
@@ -661,7 +720,7 @@ def main():
     print()
     print("[sp] Running special cross-compile probe tests ...")
     sc_pass, sc_fail, sc_error, sc_files = run_special_probe_tests(
-        script_dir, str(sharpc_path), args.verbose, args.timeout, args.jobs
+        script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
     )
     total_pass  += sc_pass
     total_fail  += sc_fail
