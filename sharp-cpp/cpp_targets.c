@@ -236,7 +236,7 @@ static const char *find_zig_exe(void)
                     return g_zig_path;
             }
 
-            /* Priority 1b: {sharp_bin}\\..\\zig.exe */
+            /* Priority 1b: {sharp_bin}\\..\\zig\\zig.exe */
             if (dirlen >= 1) {
                 char parent_dir[MAX_PATH];
                 memcpy(parent_dir, exe_path, dirlen);
@@ -249,9 +249,9 @@ static const char *find_zig_exe(void)
                 }
                 if (parent_sep) {
                     size_t pdirlen = (size_t)(parent_sep - parent_dir);
-                    if (pdirlen + 9 < sizeof(g_zig_path)) {
+                    if (pdirlen + 13 < sizeof(g_zig_path)) {
                         memcpy(g_zig_path, parent_dir, pdirlen);
-                        memcpy(g_zig_path + pdirlen, "\\zig.exe", 9);
+                        memcpy(g_zig_path + pdirlen, "\\zig\\zig.exe", 13);
                         DWORD a2 = GetFileAttributesA(g_zig_path);
                         if (a2 != INVALID_FILE_ATTRIBUTES && !(a2 & FILE_ATTRIBUTE_DIRECTORY))
                             return g_zig_path;
@@ -312,7 +312,7 @@ static const char *find_zig_exe(void)
                     return g_zig_path;
             }
 
-            /* Priority 1b: {sharp_bin}/../zig */
+            /* Priority 1b: {sharp_bin}/../zig/zig */
             if (dirlen >= 1) {
                 char parent_dir[4096];
                 memcpy(parent_dir, exe_path, dirlen);
@@ -320,9 +320,9 @@ static const char *find_zig_exe(void)
                 char *parent_sep = strrchr(parent_dir, '/');
                 if (parent_sep) {
                     size_t pdirlen = (size_t)(parent_sep - parent_dir);
-                    if (pdirlen + 5 < sizeof(g_zig_path)) {
+                    if (pdirlen + 9 < sizeof(g_zig_path)) {
                         memcpy(g_zig_path, parent_dir, pdirlen);
-                        memcpy(g_zig_path + pdirlen, "/zig", 5);
+                        memcpy(g_zig_path + pdirlen, "/zig/zig", 9);
                         if (access(g_zig_path, X_OK) == 0)
                             return g_zig_path;
                     }

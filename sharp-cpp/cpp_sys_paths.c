@@ -105,7 +105,7 @@ static const char *try_find_zig_dir(char *out_buf, size_t buf_size) {
                 }
             }
 
-            /* Priority 1b: {sharp_bin}/../zig */
+            /* Priority 1b: {sharp_bin}/../zig (check binary at ../zig/zig, install dir at ../zig) */
             if (dirlen >= 1) {
                 char parent_dir[2048];
                 memcpy(parent_dir, exe_path, dirlen);
@@ -114,16 +114,16 @@ static const char *try_find_zig_dir(char *out_buf, size_t buf_size) {
                 if (parent_sep) {
                     size_t pdirlen = (size_t)(parent_sep - parent_dir);
                     char candidate[2048];
-                    snprintf(candidate, sizeof(candidate), "%.*s/zig",
+                    snprintf(candidate, sizeof(candidate), "%.*s/zig/zig",
                              (int)pdirlen, parent_dir);
                     struct stat st2;
                     if (stat(candidate, &st2) == 0 && (st2.st_mode & S_IXUSR)) {
                         char test[2048];
-                        snprintf(test, sizeof(test), "%.*s/lib/libc",
+                        snprintf(test, sizeof(test), "%.*s/zig/lib/libc",
                                  (int)pdirlen, parent_dir);
                         if (stat(test, &st2) == 0 && S_ISDIR(st2.st_mode)) {
-                            strncpy(out_buf, parent_dir, buf_size - 1);
-                            out_buf[pdirlen] = '\0';
+                            snprintf(out_buf, buf_size, "%.*s/zig",
+                                     (int)pdirlen, parent_dir);
                             return out_buf;
                         }
                     }
@@ -864,7 +864,7 @@ static const char *find_zig_install_dir(void) {
                 }
             }
 
-            /* Priority 1b: {sharp_bin}/../zig */
+            /* Priority 1b: {sharp_bin}/../zig (check binary at ../zig/zig, install dir at ../zig) */
             if (dirlen >= 1) {
                 char parent_dir[4096];
                 memcpy(parent_dir, exe_path, dirlen);
@@ -873,12 +873,12 @@ static const char *find_zig_install_dir(void) {
                 if (parent_sep) {
                     size_t pdirlen = (size_t)(parent_sep - parent_dir);
                     char candidate[2048];
-                    snprintf(candidate, sizeof(candidate), "%.*s/zig",
+                    snprintf(candidate, sizeof(candidate), "%.*s/zig/zig",
                              (int)pdirlen, parent_dir);
                     struct stat st2;
                     if (stat(candidate, &st2) == 0 && (st2.st_mode & S_IXUSR)) {
-                        strncpy(zig_dir, parent_dir, sizeof(zig_dir) - 1);
-                        zig_dir[pdirlen] = '\0';
+                        snprintf(zig_dir, sizeof(zig_dir), "%.*s/zig",
+                                 (int)pdirlen, parent_dir);
                         char test[2048];
                         snprintf(test, sizeof(test), "%s/lib/libc", zig_dir);
                         if (stat(test, &st2) == 0 && S_ISDIR(st2.st_mode))
