@@ -109,6 +109,21 @@ void HashMap__Point__int__clear(HashMap__Point__int * this);
 #line 141 "sharp-test/c_superset_probes/p220_hashmap.sp"
 void HashMap__Point__int__destroy(HashMap__Point__int * this);
 
+#line 189 "sharp-test/c_superset_probes/p220_hashmap.sp"
+void HashMap__Point__int___grow_if_needed(HashMap__Point__int * this);
+
+#line 158 "sharp-test/c_superset_probes/p220_hashmap.sp"
+long HashMap__Point__int___probe_for_insert(HashMap__Point__int * this, Point key);
+
+#line 177 "sharp-test/c_superset_probes/p220_hashmap.sp"
+long HashMap__Point__int___probe_for_lookup(HashMap__Point__int * this, Point key);
+
+#line 73 "sharp-test/c_superset_probes/p220_hashmap.sp"
+void HashMapCursor__Point__int___advance(HashMapCursor__Point__int * this);
+
+#line 196 "sharp-test/c_superset_probes/p220_hashmap.sp"
+void HashMap__Point__int___rehash(HashMap__Point__int * this, long new_cap);
+
 #line 20 "sharp-test/c_superset_probes/p220_hashmap.sp"
 void * malloc(unsigned long);
 
@@ -613,5 +628,184 @@ __attribute__((weak)) void HashMap__Point__int__destroy(HashMap__Point__int * th
 
 #line 146 "sharp-test/c_superset_probes/p220_hashmap.sp"
     this->tombstones = 0;
+}
+
+
+#line 189 "sharp-test/c_superset_probes/p220_hashmap.sp"
+__attribute__((weak)) void HashMap__Point__int___grow_if_needed(HashMap__Point__int * this) {
+
+#line 190 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    isize used = this->len + this->tombstones;
+
+#line 191 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    if ((used + 1) * 4 <= this->cap * 3 && this->cap > 0) 
+        return;
+
+#line 192 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    isize new_cap = this->cap > 0 ? this->cap * 2 : 8;
+
+#line 193 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    HashMap__Point__int___rehash(this, new_cap);
+}
+
+
+#line 158 "sharp-test/c_superset_probes/p220_hashmap.sp"
+__attribute__((weak)) long HashMap__Point__int___probe_for_insert(HashMap__Point__int * this, Point key) {
+
+#line 159 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    usize h = Point__hash(&key);
+
+#line 160 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    isize mask = this->cap - 1;
+
+#line 161 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    isize i = (isize)(h & (usize)mask);
+
+#line 162 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    isize first_tomb = -1;
+
+#line 163 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    while (1) {
+
+#line 164 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        unsigned char st = this->entries[i].state;
+
+#line 165 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        if (st == (unsigned char)0) {
+
+#line 166 "sharp-test/c_superset_probes/p220_hashmap.sp"
+            return first_tomb >= 0 ? first_tomb : i;
+        }
+
+#line 168 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        if (st == (unsigned char)2) {
+
+#line 169 "sharp-test/c_superset_probes/p220_hashmap.sp"
+            if (first_tomb < 0) 
+                first_tomb = i;
+        }
+        else {
+
+#line 171 "sharp-test/c_superset_probes/p220_hashmap.sp"
+            if (Point__op_eq(&this->entries[i].key, key)) 
+                return i;
+        }
+
+#line 173 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        i = (i + 1) & mask;
+    }
+}
+
+
+#line 177 "sharp-test/c_superset_probes/p220_hashmap.sp"
+__attribute__((weak)) long HashMap__Point__int___probe_for_lookup(HashMap__Point__int * this, Point key) {
+
+#line 178 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    usize h = Point__hash(&key);
+
+#line 179 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    isize mask = this->cap - 1;
+
+#line 180 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    isize i = (isize)(h & (usize)mask);
+
+#line 181 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    while (1) {
+
+#line 182 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        unsigned char st = this->entries[i].state;
+
+#line 183 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        if (st == (unsigned char)0) 
+            return -1;
+
+#line 184 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        if (st == (unsigned char)1 && Point__op_eq(&this->entries[i].key, key)) 
+            return i;
+
+#line 185 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        i = (i + 1) & mask;
+    }
+}
+
+
+#line 73 "sharp-test/c_superset_probes/p220_hashmap.sp"
+__attribute__((weak)) void HashMapCursor__Point__int___advance(HashMapCursor__Point__int * this) {
+
+#line 74 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    this->idx = this->idx + 1;
+
+#line 75 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    while (this->idx < this->cap && this->entries[this->idx].state != (unsigned char)1) {
+
+#line 77 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        this->idx = this->idx + 1;
+    }
+}
+
+
+#line 196 "sharp-test/c_superset_probes/p220_hashmap.sp"
+__attribute__((weak)) void HashMap__Point__int___rehash(HashMap__Point__int * this, long new_cap) {
+
+#line 197 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    HashMapEntry__Point__int * nbuf = (HashMapEntry__Point__int *)calloc((unsigned long)new_cap, sizeof(HashMapEntry__Point__int));
+
+#line 199 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    if (!nbuf) 
+        __builtin_trap();
+
+#line 201 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    isize old_cap = this->cap;
+
+#line 202 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    HashMapEntry__Point__int * old_buf = this->entries;
+
+#line 204 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    this->entries = nbuf;
+
+#line 205 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    this->cap = new_cap;
+
+#line 206 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    this->len = 0;
+
+#line 207 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    this->tombstones = 0;
+
+#line 209 "sharp-test/c_superset_probes/p220_hashmap.sp"
+    if (old_buf != (HashMapEntry__Point__int *)0) {
+
+#line 210 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        isize j = 0;
+
+#line 211 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        while (j < old_cap) {
+
+#line 212 "sharp-test/c_superset_probes/p220_hashmap.sp"
+            if (old_buf[j].state == (unsigned char)1) {
+
+#line 213 "sharp-test/c_superset_probes/p220_hashmap.sp"
+                isize i = HashMap__Point__int___probe_for_insert(this, old_buf[j].key);
+
+#line 214 "sharp-test/c_superset_probes/p220_hashmap.sp"
+                this->entries[i].key = old_buf[j].key;
+
+#line 215 "sharp-test/c_superset_probes/p220_hashmap.sp"
+                this->entries[i].value = old_buf[j].value;
+
+#line 216 "sharp-test/c_superset_probes/p220_hashmap.sp"
+                this->entries[i].state = (unsigned char)1;
+
+#line 217 "sharp-test/c_superset_probes/p220_hashmap.sp"
+                this->len = this->len + 1;
+            }
+
+#line 219 "sharp-test/c_superset_probes/p220_hashmap.sp"
+            j = j + 1;
+        }
+
+#line 221 "sharp-test/c_superset_probes/p220_hashmap.sp"
+        free(old_buf);
+    }
 }
 

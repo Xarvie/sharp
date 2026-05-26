@@ -10,7 +10,6 @@
  * Avoids stdio so the test runs under sharpc's zig-cc-link path without
  * needing multiarch glibc headers.  Result via exit code.
  */
-/* TODO(e2e): generic HashMap internal method instantiation — private methods not forward-declared */
 #include <stdbool.h>
 
 typedef long isize;

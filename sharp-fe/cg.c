@@ -121,6 +121,7 @@ struct CgCtx {
         char                 *mangle_name;
         Type                **targs;      /* concrete type arguments */
         size_t                 ntargs;
+        bool                   walked;     /* transitive body walk completed */
     }    *gfinsts;
     size_t ngfinsts;
     size_t gfinsts_cap;
@@ -5647,12 +5648,39 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                                     pnames[k] = efn->u.func_def.generic_params.data[k]
                                                       ->u.generic_param.name;
                             }
-                            for (size_t k = 0; k < np && k < st->u.struct_.nargs; k++)
-                                pvals[k] = st->u.struct_.args[k];
+                            for (size_t k = 0; k < np && k < st->u.struct_.nargs; k++) {
+                                Type *arg = st->u.struct_.args[k];
+                                /* Resolve TY_PARAM through the active
+                                 * substitution context.  When walking a
+                                 * generic extension method body (e.g.
+                                 * insert<K,V> calling this->_grow_if_needed()),
+                                 * the receiver's struct args are TY_PARAMs.
+                                 * Without resolution we would register the
+                                 * nested method with TY_PARAM args instead
+                                 * of concrete types. */
+                                if (arg && arg->kind == TY_PARAM &&
+                                    ctx->gp_names && ctx->gp_vals) {
+                                    for (size_t g = 0; g < ctx->ngp; g++) {
+                                        if (strcmp(arg->u.param.name,
+                                                   ctx->gp_names[g]) == 0) {
+                                            arg = ctx->gp_vals[g];
+                                            break;
+                                        }
+                                    }
+                                }
+                                pvals[k] = arg;
+                            }
+                            /* Build a temp resolved-args array for
+                             * cg_mangle_inst so it uses concrete types. */
+                            Type **resolved_args = NULL;
+                            if (st->u.struct_.nargs > 0 &&
+                                np == st->u.struct_.nargs) {
+                                resolved_args = pvals;  /* already resolved above */
+                            }
                             CgSB sb = {0};
-                            /* Mangle struct name first: Stack<int> → Stack__int */
+                            /* Mangle struct name: HashMap<Point,int> → HashMap__Point__int */
                             char *inst_sn = st->u.struct_.nargs > 0
-                                ? cg_mangle_inst(sname, st->u.struct_.args, st->u.struct_.nargs)
+                                ? cg_mangle_inst(sname, resolved_args ? resolved_args : st->u.struct_.args, st->u.struct_.nargs)
                                 : NULL;
                             const char *effective_sn = inst_sn ? inst_sn : sname;
                             cgb_puts(&sb, effective_sn);
@@ -6094,6 +6122,7 @@ static void gfinst_push(CgCtx *ctx, const AstNode *fn, const char *mn,
         ctx->gfinsts[idx].mangle_name = cpp_xstrdup(mn);
         ctx->gfinsts[idx].targs       = (Type **)ta;
         ctx->gfinsts[idx].ntargs      = ntargs;
+        ctx->gfinsts[idx].walked      = false;
     }
 }
 
@@ -8253,6 +8282,75 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
             }
         }
     }
+
+    /* Fixpoint: walk newly-discovered generic function instances to find
+     * transitive dependencies.  For example, main() calls
+     * HashMap<Point,int>.insert() which calls ._grow_if_needed() --
+     * only the direct call is discovered during the initial body walk
+     * above because generic function bodies are not walked there (they
+     * contain unresolved TY_PARAMs).  We iterate until no new instances
+     * are discovered, resolving TY_PARAMs through each instance's type
+     * substitution context. */
+    size_t prev_ngfinsts;
+    do {
+        prev_ngfinsts = ctx->ngfinsts;
+        for (size_t i = 0; i < ctx->ngfinsts; i++) {
+            struct GFuncInst_ *gi = &ctx->gfinsts[i];
+            if (gi->walked) continue;
+            gi->walked = true;
+            const AstNode *fn = gi->fn;
+            if (!fn || fn->kind != AST_FUNC_DEF || !fn->u.func_def.body)
+                continue;
+            size_t np = fn->u.func_def.generic_params.len;
+            /* Extension methods use the struct's generic params,
+             * not their own. */
+            if (np == 0) { np = gi->ntargs; if (!gi->targs || np == 0) continue; }
+            if (!gi->targs) continue;
+
+            /* Build pnames from the template definition. */
+            const char **pnames = malloc(np * sizeof *pnames);
+            if (!pnames) abort();
+            if (fn->u.func_def.generic_params.len > 0) {
+                for (size_t k = 0; k < np; k++)
+                    pnames[k] = fn->u.func_def.generic_params.data[k]
+                                    ->u.generic_param.name;
+            } else if (fn->u.func_def.struct_name && ctx->file_scope) {
+                /* Extension method: get param names from the struct. */
+                Symbol *ss = scope_lookup_type(ctx->file_scope,
+                                                fn->u.func_def.struct_name);
+                if (ss && ss->kind == SYM_TYPE && ss->decl &&
+                    ss->decl->kind == AST_STRUCT_DEF) {
+                    for (size_t k = 0; k < np &&
+                         k < ss->decl->u.struct_def.generic_params.len; k++)
+                        pnames[k] = ss->decl->u.struct_def.generic_params
+                                        .data[k]->u.generic_param.name;
+                }
+            }
+
+            /* Install gp context and walk the template body.
+             * cg_collect_expr's AST_METHOD_CALL handler will resolve
+             * TY_PARAM struct args through gp_names/gp_vals and push
+             * newly-discovered instances (e.g. _grow_if_needed). */
+            const char **saved_pnames = ctx->gp_names;
+            Type       **saved_pvals  = ctx->gp_vals;
+            size_t       saved_np     = ctx->ngp;
+            ctx->gp_names = pnames;
+            ctx->gp_vals  = gi->targs;
+            ctx->ngp      = np;
+
+            /* Annotate the template body with sem_types so
+             * cg_collect_expr's AST_METHOD_CALL handler can
+             * resolve the receiver type. */
+            Scope *mscope = fn->sem_scope ? fn->sem_scope : ctx->file_scope;
+            sema_func_template_body(ctx->ts, mscope, NULL, (AstNode*)fn);
+            cg_collect_block(ctx, fn->u.func_def.body);
+
+            ctx->gp_names = saved_pnames;
+            ctx->gp_vals  = saved_pvals;
+            ctx->ngp      = saved_np;
+            free(pnames);
+        }
+    } while (ctx->ngfinsts > prev_ngfinsts);
 
     /* End of Phase 2 collection. Pull the captured spec output back out
      * and restore ctx->out to the main buffer.  Specs will be emitted
