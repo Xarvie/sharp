@@ -364,29 +364,6 @@ static void cg_printf(CgCtx *ctx, const char *fmt, ...) {
 }
 
 /* =========================================================================
- * S1: detect outer-layer `volatile` on an AST type tree.
- *
- * The Sharp Type* model interns const through TY_CONST but deliberately
- * does not track volatile (it has no semantic effect on type
- * compatibility -- the C compiler enforces access ordering).  To preserve
- * the volatile keyword in the generated C, we walk the AST type tree
- * looking for AST_TYPE_VOLATILE at the outer layer (skipping any
- * intervening AST_TYPE_CONST wrappers).  Returns true iff found.  We do
- * not handle volatile-on-pointee (`int * volatile p`) -- rare in
- * practice and harmless to drop because the qualifier affects
- * code-generation rules cc applies regardless of how we present the
- * type.
- * ====================================================================== */
-__attribute__((unused)) static bool ast_type_outer_is_volatile(const AstNode *ty) {
-    while (ty) {
-        if (ty->kind == AST_TYPE_VOLATILE) return true;
-        if (ty->kind == AST_TYPE_CONST)    { ty = ty->u.type_const.base; continue; }
-        return false;
-    }
-    return false;
-}
-
-/* =========================================================================
  * Type generation
  * (Outputs the C declaration prefix; name is added separately)
  * ====================================================================== */

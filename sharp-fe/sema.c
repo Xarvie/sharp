@@ -1700,15 +1700,6 @@ static Symbol *struct_member(TyStore *ts, Type *recv_type, const char *name,
     return NULL;
 }
 
-/* Check if recv is const (const T or const T* pointee). */
-__attribute__((unused)) static bool recv_is_const(Type *t) {
-    if (!t) return false;
-    if (t->kind == TY_CONST) return true;                /* const T (value) */
-    if (t->kind == TY_PTR && t->u.ptr.base &&
-        t->u.ptr.base->kind == TY_CONST) return true;   /* T const* — wait, that's different */
-    return false;
-}
-
 /* Check if the pointee (or value) of a receiver is const.
  * "const B*" or "const B" — the object referred to is const. */
 static bool recv_object_is_const(Type *t) {

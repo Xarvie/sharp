@@ -402,11 +402,6 @@ static void ps_sync(PS *ps) {
     }
 }
 
-/* Make a node at the location of the current token. */
-__attribute__((unused)) static AstNode *ps_node(PS *ps, AstKind k) {
-    return ast_node_new(k, ps_peek(ps).loc);
-}
-
 /* Check if a name is a known type (typedef or struct/union tag).
  * Needed because is_type_start must distinguish `Vec<int> vi;` (declaration)
  * from `swap<int>(&x, &y)` (generic function call). */
@@ -601,7 +596,6 @@ static AstNode *parse_top_decl(PS *ps);
  *
  * If `stmt_wrap` is true, decls are wrapped in AST_DECL_STMT (statement
  * context); otherwise the bare AST_VAR_DECL is produced (file/top-level). */
-__attribute__((unused)) static AstNode *parse_var_decl_list(PS *ps, AstNode *base_ty, bool stmt_wrap);
 static AstNode *parse_array_suffix(PS *ps, AstNode *inner_ty);
 static AstNode *parse_init_list(PS *ps);
 static AstNode *finish_func(PS *ps, AstNode *ret_type, SharpTok name_tok, bool is_operator);
@@ -3245,15 +3239,6 @@ static AstNode *parse_init_declarator_list(PS *ps, const DeclSpecs *ds, bool stm
     return first_node;
 }
 
-/* Back-compat wrapper.  Some call sites still hand us a pre-parsed base
- * type with no DeclSpecs context; treat them as having no storage class. */
-__attribute__((unused)) static AstNode *parse_var_decl_list(PS *ps, AstNode *base_ty, bool stmt_wrap) {
-    DeclSpecs ds = {0};
-    ds.base_ty = base_ty;
-    ds.loc     = base_ty ? base_ty->loc : ps_peek(ps).loc;
-    return parse_init_declarator_list(ps, &ds, stmt_wrap);
-}
-
 /* =========================================================================
  * looks_like_sharp_generic_params  —  3-token lookahead.
  *
@@ -5882,28 +5867,6 @@ static AstNode *parse_stmt(PS *ps) {
 /* =========================================================================
  * Entry point
  * ====================================================================== */
-
-/* Determine whether a file path is a "user" file (should be
- * emitted by CG) vs a system/external header (skipped in CG output and
- * replaced by the original #include directive).
- *
- * A file is considered user-owned if it is:
- *   - the root source file itself, OR
- *   - a path that does NOT start with any known system prefix AND
- *     does NOT come from a compiler built-in location.
- *
- * The heuristic: system headers live under /usr/, /lib/, compiler internal
- * paths like /usr/lib/gcc/, or are named "<built-in>" / "<command-line>".
- * Project-local headers (#include "mylib.h") are user files.
- */
-__attribute__((unused)) static bool is_user_file(const char *path, const char *root_file) {
-    /* only the root source file itself is a "user" file.
-     * All included headers — system or project-local — go to sys_decls.
-     * The CG re-emits them as #include directives instead of expanding
-     * their content. */
-    if (!path || !root_file) return false;
-    return strcmp(path, root_file) == 0;
-}
 
 /* Append a unique #include string to file->u.file.user_includes. */
 void file_add_include(AstNode *file, const char *inc_str) {
