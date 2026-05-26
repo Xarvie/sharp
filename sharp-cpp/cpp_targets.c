@@ -214,7 +214,54 @@ static const char *find_zig_exe(void)
         return g_zig_path[0] ? g_zig_path : NULL;
     g_zig_path_found = 1;
 
-    /* First try: PATH search */
+    /* Priority 1: resolve self exe path, look for zig nearby */
+    char exe_path[MAX_PATH];
+    DWORD exe_len = GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
+    if (exe_len > 0 && exe_len < sizeof(exe_path)) {
+        char *last_sep = NULL;
+        {
+            char *bs = strrchr(exe_path, '\\');
+            char *fs = strrchr(exe_path, '/');
+            last_sep = (bs > fs) ? bs : fs;
+        }
+        if (last_sep) {
+            size_t dirlen = (size_t)(last_sep - exe_path);
+
+            /* Priority 1a: {sharp_bin}\\zig.exe */
+            if (dirlen + 9 < sizeof(g_zig_path)) {
+                memcpy(g_zig_path, exe_path, dirlen);
+                memcpy(g_zig_path + dirlen, "\\zig.exe", 9);
+                DWORD a = GetFileAttributesA(g_zig_path);
+                if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY))
+                    return g_zig_path;
+            }
+
+            /* Priority 1b: {sharp_bin}\\..\\zig.exe */
+            if (dirlen >= 1) {
+                char parent_dir[MAX_PATH];
+                memcpy(parent_dir, exe_path, dirlen);
+                parent_dir[dirlen] = '\0';
+                char *parent_sep = NULL;
+                {
+                    char *bs2 = strrchr(parent_dir, '\\');
+                    char *fs2 = strrchr(parent_dir, '/');
+                    parent_sep = (bs2 > fs2) ? bs2 : fs2;
+                }
+                if (parent_sep) {
+                    size_t pdirlen = (size_t)(parent_sep - parent_dir);
+                    if (pdirlen + 9 < sizeof(g_zig_path)) {
+                        memcpy(g_zig_path, parent_dir, pdirlen);
+                        memcpy(g_zig_path + pdirlen, "\\zig.exe", 9);
+                        DWORD a2 = GetFileAttributesA(g_zig_path);
+                        if (a2 != INVALID_FILE_ATTRIBUTES && !(a2 & FILE_ATTRIBUTE_DIRECTORY))
+                            return g_zig_path;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Priority 2: PATH search */
     if (SearchPathA(NULL, "zig.exe", NULL, sizeof(g_zig_path), g_zig_path, NULL))
         return g_zig_path;
 
@@ -248,6 +295,43 @@ static const char *find_zig_exe(void)
         return g_zig_path[0] ? g_zig_path : NULL;
     g_zig_path_found = 1;
 
+    /* Priority 1: resolve self exe path, look for zig nearby */
+    char exe_path[4096];
+    ssize_t exe_len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (exe_len > 0 && (size_t)exe_len < sizeof(exe_path)) {
+        exe_path[exe_len] = '\0';
+        char *last_sep = strrchr(exe_path, '/');
+        if (last_sep) {
+            size_t dirlen = (size_t)(last_sep - exe_path);
+
+            /* Priority 1a: {sharp_bin}/zig */
+            if (dirlen + 5 < sizeof(g_zig_path)) {
+                memcpy(g_zig_path, exe_path, dirlen);
+                memcpy(g_zig_path + dirlen, "/zig", 5);
+                if (access(g_zig_path, X_OK) == 0)
+                    return g_zig_path;
+            }
+
+            /* Priority 1b: {sharp_bin}/../zig */
+            if (dirlen >= 1) {
+                char parent_dir[4096];
+                memcpy(parent_dir, exe_path, dirlen);
+                parent_dir[dirlen] = '\0';
+                char *parent_sep = strrchr(parent_dir, '/');
+                if (parent_sep) {
+                    size_t pdirlen = (size_t)(parent_sep - parent_dir);
+                    if (pdirlen + 5 < sizeof(g_zig_path)) {
+                        memcpy(g_zig_path, parent_dir, pdirlen);
+                        memcpy(g_zig_path + pdirlen, "/zig", 5);
+                        if (access(g_zig_path, X_OK) == 0)
+                            return g_zig_path;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Priority 2: PATH environment variable */
     const char *path_env = getenv("PATH");
     if (path_env) {
         const char *start = path_env;

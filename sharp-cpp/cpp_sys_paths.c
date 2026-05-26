@@ -78,7 +78,61 @@ static const char *try_find_zig_dir(char *out_buf, size_t buf_size) {
     if (!PathIsDirectoryA(test)) return NULL;
     return out_buf;
 #else
-    /* Linux/macOS: search PATH for "zig" */
+    /* Priority 1: resolve self exe path, look for zig nearby */
+    char exe_path[2048];
+    ssize_t exe_len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (exe_len > 0 && (size_t)exe_len < sizeof(exe_path)) {
+        exe_path[exe_len] = '\0';
+        char *last_sep = strrchr(exe_path, '/');
+        if (last_sep) {
+            size_t dirlen = (size_t)(last_sep - exe_path);
+
+            /* Priority 1a: {sharp_bin}/zig */
+            {
+                char candidate[2048];
+                snprintf(candidate, sizeof(candidate), "%.*s/zig",
+                         (int)dirlen, exe_path);
+                struct stat st;
+                if (stat(candidate, &st) == 0 && (st.st_mode & S_IXUSR)) {
+                    char test[2048];
+                    snprintf(test, sizeof(test), "%.*s/lib/libc",
+                             (int)dirlen, exe_path);
+                    if (stat(test, &st) == 0 && S_ISDIR(st.st_mode)) {
+                        strncpy(out_buf, exe_path, buf_size - 1);
+                        out_buf[dirlen] = '\0';
+                        return out_buf;
+                    }
+                }
+            }
+
+            /* Priority 1b: {sharp_bin}/../zig */
+            if (dirlen >= 1) {
+                char parent_dir[2048];
+                memcpy(parent_dir, exe_path, dirlen);
+                parent_dir[dirlen] = '\0';
+                char *parent_sep = strrchr(parent_dir, '/');
+                if (parent_sep) {
+                    size_t pdirlen = (size_t)(parent_sep - parent_dir);
+                    char candidate[2048];
+                    snprintf(candidate, sizeof(candidate), "%.*s/zig",
+                             (int)pdirlen, parent_dir);
+                    struct stat st2;
+                    if (stat(candidate, &st2) == 0 && (st2.st_mode & S_IXUSR)) {
+                        char test[2048];
+                        snprintf(test, sizeof(test), "%.*s/lib/libc",
+                                 (int)pdirlen, parent_dir);
+                        if (stat(test, &st2) == 0 && S_ISDIR(st2.st_mode)) {
+                            strncpy(out_buf, parent_dir, buf_size - 1);
+                            out_buf[pdirlen] = '\0';
+                            return out_buf;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /* Priority 2: search PATH for "zig" */
     const char *path_env = getenv("PATH");
     if (!path_env) return NULL;
 
@@ -785,7 +839,57 @@ static const char *find_zig_install_dir(void) {
 
     return zig_dir;
 #else
-    /* Linux/macOS: search PATH for "zig" */
+    /* Priority 1: resolve self exe path, look for zig nearby */
+    char exe_path[4096];
+    ssize_t exe_len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (exe_len > 0 && (size_t)exe_len < sizeof(exe_path)) {
+        exe_path[exe_len] = '\0';
+        char *last_sep = strrchr(exe_path, '/');
+        if (last_sep) {
+            size_t dirlen = (size_t)(last_sep - exe_path);
+
+            /* Priority 1a: {sharp_bin}/zig */
+            {
+                char candidate[2048];
+                snprintf(candidate, sizeof(candidate), "%.*s/zig",
+                         (int)dirlen, exe_path);
+                struct stat st;
+                if (stat(candidate, &st) == 0 && (st.st_mode & S_IXUSR)) {
+                    strncpy(zig_dir, exe_path, sizeof(zig_dir) - 1);
+                    zig_dir[dirlen] = '\0';
+                    char test[2048];
+                    snprintf(test, sizeof(test), "%s/lib/libc", zig_dir);
+                    if (stat(test, &st) == 0 && S_ISDIR(st.st_mode))
+                        return zig_dir;
+                }
+            }
+
+            /* Priority 1b: {sharp_bin}/../zig */
+            if (dirlen >= 1) {
+                char parent_dir[4096];
+                memcpy(parent_dir, exe_path, dirlen);
+                parent_dir[dirlen] = '\0';
+                char *parent_sep = strrchr(parent_dir, '/');
+                if (parent_sep) {
+                    size_t pdirlen = (size_t)(parent_sep - parent_dir);
+                    char candidate[2048];
+                    snprintf(candidate, sizeof(candidate), "%.*s/zig",
+                             (int)pdirlen, parent_dir);
+                    struct stat st2;
+                    if (stat(candidate, &st2) == 0 && (st2.st_mode & S_IXUSR)) {
+                        strncpy(zig_dir, parent_dir, sizeof(zig_dir) - 1);
+                        zig_dir[pdirlen] = '\0';
+                        char test[2048];
+                        snprintf(test, sizeof(test), "%s/lib/libc", zig_dir);
+                        if (stat(test, &st2) == 0 && S_ISDIR(st2.st_mode))
+                            return zig_dir;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Priority 2: search PATH for "zig" */
     const char *path_env = getenv("PATH");
     if (!path_env) return NULL;
 

@@ -1312,10 +1312,11 @@ int main(int argc, char *argv[]) {
         const char *zig_early = cpp_find_zig_exe();
         if (!zig_early) {
             fprintf(stderr,
-                "sharpc: error: zig not found in PATH.\n"
+                "sharpc: error: zig not found.\n"
                 "  zig is required as the C compiler backend.\n"
-                "  Install zig from https://ziglang.org/download/\n"
-                "  Then add the zig directory to your PATH.\n");
+                "  Place 'zig' next to sharpc, or in the parent directory,\n"
+                "  or install zig from https://ziglang.org/download/\n"
+                "  and add it to your PATH.\n");
             ret = 3;
             goto cleanup;
         }

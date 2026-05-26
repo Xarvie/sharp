@@ -55,4 +55,8 @@ Desktop.ini
 *.bak
 *.log
 
+# === 依赖 ===
+zig/
+zig-*.tar.xz
+
 NUL
