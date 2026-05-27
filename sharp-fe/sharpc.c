@@ -177,7 +177,9 @@ static char *xstrdup(const char *s) {
 
 typedef struct {
     const char *path;          /* original path (or "-" for stdin) */
-    char       *tmp_c;         /* generated .c text (NULL if not yet generated) */
+    char       *tmp_c;         /* generated .c text (NULL if not yet generated);
+                                  for .S files this is preprocessed assembly */
+    bool        tmp_is_asm;    /* true if tmp_c is assembly (.S), not C */
     char      **included_files; /* files opened via #include (owned, freed on cleanup) */
     size_t      nincluded;
     bool       *included_is_sys; /* parallel to included_files, true = system header */
@@ -197,6 +199,7 @@ static InputFile *iv_push(InputVec *v) {
     }
     v->data[v->len].path = NULL;
     v->data[v->len].tmp_c = NULL;
+    v->data[v->len].tmp_is_asm = false;
     v->data[v->len].included_files = NULL;
     v->data[v->len].nincluded = 0;
     v->data[v->len].included_is_sys = NULL;
@@ -411,7 +414,11 @@ static bool is_linkable_input(const char *path) {
     const char *ext = file_ext(path);
     return strcmp(ext, ".o")  == 0 || strcmp(ext, ".obj") == 0 ||
            strcmp(ext, ".a")  == 0 || strcmp(ext, ".so")  == 0 ||
-           strcmp(ext, ".S")  == 0 || strcmp(ext, ".s")   == 0;
+           strcmp(ext, ".s")  == 0;
+}
+
+static bool is_dot_S(const char *path) {
+    return strcmp(file_ext(path), ".S") == 0;
 }
 
 static char *replace_ext(const char *path, const char *new_ext) {
@@ -492,10 +499,11 @@ static void usage(FILE *out) {
 "       sharpc -E <input> [options]                   preprocess only\n"
 "\n"
 "Input files:\n"
-"  <file>.sp/.c/.i     source files (multiple inputs supported)\n"
+"  <file>.sp/.c/.i     source files (compiled via Sharp frontend)\n"
+"  <file>.S             assembly with preprocessor (cpp + zig cc)\n"
 "  <file>.o/.obj        pre-built objects (passed to linker)\n"
 "  <file>.a/.so         static / shared libraries (passed to linker)\n"
-"  <file>.S/.s          assembly files (passed to assembler)\n"
+"  <file>.s             assembly without preprocessor (passed to zig cc)\n"
 "  -                   read from stdin\n"
 "\n"
 "Output:\n"
@@ -714,6 +722,58 @@ static char *prepend_force_includes(const char *input, char *src,
     memcpy(p, src, src_len + 1);
     free(src);
     return buf;
+}
+
+/* Run sharp's C preprocessor on src with all flags applied.
+ * Does NOT free src — the caller owns it.
+ * Returns preprocessed text (caller frees), or NULL on error. */
+static char *cpp_preprocess_src(const char *src, const char *filename,
+                                 StrVec *user_inc, StrVec *sys_inc,
+                                 MacroVec *macros, long lang_std,
+                                 const char *target, bool linemarkers) {
+    CppCtx *cctx = cpp_ctx_new();
+    cpp_probe_zig_macros(cctx, target);
+    cpp_emit_linemarkers(cctx, linemarkers);
+    if (lang_std >= 0) cpp_set_lang_std(cctx, lang_std);
+
+    for (size_t i = 0; i < user_inc->len; i++)
+        cpp_add_user_include(cctx, user_inc->data[i]);
+    for (size_t i = 0; i < sys_inc->len; i++)
+        cpp_add_sys_include(cctx, sys_inc->data[i]);
+
+    for (size_t i = 0; i < macros->len; i++) {
+        if (macros->data[i].is_undef)
+            cpp_undefine(cctx, macros->data[i].spec);
+        else if (apply_define(cctx, macros->data[i].spec) < 0) {
+            cpp_ctx_free(cctx); return NULL;
+        }
+    }
+
+    CppResult r = cpp_run_buf(cctx, src, strlen(src), filename);
+
+    bool had_error = false;
+    for (size_t i = 0; i < r.ndiags; i++) {
+        CppDiag *d = &r.diags[i];
+        if (d->level == CPP_DIAG_NOTE) continue;
+        const char *fname = d->loc.file ? d->loc.file : filename;
+        fprintf(stderr, "%s:%u:%u: %s: %s\n",
+                fname, d->loc.line, d->loc.col,
+                d->level == CPP_DIAG_FATAL   ? "fatal" :
+                d->level == CPP_DIAG_ERROR   ? "error" :
+                d->level == CPP_DIAG_WARNING ? "warning" : "note",
+                d->msg ? d->msg : "");
+        if (d->level == CPP_DIAG_ERROR || d->level == CPP_DIAG_FATAL)
+            had_error = true;
+    }
+    if (had_error) { cpp_result_free(&r); cpp_ctx_free(cctx); return NULL; }
+
+    char *out = malloc(r.text_len + 1);
+    if (!out) { cpp_result_free(&r); cpp_ctx_free(cctx); return NULL; }
+    if (r.text_len) memcpy(out, r.text, r.text_len);
+    out[r.text_len] = '\0';
+    cpp_result_free(&r);
+    cpp_ctx_free(cctx);
+    return out;
 }
 
 static char *preprocess_one_file(const char *input,
@@ -1405,8 +1465,32 @@ int main(int argc, char *argv[]) {
     for (size_t fi = 0; fi < inputs.len; fi++) {
         InputFile *inf = &inputs.data[fi];
 
-        /* .o/.obj/.a/.so/.S/.s files — skip sharp preprocessing/compilation */
+        /* .o/.obj/.a/.so/.s — skip sharp preprocessing/compilation entirely */
         if (is_linkable_input(inf->path)) continue;
+
+        /* .S — preprocess with sharp's cpp (flags apply), skip frontend */
+        if (is_dot_S(inf->path)) {
+            char *s_src = read_file(inf->path);
+            if (!s_src) { had_error = 1; continue; }
+            if (force_includes.len > 0) {
+                s_src = prepend_force_includes(inf->path, s_src, &force_includes);
+                if (!s_src) { had_error = 1; continue; }
+            }
+            char *pp = cpp_preprocess_src(s_src, inf->path, &user_inc, &sys_inc,
+                                           &macros, lang_std, target, false);
+            free(s_src);
+            if (!pp) { had_error = 1; continue; }
+            inf->tmp_c = pp;
+            inf->tmp_is_asm = true;
+            if (action == ACTION_PREPROCESS) {
+                FILE *out = output ? fopen(output, "w") : stdout;
+                if (!out) { perror(output ? output : "stdout"); ret = 2; goto cleanup; }
+                fputs(pp, out);
+                if (output) fclose(out);
+                goto cleanup;
+            }
+            continue;
+        }
 
         if (action == ACTION_PREPROCESS) {
             /* -E: preprocess and output to stdout or -o file */
@@ -1495,6 +1579,23 @@ int main(int argc, char *argv[]) {
         for (size_t fi = 0; fi < inputs.len; fi++) {
             InputFile *inf = &inputs.data[fi];
             if (!inf->tmp_c) continue;
+
+            const char *out_file = (inputs.len == 1 && output) ? output :
+                                   replace_ext(inf->path, ".s");
+
+            if (inf->tmp_is_asm) {
+                /* .S: preprocessed by sharp's cpp already — emit directly */
+                FILE *f = fopen(out_file, "w");
+                if (!f) { perror(out_file); ret = 2; goto cleanup; }
+                fputs(inf->tmp_c, f);
+                fclose(f);
+                if (g_sess.verbose)
+                    fprintf(stderr, "sharpc: wrote %s\n", out_file);
+                if (inputs.len != 1 || !output)
+                    free((void *)out_file);
+                continue;
+            }
+
             /* Write .c temp file */
             char *tmp_c = make_tmp_name(inf->path, ".c");
             if (!tmp_c) { ret = 2; goto cleanup; }
@@ -1502,9 +1603,6 @@ int main(int argc, char *argv[]) {
             if (!f) { perror(tmp_c); ret = 2; goto cleanup; }
             fputs(inf->tmp_c, f);
             fclose(f);
-
-            const char *out_file = (inputs.len == 1 && output) ? output :
-                                   replace_ext(inf->path, ".s");
 
             const char *zig_argv[] = {zig_exe, "cc", "-S", tmp_c, "-o", out_file, NULL};
             if (g_sess.verbose) {
@@ -1552,17 +1650,57 @@ int main(int argc, char *argv[]) {
         for (size_t fi = 0; fi < inputs.len; fi++) {
             InputFile *inf = &inputs.data[fi];
             if (!inf->tmp_c) continue;
+
+            const char *obj_out = (inputs.len == 1 && output &&
+                                   strcmp(file_ext(output), ".c") != 0)
+                                  ? output :
+                                  replace_ext(inf->path, ".o");
+
+            if (inf->tmp_is_asm) {
+                /* .S: write preprocessed assembly to .s temp file, assemble via zig cc */
+                char *tmp_s = make_tmp_name(inf->path, ".s");
+                if (!tmp_s) { ret = 2; goto cleanup; }
+                FILE *fs = fopen(tmp_s, "w");
+                if (!fs) { perror(tmp_s); ret = 2; goto cleanup; }
+                fputs(inf->tmp_c, fs);
+                fclose(fs);
+
+                StrVec zig_args = {0};
+                sv_push(&zig_args, zig_exe);
+                sv_push(&zig_args, "cc");
+                if (target && target[0]) { sv_push(&zig_args, "-target"); sv_push(&zig_args, (char *)target); }
+                sv_push(&zig_args, "-c");
+                sv_push(&zig_args, tmp_s);
+                sv_push(&zig_args, "-o");
+                sv_push(&zig_args, obj_out);
+                for (size_t li = 0; li < link_other.len; li++)
+                    sv_push(&zig_args, link_other.data[li]);
+                sv_push(&zig_args, NULL);
+
+                if (g_sess.verbose) {
+                    fprintf(stderr, "[sharpc] ");
+                    for (int ai = 0; zig_args.data[ai]; ai++) fprintf(stderr, "%s ", zig_args.data[ai]);
+                    fprintf(stderr, "\n");
+                }
+                if (run_cmd(zig_args.data) != 0) {
+                    fprintf(stderr, "sharpc: assembly failed for %s\n", inf->path);
+                    free(zig_args.data);
+                    ret = 3; goto cleanup;
+                }
+                free(zig_args.data);
+                if (g_sess.verbose)
+                    fprintf(stderr, "sharpc: wrote %s\n", obj_out);
+                if (inputs.len != 1 || !output)
+                    free((void *)obj_out);
+                continue;
+            }
+
             char *tmp_c = make_tmp_name(inf->path, ".c");
             if (!tmp_c) { ret = 2; goto cleanup; }
             FILE *f = fopen(tmp_c, "w");
             if (!f) { perror(tmp_c); ret = 2; goto cleanup; }
             fputs(inf->tmp_c, f);
             fclose(f);
-
-            const char *obj_out = (inputs.len == 1 && output &&
-                                   strcmp(file_ext(output), ".c") != 0)
-                                  ? output :
-                                  replace_ext(inf->path, ".o");
 
             /* Build zig cc argv */
             StrVec zig_args = {0};
@@ -1614,6 +1752,47 @@ int main(int argc, char *argv[]) {
         }
 
         if (!inf->tmp_c) continue;
+
+        if (inf->tmp_is_asm) {
+            /* .S: write preprocessed assembly to .s temp file, assemble via zig cc */
+            char *tmp_s = make_tmp_name(inf->path, ".s");
+            if (!tmp_s) { ret = 2; goto cleanup; }
+            FILE *fs = fopen(tmp_s, "w");
+            if (!fs) { perror(tmp_s); ret = 2; goto cleanup; }
+            fputs(inf->tmp_c, fs);
+            fclose(fs);
+
+            const char *obj_tmp = make_tmp_name(inf->path, ".o");
+            if (!obj_tmp) { ret = 2; goto cleanup; }
+
+            StrVec zig_args = {0};
+            sv_push(&zig_args, zig_exe);
+            sv_push(&zig_args, "cc");
+            if (target && target[0]) { sv_push(&zig_args, "-target"); sv_push(&zig_args, (char *)target); }
+            sv_push(&zig_args, "-c");
+            sv_push(&zig_args, tmp_s);
+            sv_push(&zig_args, "-o");
+            sv_push(&zig_args, obj_tmp);
+            for (size_t li = 0; li < link_other.len; li++)
+                sv_push(&zig_args, link_other.data[li]);
+            sv_push(&zig_args, NULL);
+
+            if (g_sess.verbose) {
+                fprintf(stderr, "[sharpc] ");
+                for (int ai = 0; zig_args.data[ai]; ai++) fprintf(stderr, "%s ", zig_args.data[ai]);
+                fprintf(stderr, "\n");
+            }
+            if (run_cmd(zig_args.data) != 0) {
+                fprintf(stderr, "sharpc: assembly failed for %s\n", inf->path);
+                free(zig_args.data);
+                ret = 3; goto cleanup;
+            }
+            free(zig_args.data);
+
+            sv_push(&obj_files, obj_tmp);
+            continue;
+        }
+
         char *tmp_c = make_tmp_name(inf->path, ".c");
         if (!tmp_c) { ret = 2; goto cleanup; }
         FILE *f = fopen(tmp_c, "w");
