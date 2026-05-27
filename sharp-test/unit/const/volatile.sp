@@ -1,0 +1,38 @@
+// 来源: p271_codegen_const_method.sp, p278_volatile_const.sp
+// const 代码生成 + volatile/const 混合测试
+
+// === p271: const pointer chain in method calls ===
+class Data {
+    int secret;
+};
+int  Data.get_val(this) const { return this->secret; }
+void Data.set_val(this, int v) { this->secret = v; }
+int read_val(const class Data* d) { return d->get_val(); }
+
+// === p278: volatile + const qualifier mix ===
+class Sensor {
+    volatile int reading;
+    const    int id;
+};
+int Sensor.get_reading(this) const { return this->reading; }
+int Sensor.get_id(this) const { return this->id; }
+
+int main() {
+    // --- p271: const codegen ---
+    Data d;
+    d.set_val(128);
+    if (d.get_val() != 128) return 1;
+    int v = read_val(&d);
+    if (v != 128) return 2;
+
+    // --- p278: volatile/const mix ---
+    Sensor s = {0, 42};
+    if (s.id != 42) return 3;
+    int v1 = s.reading;
+    int v2 = s.reading;
+    if (v1 != v2) return 4;  // volatile not changed externally
+    const Sensor* sp = &s;
+    if (sp->get_id() != 42) return 5;
+
+    return 0;
+}

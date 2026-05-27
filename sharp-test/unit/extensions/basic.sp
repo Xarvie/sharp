@@ -1,0 +1,66 @@
+// 来源: p223_str_extensions.sp, p228_array_struct.sp
+// 扩展方法基础: struct/class/数组 扩展方法 + 外部作用域
+
+// === p223: string-like extensions (len, starts_with, find) ===
+class Str {
+    const char* ptr;
+    long len;
+}
+
+long Str.length(this) const { return this->len; }
+
+int Str.starts_with(this, const char* prefix) {
+    long i = 0;
+    while (prefix[i] != 0) {
+        if (i >= this->len) return 0;
+        if (this->ptr[i] != prefix[i]) return 0;
+        i = i + 1;
+    }
+    return 1;
+}
+
+long Str.find(this, char c) {
+    for (long i = 0; i < this->len; i = i + 1)
+        if (this->ptr[i] == c) return i;
+    return (long)-1;
+}
+
+// === p228: extensions to array (sum, avg, copy), struct extension ===
+long array_sum(const int* a, long n) {
+    long s = 0;
+    for (long i = 0; i < n; i = i + 1) s = s + (long)a[i];
+    return s;
+}
+float array_avg(const int* a, long n) {
+    return (float)array_sum(a, n) / (float)n;
+}
+
+struct Box { int x; int y; };
+long box_hypot(struct Box b) {
+    return (long)b.x * (long)b.x + (long)b.y * (long)b.y;
+}
+
+int main() {
+    // --- p223 ---
+    Str s; s.ptr = "hello world"; s.len = 11;
+    if (s.length() != 11) return 1;
+    if (s.starts_with("hello") != 1) return 2;
+    if (s.starts_with("world") != 0) return 3;
+    long pos_w = s.find('w');
+    long pos_z = s.find('z');
+    if (pos_w != 6) return 4;
+    if (pos_z != -1) return 5;
+
+    // --- p228 ---
+    int arr[5] = {1, 2, 3, 4, 5};
+    long sum = array_sum(arr, 5);
+    float avg = array_avg(arr, 5);
+    if (sum != 15) return 6;
+    if (avg < 2.9f || avg > 3.1f) return 7;
+
+    struct Box b = {3, 4};
+    long h = box_hypot(b);
+    if (h != 25) return 8;
+
+    return 0;
+}

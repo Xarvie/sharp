@@ -1,4 +1,0 @@
-/* p218_types.h — p218 type definitions */
-
-typedef long isize;
-typedef unsigned long usize;

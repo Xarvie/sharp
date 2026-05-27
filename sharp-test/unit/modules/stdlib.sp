@@ -1,0 +1,119 @@
+// 来源: p161_stdlib_integration.sp
+// 标准库集成测试: 模块化 struct/class 和方法导入
+
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+typedef long isize;
+
+// === std.str 风格 (内联) ===
+class Str {
+    const char* ptr;
+    isize       len;
+};
+isize Str.size(this) const { return this->len; }
+bool Str.eq(this, Str other) const {
+    if (this->len != other.len) return false;
+    for (isize i = 0; i < this->len; i = i + 1)
+        if (this->ptr[i] != other.ptr[i]) return false;
+    return true;
+}
+Str str_from_lit(const char* lit) {
+    Str s; s.ptr = lit; s.len = 0;
+    while (lit[s.len] != 0) s.len = s.len + 1;
+    return s;
+}
+bool str_eq(Str a, Str b) { return a.eq(b); }
+
+// === std.string 风格 (内联) ===
+class String {
+    char* ptr;
+    isize len;
+    isize cap;
+};
+void String.push_byte(this, char c) {
+    if (this->len >= this->cap) {
+        isize new_cap = (this->cap == 0) ? 8 : this->cap * 2;
+        this->ptr = (char*)realloc(this->ptr, new_cap);
+        if (!this->ptr) __builtin_trap();
+        this->cap = new_cap;
+    }
+    this->ptr[this->len] = c;
+    this->len = this->len + 1;
+}
+isize String.size(this) const { return this->len; }
+void String.destroy(this) { free(this->ptr); this->ptr = (char*)0; this->len = 0; this->cap = 0; }
+String string_from_str(Str s) {
+    String r;
+    r.len = s.len; r.cap = s.len;
+    r.ptr = (char*)malloc(r.cap);
+    if (!r.ptr && r.cap > 0) __builtin_trap();
+    for (isize i = 0; i < s.len; i = i + 1) r.ptr[i] = s.ptr[i];
+    return r;
+}
+
+// === std.vec 风格 (int 特化, 内联) ===
+class Vec_int {
+    int*    data;
+    isize len;
+    isize cap;
+};
+void Vec_int.push(this, int val) {
+    if (this->len >= this->cap) {
+        isize new_cap = (this->cap == 0) ? 8 : this->cap * 2;
+        this->data = (int*)realloc(this->data, sizeof(int) * new_cap);
+        if (!this->data) __builtin_trap();
+        this->cap = new_cap;
+    }
+    this->data[this->len] = val;
+    this->len = this->len + 1;
+}
+int Vec_int.pop(this) {
+    if (this->len == 0) __builtin_trap();
+    this->len = this->len - 1;
+    return this->data[this->len];
+}
+int Vec_int.get(this, isize i) const { return this->data[i]; }
+isize Vec_int.size(this) const { return this->len; }
+void Vec_int.destroy(this) { free(this->data); this->data = (int*)0; this->len = 0; this->cap = 0; }
+
+int main(void) {
+    // --- Str 测试 ---
+    Str hello = str_from_lit("hello");
+    Str world = str_from_lit("world");
+    Str hello2 = str_from_lit("hello");
+
+    isize hello_len = hello.size();
+    if (hello_len != 5) return 1;
+    if (!hello.eq(hello2)) return 2;
+    if (str_eq(hello, world)) return 3;
+
+    // --- String 测试 ---
+    String s = string_from_str(hello);
+    isize s_size = s.size();
+    s.push_byte('!');
+    isize s_size2 = s.size();
+    if (s_size != 5) return 4;
+    if (s_size2 != 6) return 5;
+    s.destroy();
+
+    // --- Vec_int 测试 ---
+    Vec_int v;
+    v.data = NULL;
+    v.len = 0;
+    v.cap = 0;
+    v.push(10);
+    v.push(20);
+    v.push(30);
+    isize v_size = v.size();
+    int v_last = v.pop();
+    int v_first = v.get(0);
+    if (v_size != 3) return 6;
+    if (v_last != 30) return 7;
+    if (v_first != 10) return 8;
+    v.destroy();
+
+    return 0;
+}

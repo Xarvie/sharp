@@ -1,0 +1,53 @@
+// 来源: p50_if_has_operator.sp
+// @has_operator 编译时内省: if (@has_operator) 分支选择 + @static_assert
+
+class HasPlus {
+    int v;
+}
+int HasPlus.operator+(this, HasPlus rhs) { return this->v + rhs.v; }
+
+struct NoPlus { int v; }
+
+class HasEq {
+    int v;
+}
+int HasEq.operator==(this, HasEq rhs) { return this->v == rhs.v; }
+int HasEq.operator<(this, HasEq rhs)  { return this->v <  rhs.v; }
+
+void static_assert_ok(HasPlus a, HasPlus b) {
+    @static_assert(@has_operator(HasPlus, +), "HasPlus must support +");
+    (void)a; (void)b;
+}
+
+int branch_plus_has() {
+    if (@has_operator(HasPlus, +)) { return 1; } else { return 0; }
+}
+int branch_plus_no() {
+    if (@has_operator(NoPlus, +)) { return 1; } else { return 0; }
+}
+int branch_eq_has() {
+    if (@has_operator(HasEq, ==)) { return 1; } else { return 0; }
+}
+int branch_eq_no() {
+    if (@has_operator(NoPlus, ==)) { return 1; } else { return 0; }
+}
+int multi_op_check() {
+    int r = 0;
+    if (@has_operator(HasEq, ==)) { r = r + 1; }
+    if (@has_operator(HasEq, <))  { r = r + 2; }
+    if (@has_operator(HasEq, +))  { r = r + 4; }
+    if (@has_operator(HasEq, >))  { r = r + 8; }
+    return r;  /* expected: 3 */
+}
+
+int main(void) {
+    HasPlus a; a.v = 0;
+    HasPlus b; b.v = 0;
+    static_assert_ok(a, b);
+    if (branch_plus_has() != 1) return 1;
+    if (branch_plus_no()  != 0) return 2;
+    if (branch_eq_has()   != 1) return 3;
+    if (branch_eq_no()    != 0) return 4;
+    if (multi_op_check()  != 3) return 5;
+    return 0;
+}

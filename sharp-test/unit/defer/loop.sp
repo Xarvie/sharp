@@ -1,0 +1,39 @@
+// Merged defer loop tests
+// Sources: p109_defer_loop.sp, p266_runtime_defer.sp(loop部分)
+
+int log_buf[20];
+int logn = 0;
+void mark(int v) { log_buf[logn++] = v; }
+
+int main(void) {
+    /* T1: break triggers defer for current iteration (p109) */
+    logn = 0;
+    int i = 0;
+    while (i < 5) {
+        defer mark(7);
+        i = i + 1;
+        if (i == 3) break;
+    }
+    if (logn != 3) return 1;
+    if (log_buf[0] != 7 || log_buf[1] != 7 || log_buf[2] != 7) return 2;
+
+    /* T2: continue triggers defer and continues loop (p109) */
+    logn = 0;
+    int sum = 0;
+    for (int j = 0; j < 4; j++) {
+        defer mark(9);
+        if (j == 2) continue;
+        sum = sum + j;
+    }
+    if (logn != 4) return 3;
+    if (sum != 4) return 4;
+
+    /* T3: defer in for loop (p266) */
+    logn = 0;
+    for (int k = 0; k < 3; k = k + 1) {
+        defer mark(k);
+    }
+    if (logn != 3) return 5;
+
+    return 0;
+}

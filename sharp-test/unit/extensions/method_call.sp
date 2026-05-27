@@ -1,0 +1,35 @@
+// 来源: p240_ext_method_call.sp
+// 扩展方法调用: this.* 模式
+
+#include <stdbool.h>
+
+class Rect {
+    int w;
+    int h;
+};
+
+int Rect.area(this) const { return this->w * this->h; }
+int Rect.perimeter(this) const { return 2 * (this->w + this->h); }
+
+// Extension that calls another extension via this.*
+bool Rect.is_square(this) const {
+    return this->w == this->h;
+}
+
+int main() {
+    Rect r;
+    r.w = 5; r.h = 7;
+    int a = r.area();
+    if (a != 35) return 1;
+    int p = r.perimeter();
+    if (p != 24) return 2;
+    if (r.is_square()) return 3;
+
+    Rect s2;
+    s2.w = 10; s2.h = 10;
+    if (!s2.is_square()) return 4;
+    int a2 = s2.area();
+    if (a2 != 100) return 5;
+
+    return 0;
+}

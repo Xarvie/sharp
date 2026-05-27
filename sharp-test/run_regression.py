@@ -291,6 +291,7 @@ def tokenize(text: str) -> List[str]:
 # ── SP 超集探针测试 ─────────────────────────────────────────────────────
 
 PROBES_DIR_NAME = "c_superset_probes"
+UNIT_DIR_NAME = "unit"
 SPECIAL_DIR_NAME = "special"
 # Flags required for cross-compile probes
 CROSS_COMPILE_ARGS = ["--target", "x86_64-linux-gnu"]
@@ -595,6 +596,110 @@ def run_all_probe_tests(
     return passed, failed, errors, file_results
 
 
+# ── Unit 测试 (unit/) ────────────────────────────────────────────────────
+
+def run_unit_tests(
+    base_dir: Path,
+    sharpc_path: str,
+    zig_path: str = "",
+    verbose: bool = False,
+    timeout: int = 30,
+    jobs: int = 1,
+) -> Tuple[int, int, int, Dict[str, Tuple[int, str]]]:
+    """Run all unit tests from unit/ directory.
+
+    Each .sp file is:
+      1. compiled: sharpc -c test.sp → test.ref.c
+      2. compared: diff generated vs .ref.c (if .ref.c exists)
+      3. compiled: zig cc test.ref.c → test.exe
+      4. run: ./test.exe → exit code 0 = pass
+    """
+    unit_dir = base_dir / UNIT_DIR_NAME
+    if not unit_dir.is_dir():
+        return 0, 0, 0, {}
+
+    sp_files = sorted(str(p.relative_to(base_dir)) for p in unit_dir.rglob("*.sp"))
+    if not sp_files:
+        return 0, 0, 0, {}
+
+    total_files = len(sp_files)
+    file_results: Dict[str, Tuple[int, str]] = {}
+    passed = failed = errors = 0
+    completed = 0
+    lock = threading.Lock()
+    print_lock = threading.Lock()
+
+    def _record(name: str, rc: int, detail: str) -> None:
+        nonlocal passed, failed, errors, completed
+        with lock:
+            file_results[name] = (rc, detail)
+            if rc == 0:
+                passed += 1
+            elif rc == 1:
+                failed += 1
+            else:
+                errors += 1
+            completed += 1
+            progress = f"[{completed:3d}/{total_files}]"
+
+        if verbose:
+            status_map = {0: "pass", 1: "fail", 2: "error"}
+            icon_map = {0: "PASS", 1: "FAIL", 2: "ERR "}
+            status = status_map.get(rc, "???")
+            icon = icon_map.get(rc, "???")
+            with print_lock:
+                print(f"  {icon} {progress}  {name}")
+                if rc != 0:
+                    for line in detail.splitlines():
+                        print(f"           {line}")
+
+    def test_unit_sp(rel_path: str) -> Tuple[int, str]:
+        sp_path = str(base_dir / rel_path)
+        ref_path = sp_path[:-3] + ".ref.c"
+        ok, tmp_out, err = _run_sharpc_codegen(sp_path, sharpc_path, timeout)
+        if not ok:
+            return 2, err
+
+        if os.path.isfile(ref_path):
+            rc, detail = _compare_gen_with_ref(tmp_out, ref_path)
+            if rc != 0:
+                _cleanup_files(tmp_out)
+                return rc, detail
+
+        rc, detail = _compile_and_run(tmp_out, zig_path, timeout)
+        _cleanup_files(tmp_out)
+        return rc, detail
+
+    if verbose:
+        print(f"\n[unit] {total_files} tests  jobs={jobs}\n")
+
+    with ThreadPoolExecutor(max_workers=jobs) as ex:
+        futures = {
+            ex.submit(test_unit_sp, sp): sp
+            for sp in sp_files
+        }
+        for fut in as_completed(futures):
+            sp_file = futures[fut]
+            rc, detail = fut.result()
+            _record(sp_file, rc, detail)
+
+    if not verbose:
+        failures_list = [
+            (name, rc, detail)
+            for name, (rc, detail) in sorted(file_results.items())
+            if rc != 0
+        ]
+        if failures_list:
+            print()
+            for name, rc, detail in failures_list:
+                icon = "FAIL" if rc == 1 else "ERR "
+                print(f"  {icon}  {name}")
+                for line in detail.splitlines():
+                    print(f"         {line}")
+
+    return passed, failed, errors, file_results
+
+
 def run_special_probe_tests(base_dir: Path, sharpc_path: str,
                             zig_path: str = "",
                             verbose: bool = False, timeout: int = 60,
@@ -715,6 +820,24 @@ def main():
     if not args.verbose:
         total_tests = sp_pass + sp_fail + sp_error
         print(f"  {sp_pass}/{total_tests} passed, {sp_fail} failed, {sp_error} errors")
+
+    # ── Unit 测试 (unit/) ──
+    print()
+    print("[unit] Running unit tests (codegen + runtime) ...")
+    unit_pass, unit_fail, unit_error, unit_files = run_unit_tests(
+        script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
+    )
+    results["unit"] = {
+        "pass": unit_pass, "fail": unit_fail, "error": unit_error,
+        "files": {k: list(v) for k, v in unit_files.items()}
+    }
+    total_pass  += unit_pass
+    total_fail  += unit_fail
+    total_error += unit_error
+
+    if not args.verbose:
+        total_ut = unit_pass + unit_fail + unit_error
+        print(f"  {unit_pass}/{total_ut} passed, {unit_fail} failed, {unit_error} errors")
 
     # ── Cross-compile / special probes ──
     print()

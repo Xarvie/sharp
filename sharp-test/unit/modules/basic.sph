@@ -1,0 +1,19 @@
+// 来源: p158_math.sph
+// 模块: 基础跨文件引用 — 函数/结构体/类型定义/变量/枚举
+
+int add(int a, int b) { return a + b; }
+float multiply(float x, float y) { return x * y; }
+void greet(char *name) { (void)name; }
+
+struct Point2D { float x; float y; };
+struct Rectangle { float width; float height; struct Point2D origin; };
+
+typedef int Int32;
+typedef float Float32;
+
+const double PI = 3.14159265358979323846;
+int VERSION = 1;
+
+enum Color { RED, GREEN, BLUE };
+enum Status { OK = 0, ERROR = -1, PENDING = 1 };
+enum Status DEFAULT_STATUS = OK;

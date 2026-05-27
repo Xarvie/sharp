@@ -1,0 +1,60 @@
+// Merged generic zero-init and embed tests
+// Sources: p235_generic_zeroinit.sp, p237_generic_embed.sp
+
+#include <stdbool.h>
+
+/* Generic struct with zero-init (p235) */
+class Maybe<T> {
+    bool has;
+    T    val;
+}
+
+bool Maybe<T>.has_val(this) const { return this->has; }
+T    Maybe<T>.get_val(this) const { return this->val; }
+void Maybe<T>.set_val(this, T v) { this->has = true; this->val = v; }
+
+/* Generic struct embedding bare struct (p237) */
+class Point {
+    int x;
+    int y;
+}
+
+class Labeled<T> {
+    T     label;
+    Point pos;
+}
+
+T    Labeled<T>.get_label(this) const { return this->label; }
+void Labeled<T>.set_label(this, T val) { this->label = val; }
+void Labeled<T>.set_xy(this, int x, int y) { this->pos.x = x; this->pos.y = y; }
+int  Labeled<T>.pos_x(this) const { return this->pos.x; }
+
+int main() {
+    /* Test zero-init (p235) */
+    Maybe<int> mi = {0};
+    if (mi.has_val()) return 1;
+
+    mi.set_val(42);
+    if (!mi.has_val()) return 2;
+    if (mi.get_val() != 42) return 3;
+
+    Maybe<float> mf = {0};
+    if (mf.has_val()) return 4;
+
+    mf.set_val(1.5f);
+    if (mf.get_val() < 1.49f || mf.get_val() > 1.51f) return 5;
+
+    /* Test embed bare struct (p237) */
+    Labeled<int> a = {0};
+    a.set_label(42);
+    a.set_xy(10, 20);
+
+    if (a.get_label() != 42) return 6;
+    if (a.pos_x() != 10) return 7;
+
+    Labeled<float> b = {0};
+    b.set_label(3.14f);
+    if (b.get_label() < 3.13f || b.get_label() > 3.15f) return 8;
+
+    return 0;
+}

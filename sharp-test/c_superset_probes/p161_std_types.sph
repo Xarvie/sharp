@@ -1,4 +1,0 @@
-/* p161_std_types.h — std.types definitions */
-
-typedef long isize;
-typedef unsigned long usize;

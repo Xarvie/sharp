@@ -1,0 +1,60 @@
+// Merged self-referential generic tests
+// Sources: p106_generic_selfref.sp, p238_generic_selfref.sp, p238_generic_crossref.sp
+
+/* Self-referential generic node (p106/p238_selfref) */
+class Node<T> {
+    T val;
+    Node<T>* next;
+}
+
+void Node<T>.set_val(this, T v) {
+    this->val = v;
+}
+
+void Node<T>.set_next(this, Node<T>* n) {
+    this->next = n;
+}
+
+T Node<T>.get_val(this) const {
+    return this->val;
+}
+
+int main() {
+    /* Test basic linked list (p106) */
+    Node<int> a;
+    Node<int> b;
+    a.val = 1;
+    b.val = 2;
+    a.next = &b;
+    b.next = (Node<int>*)0;
+
+    if (a.val != 1) return 1;
+    if (a.next->val != 2) return 2;
+    if (a.next->next != (Node<int>*)0) return 3;
+
+    /* Test with methods (p238_selfref) */
+    Node<int> x = {0};
+    x.set_val(10);
+
+    Node<int> y = {0};
+    y.set_val(20);
+
+    x.set_next(&y);
+
+    if (x.get_val() != 10) return 4;
+    if (x.next->val != 20) return 5;
+
+    x.next->val = 30;
+    if (y.val != 30) return 6;
+
+    /* Test cross-referencing (p238_crossref) */
+    Node<int> head = {0};
+    head.set_val(100);
+    Node<int> tail = {0};
+    tail.set_val(200);
+    head.set_next(&tail);
+    if (head.get_val() != 100) return 7;
+    if (head.next->val != 200) return 8;
+
+    return 0;
+}
