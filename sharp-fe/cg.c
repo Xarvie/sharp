@@ -928,6 +928,13 @@ static void cg_type_from_ast(CgCtx *ctx, const AstNode *n) {
                          ? n->u.type_volatile.kw : "volatile";
         /* _Atomic uses is_atomic flag on AST_TYPE_VOLATILE */
         if (n->u.type_volatile.is_atomic) kw = "_Atomic";
+        /* _Atomic(T) parenthesised form — emit _Atomic(inner) */
+        if (n->u.type_volatile.is_atomic && n->u.type_volatile.is_atomic_paren) {
+            cg_puts(ctx, kw); cg_puts(ctx, "(");
+            cg_type_from_ast(ctx, n->u.type_volatile.base);
+            cg_puts(ctx, ")");
+            break;
+        }
         /* Post-type __attribute__ OR volatile declared after base type
          * (e.g. `void volatile **`): emit base first then qualifier. */
         if ((kw && strncmp(kw, "__attribute__", 13) == 0) || n->u.type_volatile.is_postfix) {
@@ -6644,14 +6651,62 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
          * find its body in file_ast and emit it inline: typedef struct { ... } Alias. */
         bool tgt_has_qual = ast_type_has_volatile(target) ||
             (target->kind == AST_TYPE_VOLATILE && target->u.type_volatile.is_atomic);
-        bool tgt_is_anon = target->kind == AST_TYPE_NAME &&
-            target->u.type_name.name &&
-            strncmp(target->u.type_name.name, "__anon_", 7) == 0 &&
+        /* Peek through AST_TYPE_VOLATILE wrapper (post-type __attribute__) to
+         * detect anonymous struct/union in typedef:
+         *   typedef struct { ... } __attribute__((packed)) Name; */
+        const AstNode *tgt_anon_base = target;
+        const char *post_attr_text = NULL;
+        if (target->kind == AST_TYPE_VOLATILE && target->u.type_volatile.base &&
+            (target->u.type_volatile.base->kind == AST_TYPE_NAME ||
+             target->u.type_volatile.base->kind == AST_ENUM_DEF)) {
+            tgt_anon_base = target->u.type_volatile.base;
+            post_attr_text = target->u.type_volatile.kw;
+        }
+        bool tgt_is_anon = tgt_anon_base->kind == AST_TYPE_NAME &&
+            tgt_anon_base->u.type_name.name &&
+            strncmp(tgt_anon_base->u.type_name.name, "__anon_", 7) == 0 &&
             ctx->file_ast;
-        if (tgt_has_qual) {
-            cg_puts(ctx, "typedef ");
-            cg_type_from_ast(ctx, target);
-            cg_printf(ctx, " %s;\n", cname);
+        if (tgt_has_qual && tgt_is_anon) {
+            /* Anonymous struct with post-type __attribute__:
+             *   typedef struct { ... } __attribute__((packed)) Name;
+             * Inline the body with the attribute. */
+            const char *anon_name = tgt_anon_base->u.type_name.name;
+            const AstNode *anon_sd = NULL;
+            for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
+                const AstNode *dd = ctx->file_ast->u.file.decls.data[k];
+                if (dd && dd->kind == AST_STRUCT_DEF && dd->u.struct_def.name &&
+                    strcmp(dd->u.struct_def.name, anon_name) == 0) {
+                    anon_sd = dd; break;
+                }
+            }
+            if (anon_sd) {
+                const char *kw = anon_sd->u.struct_def.is_union ? "union" : "struct";
+                if (anon_sd->u.struct_def.fields.len > 0) {
+                    cg_printf(ctx, "typedef %s {\n", kw);
+                    for (size_t i = 0; i < anon_sd->u.struct_def.fields.len; i++) {
+                        const AstNode *fi = anon_sd->u.struct_def.fields.data[i];
+                        if (fi && fi->kind == AST_FIELD_DECL &&
+                            fi->u.field_decl.is_comma_cont) continue;
+                        cg_puts(ctx, "    ");
+                        if (!cg_emit_field_maybe_inline(ctx, anon_sd, &anon_sd->u.struct_def.fields, i))
+                            cg_emit_field_group(ctx, &anon_sd->u.struct_def.fields, i);
+                    }
+                    if (post_attr_text)
+                        cg_printf(ctx, "} %s %s;\n", post_attr_text, cname);
+                    else
+                        cg_printf(ctx, "} %s;\n", cname);
+                } else {
+                    if (post_attr_text)
+                        cg_printf(ctx, "typedef %s {} %s %s;\n", kw, cname, post_attr_text);
+                    else
+                        cg_printf(ctx, "typedef %s {} %s;\n", kw, cname);
+                }
+            } else {
+                /* Fallback: just emit the tag reference with qualifiers */
+                cg_puts(ctx, "typedef ");
+                cg_type_from_ast(ctx, target);
+                cg_printf(ctx, " %s;\n", cname);
+            }
         } else if (tgt_is_anon) {
             /* Find the __anon_struct_N def in file_ast and emit inline. */
             const char *anon_name = target->u.type_name.name;
@@ -6813,11 +6868,27 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                  * The struct body was pushed to file_ast with from_inline_typedef=true.
                  * Emit it inline here when adjacent to this typedef in file_ast.
                  * For a simple type alias `typedef ExistingType NewAlias;`, do NOT
-                 * inline any struct body -- just preserve the type name. */
+                 * inline any struct body -- just preserve the type name.
+                 *
+                 * Peek through AST_TYPE_VOLATILE wrapper (inserted by tspec_resolve
+                 * for post-type __attribute__ like `void __attribute__((noreturn))`):
+                 *   typedef struct { ... } __attribute__((packed)) Name;
+                 * The attribute is stored in kw and must be emitted between `}`
+                 * and the alias. */
                 bool inlined_struct = false;
-                if (target->kind == AST_TYPE_NAME &&
-                    target->u.type_name.name && ctx->file_ast) {
-                    const char *tname = target->u.type_name.name;
+                /* Peek through AST_TYPE_VOLATILE wrapping to reach TYPE_NAME. */
+                const AstNode *inner_target = target;
+                const char *post_attr = NULL;
+                if (target->kind == AST_TYPE_VOLATILE &&
+                    target->u.type_volatile.base &&
+                    (target->u.type_volatile.base->kind == AST_TYPE_NAME ||
+                     target->u.type_volatile.base->kind == AST_ENUM_DEF)) {
+                    inner_target = target->u.type_volatile.base;
+                    post_attr = target->u.type_volatile.kw;
+                }
+                if (inner_target->kind == AST_TYPE_NAME &&
+                    inner_target->u.type_name.name && ctx->file_ast) {
+                    const char *tname = inner_target->u.type_name.name;
                     /* Find this typedef node's position in file_ast. */
                     size_t typedef_idx = SIZE_MAX;
                     for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
@@ -6848,7 +6919,10 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                             cg_puts(ctx, "    ");
                             cg_emit_field_group(ctx, &body_sd2->u.struct_def.fields, i);
                         }
-                        cg_printf(ctx, "} %s;\n", cname);
+                        if (post_attr)
+                            cg_printf(ctx, "} %s %s;\n", post_attr, cname);
+                        else
+                            cg_printf(ctx, "} %s;\n", cname);
                         inlined_struct = true;
                     }
                 }

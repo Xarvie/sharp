@@ -445,7 +445,7 @@ static bool is_type_start(PS *ps) {
     case STOK_DECLSPEC:
     case STOK_ASM:
     /* C11 keywords that can lead a declaration */
-    case STOK__NORETURN: case STOK__ALIGNAS:
+    case STOK__NORETURN: case STOK__ALIGNAS: case STOK__THREAD_LOCAL:
     /* C23: constexpr can lead a declaration */
     case STOK_CONSTEXPR:
         return true;
@@ -942,6 +942,7 @@ static AstNode *parse_type(PS *ps) {
         AstNode *an = ast_node_new(AST_TYPE_VOLATILE, t.loc);
         an->u.type_volatile.base      = inner;
         an->u.type_volatile.is_atomic = true;
+        an->u.type_volatile.is_atomic_paren = true;
         base = an;
         goto apply_suffix;
     }
@@ -1943,7 +1944,27 @@ static DeclSpecs parse_decl_specifiers(PS *ps) {
             ps_advance(ps);
             continue;
         }
-        if (t.kind == STOK__ATOMIC)  { ds.is_atomic = true;   ds.empty = false; ps_advance(ps); continue; }
+        if (t.kind == STOK__ATOMIC)  {
+            ps_advance(ps);
+            ds.empty = false;
+            if (ps_at(ps, STOK_LPAREN)) {
+                /* _Atomic(T) — type-specifier form (C11 6.7.2.4).
+                 * Parse the inner type and wrap it; don't set ds.is_atomic
+                 * since the atomic-ness is already encoded in the node. */
+                ps_advance(ps);  /* consume '(' */
+                AstNode *inner = parse_type(ps);
+                ps_expect(ps, STOK_RPAREN, "_Atomic(T) closing ')'");
+                AstNode *an = ast_node_new(AST_TYPE_VOLATILE, t.loc);
+                an->u.type_volatile.base      = inner;
+                an->u.type_volatile.is_atomic = true;
+                an->u.type_volatile.is_atomic_paren = true;
+                ts.user_ty = an;
+            } else {
+                /* _Atomic alone — type qualifier */
+                ds.is_atomic = true;
+            }
+            continue;
+        }
         if (t.kind == STOK_RESTRICT) { ds.empty = false; ps_advance(ps); continue; }
 
         /* Clang nullability annotations — macOS / iOS system headers use

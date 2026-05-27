@@ -15,9 +15,26 @@
  * TLS storage); from sharp-fe's perspective the keyword must
  * round-trip into the generated C verbatim.
  */
+
+/* ── static _Thread_local (file scope) ──────────────────────────── */
 static _Thread_local const char *err_reason = "no error";
 
+/* ── _Thread_local at file scope ────────────────────────────────── */
+_Thread_local int thread_var;
+
+/* ── _Thread_local + static at file scope ───────────────────────── */
+static _Thread_local int st_thread_var;
+
+/* ── _Thread_local + static at block scope ──────────────────────── */
+void test_thread_local(void) {
+    static _Thread_local int local_thread;
+    local_thread = 42;
+}
+
 int main(void) {
+    thread_var = 1;
+    st_thread_var = 2;
+    test_thread_local();
     /* compare first byte of the literal: 'n' == 0x6E == 110 */
     return err_reason[0] == 'n' ? 0 : 1;
 }

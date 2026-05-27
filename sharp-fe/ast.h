@@ -398,7 +398,7 @@ struct AstNode {
                  const char *nullability;  /* macOS: "_Nullable", "_Nonnull", "_Null_unspecified" */
                } type_ptr;
         struct { AstNode *base; bool is_postfix; const char *kw; } type_const;
-        struct { AstNode *base; const char *kw; bool is_postfix; bool is_atomic; } type_volatile;
+        struct { AstNode *base; const char *kw; bool is_postfix; bool is_atomic; bool is_atomic_paren; } type_volatile;
         struct { AstNode *base; AstNode *size;
                  bool has_static;   /* C8: int a[static 10]  */
                  bool has_restrict; /* C8: char *v[restrict] */
