@@ -405,6 +405,15 @@ static const char *file_ext(const char *p) {
     return dot ? dot : "";
 }
 
+/* File types that skip sharp preprocessing/compilation and are passed
+ * directly to zig cc (assembler / linker). */
+static bool is_linkable_input(const char *path) {
+    const char *ext = file_ext(path);
+    return strcmp(ext, ".o")  == 0 || strcmp(ext, ".obj") == 0 ||
+           strcmp(ext, ".a")  == 0 || strcmp(ext, ".so")  == 0 ||
+           strcmp(ext, ".S")  == 0 || strcmp(ext, ".s")   == 0;
+}
+
 static char *replace_ext(const char *path, const char *new_ext) {
     /* e.g. /a/b/foo.sp → /a/b/foo.o */
     const char *dot = strrchr(path, '.');
@@ -484,6 +493,9 @@ static void usage(FILE *out) {
 "\n"
 "Input files:\n"
 "  <file>.sp/.c/.i     source files (multiple inputs supported)\n"
+"  <file>.o/.obj        pre-built objects (passed to linker)\n"
+"  <file>.a/.so         static / shared libraries (passed to linker)\n"
+"  <file>.S/.s          assembly files (passed to assembler)\n"
 "  -                   read from stdin\n"
 "\n"
 "Output:\n"
@@ -1393,8 +1405,8 @@ int main(int argc, char *argv[]) {
     for (size_t fi = 0; fi < inputs.len; fi++) {
         InputFile *inf = &inputs.data[fi];
 
-        /* .o / .obj files are pre-built objects — skip preprocessing */
-        if (strcmp(file_ext(inf->path), ".o") == 0 || strcmp(file_ext(inf->path), ".obj") == 0) continue;
+        /* .o/.obj/.a/.so/.S/.s files — skip sharp preprocessing/compilation */
+        if (is_linkable_input(inf->path)) continue;
 
         if (action == ACTION_PREPROCESS) {
             /* -E: preprocess and output to stdout or -o file */
@@ -1595,8 +1607,8 @@ int main(int argc, char *argv[]) {
     for (size_t fi = 0; fi < inputs.len; fi++) {
         InputFile *inf = &inputs.data[fi];
 
-        /* Pre-built object files — add directly to link list */
-        if (strcmp(file_ext(inf->path), ".o") == 0 || strcmp(file_ext(inf->path), ".obj") == 0) {
+        /* Pre-built object / library / assembly files — add directly to link list */
+        if (is_linkable_input(inf->path)) {
             sv_push(&obj_files, inf->path);
             continue;
         }
