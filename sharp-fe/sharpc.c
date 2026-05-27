@@ -477,14 +477,13 @@ static int apply_define(CppCtx *ctx, const char *spec) {
 
 /* ── Argument parsing ────────────────────────────────────────────────── */
 
-/* Recognise compilation-only flags that the driver should accept and
- * ignore (so `sharpc` can be substituted for `cc` without the build
- * system having to filter them out).
+/* Recognise flags that the driver should accept and truly ignore
+ * (they affect diagnostics or C-standard mode selection that sharp
+ * does not implement, and would be meaningless / harmful to pass
+ * through to the backend).  Code-generation flags (-m, -f, -W) are
+ * NOT ignored — they are passed through to zig in the main loop.
  * Returns: 0 = not ignored, 1 = skip just this flag. */
 static int is_ignored_flag(const char *a) {
-    if (strncmp(a, "-W", 2) == 0)    return 1;   /* any -W... */
-    if (strncmp(a, "-f", 2) == 0)    return 1;   /* any -f... */
-    if (strncmp(a, "-m", 2) == 0)    return 1;   /* any -m... (e.g. -m64) */
     if (strcmp(a, "-pedantic")        == 0) return 1;
     if (strcmp(a, "-pedantic-errors") == 0) return 1;
     if (strcmp(a, "-ansi")            == 0) return 1;
@@ -530,6 +529,14 @@ static void usage(FILE *out) {
 "  -L<dir>             add library search path\n"
 "  -shared             produce shared library\n"
 "  -static             static linking\n"
+"\n"
+"Code generation (passed through to system compiler):\n"
+"  -m<flag>            machine-specific flags (e.g. -msse4.2, -mavx2)\n"
+"  -m<key>=<val>       machine param (e.g. -march=native, -mtune=generic)\n"
+"  -f<flag>            code-gen flags (e.g. -fPIC, -fsanitize=address)\n"
+"  -W<flag>            warning flags (e.g. -Wall, -Wextra)\n"
+"  -pthread            POSIX threads support\n"
+"  -pipe               use pipes between compilation stages\n"
 "\n"
 "Misc:\n"
 "  --target <triple>   install target macros (default: x86_64-linux-gnu)\n"
@@ -1350,6 +1357,20 @@ int main(int argc, char *argv[]) {
         } else if (strncmp(a, "-O", 2) == 0) {
             sv_push(&link_other, a);
 
+        /* ── Code-generation flags → pass through to zig ────────────
+         * -m<flag>   machine-specific (e.g. -msse4.2, -mavx2)
+         * -m<key>=<v> (e.g. -march=native)
+         * -f<flag>   code-gen / semantic (e.g. -fPIC, -fno-strict-aliasing)
+         * -f<key>=<v> (e.g. -fsanitize=address)
+         * -W<flag>   warning flags (e.g. -Wall, -Wextra)
+         * -pthread   POSIX threads
+         * -pipe      use pipes between compilation stages           */
+        } else if (strncmp(a, "-m", 2) == 0 || strncmp(a, "-f", 2) == 0 ||
+                   strncmp(a, "-W", 2) == 0) {
+            sv_push(&link_other, a);
+        } else if (strcmp(a, "-pthread") == 0 || strcmp(a, "-pipe") == 0) {
+            sv_push(&link_other, a);
+
         /* ── Stdin / positional input ────────────────────────────── */
         } else if (strcmp(a, "-") == 0) {
             InputFile *f = iv_push(&inputs);
@@ -1619,7 +1640,6 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "sharpc: wrote %s\n", out_file);
             if (inputs.len != 1 || !output)
                 free((void *)out_file);
-            free(tmp_c);
         }
         goto cleanup;
     }
@@ -1693,7 +1713,6 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "sharpc: wrote %s\n", obj_out);
                 if (inputs.len != 1 || !output)
                     free((void *)obj_out);
-                free(tmp_s);
                 continue;
             }
 
@@ -1733,7 +1752,6 @@ int main(int argc, char *argv[]) {
             if (inputs.len != 1 || !output)
                 free((void *)obj_out);
             free(zig_args.data);
-            free(tmp_c);
         }
         goto cleanup;
     }
@@ -1793,7 +1811,6 @@ int main(int argc, char *argv[]) {
             free(zig_args.data);
 
             sv_push(&obj_files, obj_tmp);
-            free(tmp_s);
             continue;
         }
 
@@ -1834,7 +1851,6 @@ int main(int argc, char *argv[]) {
 
         /* Add obj to link list */
         sv_push(&obj_files, obj_tmp);
-        free(tmp_c);
     }
 
     /* ── Link ─────────────────────────────────────────────────────── */
