@@ -211,8 +211,9 @@ SharpSess g_sess = {0};
 
 static void register_tmp(const char *path) {
     if (!path) return;
-    g_sess.tmp_files = realloc(g_sess.tmp_files, (g_sess.n_tmp_files + 1) * sizeof *g_sess.tmp_files);
-    if (!g_sess.tmp_files) return;
+    const char **newp = realloc(g_sess.tmp_files, (g_sess.n_tmp_files + 1) * sizeof *g_sess.tmp_files);
+    if (!newp) return;
+    g_sess.tmp_files = newp;
     g_sess.tmp_files[g_sess.n_tmp_files++] = path;
 }
 

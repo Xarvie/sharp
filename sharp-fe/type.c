@@ -524,8 +524,8 @@ static int64_t eval_array_size(TyStore *ts, const AstNode *expr,
         case STOK_STAR:    return l * r;
         case STOK_SLASH:   return r != 0 ? l / r : -1;
         case STOK_PERCENT: return r != 0 ? l % r : -1;
-        case STOK_LTLT:    return l << r;
-        case STOK_GTGT:    return l >> r;
+        case STOK_LTLT:    return (r >= 0 && r < 64) ? l << r : -1;
+        case STOK_GTGT:    return (r >= 0 && r < 64) ? l >> r : -1;
         default:           return -1;
         }
     }
