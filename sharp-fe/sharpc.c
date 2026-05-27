@@ -491,6 +491,7 @@ static void usage(FILE *out) {
 "Preprocessor (gcc-compatible):\n"
 "  -I <dir>            add user #include search path\n"
 "  -isystem <dir>      add system #include search path\n"
+"  -include <file>     include file before processing the primary source\n"
 "  -D <NAME>[=V]       define macro\n"
 "  -U <NAME>           undefine macro\n"
 "  -P                  suppress linemarkers\n"
@@ -676,11 +677,38 @@ static char *convert_raw_strings(const char *src, const char *input) {
     out[out_len] = '\0';
     return out;
 }
+
+/* Prepend "#include \"file\"\n" for each force-include, then append src.
+ * The first file gets a linemarker pointing back to the original input. */
+static char *prepend_force_includes(const char *input, char *src,
+                                    StrVec *force_includes) {
+    size_t total_extra = 0;
+    for (size_t i = 0; i < force_includes->len; i++)
+        total_extra += 11 + strlen(force_includes->data[i]); /* #include "f"\n */
+    /* linemarker: # 1 "input" 1\n = 17 chars approx (max path len) */
+    size_t lm_extra = 0;
+    if (force_includes->len > 0)
+        lm_extra = 6 + strlen(input) + 4; /* # 1 "input"\n */
+    size_t src_len = strlen(src);
+    char *buf = malloc(lm_extra + total_extra + src_len + 1);
+    if (!buf) { free(src); return NULL; }
+    char *p = buf;
+    /* Emit linemarker so diagnostics from injected includes report
+     * the original file. */
+    p += sprintf(p, "# 1 \"%s\"\n", input);
+    for (size_t i = 0; i < force_includes->len; i++)
+        p += sprintf(p, "#include \"%s\"\n", force_includes->data[i]);
+    memcpy(p, src, src_len + 1);
+    free(src);
+    return buf;
+}
+
 static char *preprocess_one_file(const char *input,
                                  StrVec *user_inc, StrVec *sys_inc,
                                  MacroVec *macros, long lang_std,
                                  const char *target,
-                                 InputFile *inf) {
+                                 InputFile *inf,
+                                 StrVec *force_includes) {
     char *src = read_file(input);
     if (!src) return NULL;
 
@@ -689,6 +717,12 @@ static char *preprocess_one_file(const char *input,
     free(src);
     if (!src2) return NULL;
     src = src2;
+
+    /* Prepend -include files as #include directives. */
+    if (force_includes && force_includes->len > 0) {
+        src = prepend_force_includes(input, src, force_includes);
+        if (!src) return NULL;
+    }
 
     CppCtx *cctx = cpp_ctx_new();
     cpp_probe_zig_macros(cctx, target);
@@ -752,9 +786,17 @@ static char *compile_one_file(const char *input,
                               MacroVec *macros, long lang_std,
                               const char *target,
                               const char *output,
-                              InputFile *inf) {
+                              InputFile *inf,
+                              StrVec *force_includes) {
     char *src = read_file(input);
     if (!src) return NULL;
+
+    /* Prepend -include files BEFORE raw-string conversion so that
+     * #include directives in -include files also get processed. */
+    if (force_includes && force_includes->len > 0) {
+        src = prepend_force_includes(input, src, force_includes);
+        if (!src) return NULL;
+    }
 
     /* Convert r#"..."# raw strings to standard C string literals
      * BEFORE the preprocessor runs.  Only for Sharp source files. */
@@ -1134,6 +1176,7 @@ int main(int argc, char *argv[]) {
     StrVec      link_libs   = {0};   /* -l<lib> */
     StrVec      link_paths  = {0};   /* -L<dir> */
     StrVec      link_other  = {0};   /* extra linker flags (-shared, -static, etc.) */
+    StrVec      force_includes = {0}; /* -include <file> */
     long        lang_std    = -1;
     InputVec    inputs      = {0};
     int         ret         = 0;
@@ -1181,6 +1224,10 @@ int main(int argc, char *argv[]) {
             if (sv_push(&sys_inc, argv[++i]) < 0) goto oom;
         } else if (strncmp(a, "-isystem", 8) == 0 && a[8]) {
             if (sv_push(&sys_inc, a + 8) < 0) goto oom;
+
+        /* ── -include ────────────────────────────────────────────── */
+        } else if (strcmp(a, "-include") == 0 && i + 1 < argc) {
+            if (sv_push(&force_includes, argv[++i]) < 0) goto oom;
 
         /* ── -D / -U ─────────────────────────────────────────────── */
         } else if (strcmp(a, "-D") == 0 && i + 1 < argc) {
@@ -1351,7 +1398,8 @@ int main(int argc, char *argv[]) {
         if (action == ACTION_PREPROCESS) {
             /* -E: preprocess and output to stdout or -o file */
             char *pp_out = preprocess_one_file(inf->path, &user_inc, &sys_inc,
-                                               &macros, lang_std, target, inf);
+                                               &macros, lang_std, target, inf,
+                                               &force_includes);
             if (!pp_out) { had_error = 1; continue; }
             FILE *out = output ? fopen(output, "w") : stdout;
             if (!out) { perror(output ? output : "stdout"); free(pp_out); ret = 2; goto cleanup; }
@@ -1363,7 +1411,8 @@ int main(int argc, char *argv[]) {
 
         char *c_out = compile_one_file(inf->path, &user_inc, &sys_inc,
                                        &macros, lang_std, target,
-                                       output, inf);
+                                       output, inf,
+                                       &force_includes);
         if (!c_out) { had_error = 1; continue; }
         inf->tmp_c = c_out;
     }
