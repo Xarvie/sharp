@@ -13,12 +13,23 @@ Usage:
 import subprocess
 import sys
 import os
+import platform as _plat
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
+# ── target triple ───────────────────────────────────────────────────────
+_SYS = sys.platform
+_MACH = _plat.machine()
+if _SYS == "win32":
+    TARGET = "x86_64-windows-gnu"
+elif _SYS == "darwin":
+    TARGET = "aarch64-macos" if _MACH == "arm64" else "x86_64-macos"
+else:
+    TARGET = "x86_64-linux-gnu"
+
 # ── zig path ───────────────────────────────────────────────────────────
-if sys.platform == "win32":
+if _SYS == "win32":
     ZIG = str(ROOT / "zig" / "zig.exe")
     OBJ_EXT = ".obj"
     EXE_EXT = ".exe"
@@ -53,8 +64,6 @@ SHARP_SOURCES = [
 ]
 
 SHARPC_SOURCES = CPP_SOURCES + SHARP_SOURCES
-
-TARGET = "x86_64-windows-gnu"
 
 CFLAGS = [
     "-std=c11",
