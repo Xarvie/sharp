@@ -8,8 +8,8 @@
  * This is by design — typedefs are transparent aliases, not new types.
  */
 /* FIXED: generic typedef expansion — defer generic typedefs until struct specs emitted */
-#include "../../sharp/std/types.sph"
-#include "../../sharp/std/vec.sph"
+#include "../../std/types.sph"
+#include "../../std/vec.sph"
 
 /* typedef aliases for generic instantiations */
 typedef Vec<int> IntVec;

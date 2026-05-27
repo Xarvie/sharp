@@ -1,9 +1,9 @@
 
 
-#line 3 "c_superset_probes/../../sharp/std/types.sph"
+#line 3 "c_superset_probes/../../std/types.sph"
 typedef long isize;
 
-#line 4 "c_superset_probes/../../sharp/std/types.sph"
+#line 4 "c_superset_probes/../../std/types.sph"
 typedef unsigned long usize;
 
 #line 9 "c_superset_probes/p252_is_arithmetic.sp"

@@ -3,7 +3,7 @@
  * Verifies monomorphized generic code works at runtime.
  */
 
-#include "../../sharp/std/types.sph"
+#include "../../std/types.sph"
 
 class Pair<T> {
     T first;

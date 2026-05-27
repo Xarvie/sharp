@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <limits.h>
 
-#include "../sharp/std/cjson.sph"
+#include "../std/cjson.sph"
 
 static int tests_passed = 0;
 static int tests_failed = 0;

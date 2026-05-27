@@ -1,10 +1,10 @@
 #include <stdbool.h>
 
 
-#line 3 "c_superset_probes/../../sharp/std/types.sph"
+#line 3 "c_superset_probes/../../std/types.sph"
 typedef long isize;
 
-#line 4 "c_superset_probes/../../sharp/std/types.sph"
+#line 4 "c_superset_probes/../../std/types.sph"
 typedef unsigned long usize;
 
 #line 5 "c_superset_probes/p262_ringbuf.sph"

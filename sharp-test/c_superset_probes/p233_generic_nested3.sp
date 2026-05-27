@@ -3,8 +3,8 @@
  * Verifies three-level nesting of generic types with full type expressions.
  */
 
-#include "../../sharp/std/types.sph"
-#include "../../sharp/std/vec.sph"
+#include "../../std/types.sph"
+#include "../../std/vec.sph"
 
 int main() {
     /* --- 3D nested Vec: Vec<Vec<Vec<int>>> --- */

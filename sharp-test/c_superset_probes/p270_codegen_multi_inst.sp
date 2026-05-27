@@ -4,7 +4,7 @@
  * type are generated correctly without conflicts.
  */
 
-#include "../../sharp/std/types.sph"
+#include "../../std/types.sph"
 
 class Wrap<T> {
     T value;

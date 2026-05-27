@@ -5,7 +5,7 @@
  */
 
 #include <stdbool.h>
-#include "../../sharp/std/types.sph"
+#include "../../std/types.sph"
 
 /* ===== struct with fixed-size array ===== */
 class Matrix {

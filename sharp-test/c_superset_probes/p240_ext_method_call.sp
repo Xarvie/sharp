@@ -5,7 +5,7 @@
  */
 
 #include <stdbool.h>
-#include "../../sharp/std/types.sph"
+#include "../../std/types.sph"
 
 class Stats {
     int   count;

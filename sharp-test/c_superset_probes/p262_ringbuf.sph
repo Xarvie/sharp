@@ -1,6 +1,6 @@
 /* p262_ringbuf.sph — Generic ring buffer module */
 
-#include "../../sharp/std/types.sph"
+#include "../../std/types.sph"
 
 class RingBuf<T> {
     T*    data;

@@ -1,6 +1,6 @@
 /* p221 — Direct #include of standard library .sph files.
  *
- * Tests that sharp/std/*.sph header files work correctly when included:
+ * Tests that std/*.sph header files work correctly when included:
  *   - types.sph  → isize/usize typedefs
  *   - vec.sph    → generic Vec<T>
  *   - str.sph    → Str string slice
@@ -8,10 +8,10 @@
  *
  * This verifies the std library headers are self-contained and correct.
  */
-#include "../../sharp/std/types.sph"
-#include "../../sharp/std/vec.sph"
-#include "../../sharp/std/str.sph"
-#include "../../sharp/std/hashmap.sph"
+#include "../../std/types.sph"
+#include "../../std/vec.sph"
+#include "../../std/str.sph"
+#include "../../std/hashmap.sph"
 
 int main(void) {
     /* ── Test types.sph ── */

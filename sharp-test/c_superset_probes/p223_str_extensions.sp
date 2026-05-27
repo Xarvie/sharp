@@ -4,7 +4,7 @@
  * extension methods defined outside the standard library.
  */
 
-#include "../../sharp/std/str.sph"
+#include "../../std/str.sph"
 
 /* Count occurrences of a byte in the Str. */
 isize Str.count_byte(this, char c) const {

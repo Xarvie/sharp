@@ -54,12 +54,12 @@
 
 /* ── Std library path: derived from sharpc executable location ────── */
 /*
- * Finds {sharp_root}/sharp/std/ by locating the directory of the
+ * Finds {sharp_root}/std/ by locating the directory of the
  * sharpc executable and walking up to its project root.
  *
  * Resolution order (first found wins):
- *   1. <exe_dir>/../sharp/std/
- *   2. <exe_dir>/sharp/std/               (exe is at repo root)
+ *   1. <exe_dir>/../std/
+ *   2. <exe_dir>/std/               (exe is at repo root)
  *   3. SHARP_ROOT environment variable
  *
  * Returns a malloc'd string (caller frees), or NULL if not found.
@@ -110,8 +110,8 @@ static char *sharp_find_std_dir(void) {
 
     /* Candidate paths to try */
     const char *candidates[] = {
-        "sharp/std",      /* <exe_dir>/sharp/std/ */
-        "../sharp/std",   /* <exe_dir>/../sharp/std/ */
+        "std",      /* <exe_dir>/std/ */
+        "../std",   /* <exe_dir>/../std/ */
     };
 
     for (int i = 0; i < 2; i++) {
@@ -134,7 +134,7 @@ static char *sharp_find_std_dir(void) {
     const char *env = getenv("SHARP_ROOT");
     if (env && env[0]) {
         char candidate[4096];
-        int n = snprintf(candidate, sizeof(candidate), "%s/sharp/std", env);
+        int n = snprintf(candidate, sizeof(candidate), "%s/std", env);
         if (n > 0 && (size_t)n < sizeof(candidate)) {
             return strdup(candidate);
         }
@@ -1374,14 +1374,14 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* Find sharp/std/ relative to the sharpc executable */
+    /* Find std/ relative to the sharpc executable */
     {
         char *std_dir = sharp_find_std_dir();
         if (std_dir) {
             sv_push(&user_inc, std_dir);
         } else {
             fprintf(stderr,
-                "sharpc: warning: cannot locate sharp/std/ directory.\n"
+                "sharpc: warning: cannot locate std/ directory.\n"
                 "  Set SHARP_ROOT env var pointing to your sharp repository root.\n"
                 "  Example: export SHARP_ROOT=/path/to/sharp\n");
         }

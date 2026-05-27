@@ -38,7 +38,7 @@ bool Point.operator==(this, Point other) const {
     return this->x == other.x && this->y == other.y;
 }
 
-/* ── HashMap (inlined from sharp/std/hashmap.sp) ─────────────────────── */
+/* ── HashMap (inlined from std/hashmap.sp) ─────────────────────── */
 struct HashMapEntry<K, V> {
     K              key;
     V              value;
