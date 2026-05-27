@@ -1198,7 +1198,7 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
             usage(stdout); goto cleanup;
         } else if (strcmp(a, "--version") == 0) {
-            fprintf(stdout, "sharpc %s\n", SHARP_VERSION);
+            fprintf(stdout, "sharpc 1.0.0\n");
             goto cleanup;
         } else if (strcmp(a, "-v") == 0) {
             g_sess.verbose = 1;

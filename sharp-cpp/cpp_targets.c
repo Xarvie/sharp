@@ -219,6 +219,7 @@ static const char *find_zig_exe(void)
     /* Priority 1: resolve self exe path, look for zig nearby */
     char exe_path[MAX_PATH];
     DWORD exe_len = GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
+    
     if (exe_len > 0 && exe_len < sizeof(exe_path)) {
         char *last_sep = NULL;
         {
@@ -233,6 +234,7 @@ static const char *find_zig_exe(void)
             if (dirlen + 9 < sizeof(g_sess.zig_exe)) {
                 memcpy(g_sess.zig_exe, exe_path, dirlen);
                 memcpy(g_sess.zig_exe + dirlen, "\\zig.exe", 9);
+                
                 DWORD a = GetFileAttributesA(g_sess.zig_exe);
                 if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY))
                     return g_sess.zig_exe;
@@ -254,6 +256,7 @@ static const char *find_zig_exe(void)
                     if (pdirlen + 13 < sizeof(g_sess.zig_exe)) {
                         memcpy(g_sess.zig_exe, parent_dir, pdirlen);
                         memcpy(g_sess.zig_exe + pdirlen, "\\zig\\zig.exe", 13);
+                        
                         DWORD a2 = GetFileAttributesA(g_sess.zig_exe);
                         if (a2 != INVALID_FILE_ATTRIBUTES && !(a2 & FILE_ATTRIBUTE_DIRECTORY))
                             return g_sess.zig_exe;
@@ -264,10 +267,12 @@ static const char *find_zig_exe(void)
     }
 
     /* Priority 2: PATH search */
+    
     if (SearchPathA(NULL, "zig.exe", NULL, sizeof(g_sess.zig_exe), g_sess.zig_exe, NULL))
         return g_sess.zig_exe;
 
     /* Fallback: common install locations */
+    
     const char *fallbacks[] = {
         "C:\\Program Files\\zig\\zig.exe",
         "C:\\zig\\zig.exe",
@@ -279,6 +284,7 @@ static const char *find_zig_exe(void)
             return g_sess.zig_exe;
         }
     }
+    
     return NULL;
 }
 

@@ -22,7 +22,7 @@ if sys.platform == "win32":
     ZIG = str(ROOT / "zig" / "zig.exe")
     OBJ_EXT = ".obj"
     EXE_EXT = ".exe"
-    LINK_FLAGS = ["-lshlwapi"]
+    LINK_FLAGS = ["-lshlwapi", "-static"]
 else:
     ZIG = str(ROOT / "zig" / "zig")
     OBJ_EXT = ".o"
@@ -54,12 +54,14 @@ SHARP_SOURCES = [
 
 SHARPC_SOURCES = CPP_SOURCES + SHARP_SOURCES
 
+TARGET = "x86_64-windows-gnu"
+
 CFLAGS = [
     "-std=c11",
     "-O2",
     "-Wall", "-Wextra", "-Wno-deprecated-declarations",
     "-DNDEBUG",
-    '-DSHARP_VERSION="1.0.0"',
+    "-target", TARGET,
     "-I", str(ROOT / "sharp-fe"),
     "-I", str(ROOT / "sharp-cpp"),
 ]
@@ -68,6 +70,10 @@ CFLAGS = [
 def run(cmd, **kw):
     r = subprocess.run(cmd, **kw)
     if r.returncode != 0:
+        if r.stderr:
+            sys.stderr.write(r.stderr.decode() if isinstance(r.stderr, bytes) else r.stderr)
+        if r.stdout:
+            sys.stderr.write(r.stdout.decode() if isinstance(r.stdout, bytes) else r.stdout)
         sys.exit(r.returncode)
     return r
 
@@ -96,7 +102,7 @@ def link_exe(objs, out_rel, extra_flags=None):
     flags = list(LINK_FLAGS)
     if extra_flags:
         flags.extend(extra_flags)
-    cmd = [ZIG, "cc"] + [str(o) for o in objs] + ["-o", str(out)] + flags
+    cmd = [ZIG, "cc", "-target", TARGET] + [str(o) for o in objs] + ["-o", str(out)] + flags
     print(f"  LD {out_rel}")
     run(cmd, capture_output=True, text=True)
 

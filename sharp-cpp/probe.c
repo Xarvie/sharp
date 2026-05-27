@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+SharpSess g_sess = {0};
+
 static int problems = 0;
 
 static CppResult run(const char *src) {

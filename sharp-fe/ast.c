@@ -478,6 +478,8 @@ static void indent_print(int depth, FILE *fp) {
     for (int i = 0; i < depth * 2; i++) fputc(' ', fp);
 }
 
+static void ast_print(const AstNode *node, int depth, FILE *fp);
+
 static void print_vec(const AstVec *v, const char *label,
                       int depth, FILE *fp) {
     if (v->len == 0) return;
