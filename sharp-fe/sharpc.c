@@ -1619,6 +1619,7 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "sharpc: wrote %s\n", out_file);
             if (inputs.len != 1 || !output)
                 free((void *)out_file);
+            free(tmp_c);
         }
         goto cleanup;
     }
@@ -1692,6 +1693,7 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "sharpc: wrote %s\n", obj_out);
                 if (inputs.len != 1 || !output)
                     free((void *)obj_out);
+                free(tmp_s);
                 continue;
             }
 
@@ -1731,6 +1733,7 @@ int main(int argc, char *argv[]) {
             if (inputs.len != 1 || !output)
                 free((void *)obj_out);
             free(zig_args.data);
+            free(tmp_c);
         }
         goto cleanup;
     }
@@ -1790,6 +1793,7 @@ int main(int argc, char *argv[]) {
             free(zig_args.data);
 
             sv_push(&obj_files, obj_tmp);
+            free(tmp_s);
             continue;
         }
 
@@ -1830,6 +1834,7 @@ int main(int argc, char *argv[]) {
 
         /* Add obj to link list */
         sv_push(&obj_files, obj_tmp);
+        free(tmp_c);
     }
 
     /* ── Link ─────────────────────────────────────────────────────── */
