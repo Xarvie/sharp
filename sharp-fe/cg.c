@@ -1590,6 +1590,19 @@ static void cg_const_expr(CgCtx *ctx, const AstNode *e) {
             SharpTokKind op = e->u.unary.op;
             if (op < STOK_COUNT && uops[op])
                 cg_puts(ctx, uops[op]);
+            /* Same spacing fix as cg_expr: prevent -- / ++ / !! / ~~ merge */
+            if (op == STOK_MINUS || op == STOK_PLUS ||
+                op == STOK_BANG || op == STOK_TILDE) {
+                const AstNode *inner = e->u.unary.operand;
+                while (inner && inner->kind == AST_PAREN)
+                    inner = inner->u.paren.inner;
+                if (inner && inner->kind == AST_UNARY && !inner->u.unary.postfix) {
+                    SharpTokKind iop = inner->u.unary.op;
+                    if (iop == STOK_MINUS || iop == STOK_PLUS ||
+                        iop == STOK_BANG || iop == STOK_TILDE)
+                        cg_puts(ctx, " ");
+                }
+            }
         }
         cg_const_expr(ctx, e->u.unary.operand);
         break;
@@ -2587,6 +2600,29 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
             cg_puts(ctx, s);
         } else {
             cg_puts(ctx, s);
+            /* Insert space when operand starts with a character that would
+             * otherwise merge with the unary operator into a different token:
+             *   --0x6200  (should be -(-0x6200))
+             *   ++x       (should be +(+x))
+             *   !!flag    (should be !(!flag))
+             *   ~^mask    (should be ~(~mask))
+             * Without this, `--` becomes the decrement operator and `++` the
+             * increment operator, both requiring lvalues. */
+            if (op == STOK_MINUS || op == STOK_PLUS ||
+                op == STOK_BANG || op == STOK_TILDE) {
+                const AstNode *inner = expr->u.unary.operand;
+                while (inner && inner->kind == AST_PAREN)
+                    inner = inner->u.paren.inner;
+                bool needs_space = false;
+                if (inner && inner->kind == AST_UNARY && !inner->u.unary.postfix) {
+                    SharpTokKind iop = inner->u.unary.op;
+                    if (iop == STOK_MINUS || iop == STOK_PLUS ||
+                        iop == STOK_BANG || iop == STOK_TILDE)
+                        needs_space = true;
+                }
+                if (needs_space)
+                    cg_puts(ctx, " ");
+            }
             cg_expr_p(ctx, expr->u.unary.operand, 14);
         }
         break;
