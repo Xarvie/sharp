@@ -1755,32 +1755,39 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                 }
             }
             if (inner_sd && inner_sd->u.struct_def.fields.len > 0) {
-                const char *kw = inner_sd->u.struct_def.is_union ? "union" : "struct";
-                cg_printf(ctx, "%s %s {\n", kw, inner_name);
-                for (size_t j = 0; j < inner_sd->u.struct_def.fields.len; j++) {
-                    const AstNode *fj = inner_sd->u.struct_def.fields.data[j];
-                    if (fj && fj->kind == AST_FIELD_DECL &&
-                        fj->u.field_decl.is_comma_cont) continue;
-                    cg_puts(ctx, "    ");
-                    cg_emit_field_group(ctx, &inner_sd->u.struct_def.fields, j);
+                if (inner_sd->u.struct_def.name &&
+                    strncmp(inner_sd->u.struct_def.name, "__anon_", 7) != 0) {
+                    /* Named nested struct is emitted standalone by
+                     * cg_emit_decl_sharp — fall through so the field uses
+                     * a tag-name reference instead of an inline body. */
+                } else {
+                    const char *kw = inner_sd->u.struct_def.is_union ? "union" : "struct";
+                    cg_printf(ctx, "%s %s {\n", kw, inner_name);
+                    for (size_t j = 0; j < inner_sd->u.struct_def.fields.len; j++) {
+                        const AstNode *fj = inner_sd->u.struct_def.fields.data[j];
+                        if (fj && fj->kind == AST_FIELD_DECL &&
+                            fj->u.field_decl.is_comma_cont) continue;
+                        cg_puts(ctx, "    ");
+                        cg_emit_field_group(ctx, &inner_sd->u.struct_def.fields, j);
+                    }
+                    if (inner_sd->u.struct_def.tail_attrs)
+                        cg_printf(ctx, "} %s", inner_sd->u.struct_def.tail_attrs);
+                    else
+                        cg_puts(ctx, "}");
+                    /* Emit pointer stars between struct body and name */
+                    for (int _pi = 0; _pi < ptr_depth; _pi++) cg_puts(ctx, " *");
+                    cg_printf(ctx, " %s", fname);
+                    /* Emit array suffix(es) */
+                    const AstNode *arr = fd->u.field_decl.type;
+                    while (arr && arr->kind == AST_TYPE_ARRAY) {
+                        cg_puts(ctx, "[");
+                        if (arr->u.type_array.size) cg_const_expr(ctx, arr->u.type_array.size);
+                        cg_puts(ctx, "]");
+                        arr = arr->u.type_array.base;
+                    }
+                    cg_puts(ctx, ";\n");
+                    return;
                 }
-                if (inner_sd->u.struct_def.tail_attrs)
-                    cg_printf(ctx, "} %s", inner_sd->u.struct_def.tail_attrs);
-                else
-                    cg_puts(ctx, "}");
-                /* Emit pointer stars between struct body and name */
-                for (int _pi = 0; _pi < ptr_depth; _pi++) cg_puts(ctx, " *");
-                cg_printf(ctx, " %s", fname);
-                /* Emit array suffix(es) */
-                const AstNode *arr = fd->u.field_decl.type;
-                while (arr && arr->kind == AST_TYPE_ARRAY) {
-                    cg_puts(ctx, "[");
-                    if (arr->u.type_array.size) cg_const_expr(ctx, arr->u.type_array.size);
-                    cg_puts(ctx, "]");
-                    arr = arr->u.type_array.base;
-                }
-                cg_puts(ctx, ";\n");
-                return;
             }
         }
     }
@@ -7854,7 +7861,9 @@ static void cg_emit_decl_sharp(CgCtx *ctx, AstNode *d) {
         if (d->u.struct_def.from_inline_typedef) return;
         /* Nested structs defined inside another struct body are already
          * emitted inline when the parent struct is emitted. */
-        if (d->u.struct_def.is_nested_in_struct) return;
+        if (d->u.struct_def.is_nested_in_struct &&
+            d->u.struct_def.name &&
+            strncmp(d->u.struct_def.name, "__anon_", 7) == 0) return;
         const char *kw = d->u.struct_def.is_union ? "union" : "struct";
         const char *nm = d->u.struct_def.name;
         const char *enm = cg_resolve_name(ctx, nm);

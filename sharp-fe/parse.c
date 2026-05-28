@@ -991,6 +991,7 @@ static AstNode *parse_type(PS *ps) {
             AstNode *sd = parse_struct_def(ps);
             AstNode *n  = ast_node_new(AST_TYPE_NAME, t.loc);
             n->u.type_name.name = cpp_xstrdup(sd->u.struct_def.name);
+            n->u.type_name.is_struct_tag = true; /* struct/union keyword was explicit */
             astvec_push(&ps->pending_decls, sd);
             base = n;
             goto try_generic;
@@ -1608,6 +1609,7 @@ static bool tspec_try_consume(PS *ps, TSpec *ts) {
                     sd->u.struct_def.is_nested_in_struct = true;
                 ts->user_ty = ast_node_new(AST_TYPE_NAME, t.loc);
                 ts->user_ty->u.type_name.name = cpp_xstrdup(sd->u.struct_def.name);
+                ts->user_ty->u.type_name.is_struct_tag = true;
                 astvec_push(&ps->pending_decls, sd);
                 return true;
             }
@@ -1646,6 +1648,7 @@ static bool tspec_try_consume(PS *ps, TSpec *ts) {
                         sd->u.struct_def.is_nested_in_struct = true;
                     ts->user_ty = ast_node_new(AST_TYPE_NAME, t.loc);
                     ts->user_ty->u.type_name.name = cpp_xstrdup(sd->u.struct_def.name);
+                    ts->user_ty->u.type_name.is_struct_tag = true;
                     astvec_push(&ps->pending_decls, sd);
                     return true;
                 }
