@@ -332,7 +332,7 @@ def _run_sharpc_codegen(src_path: str, sharpc_path: str, zig_path: str = "",
                         timeout: int = 30,
                         extra_args: Optional[List[str]] = None) -> Tuple[bool, str, str]:
     """Run sharpc -c. Returns (success, output_path, error_detail)."""
-    tmp_out = src_path + ".gen.c"
+    tmp_out = src_path + ".gen.i"
     try:
         cmd = [sharpc_path, "-c", src_path, "-o", tmp_out]
         # Note: sharpc now auto-detects zig's include paths internally via
@@ -421,13 +421,13 @@ def _compare_gen_with_ref(tmp_out: str, ref_path: str) -> Tuple[int, str]:
         return 2, f"compare error: {e}"
 
 
-def _compile_and_run(gen_c_path: str, zig_path: str, timeout: int = 30) -> Tuple[int, str]:
-    """Compile generated .gen.c with zig cc, link to executable, and run it.
+def _compile_and_run(gen_i_path: str, zig_path: str, timeout: int = 30) -> Tuple[int, str]:
+    """Compile generated .gen.i with zig cc, link to executable, and run it.
     Returns (rc, detail): 0=pass, 1=fail (non-zero exit), 2=error (compile/link fail)."""
-    exe_path = gen_c_path + ".exe"
+    exe_path = gen_i_path + ".exe"
 
     stdout, stderr, rc = run_cmd(
-        [zig_path, "cc", gen_c_path, "-o", exe_path, "-std=c11", "-fno-sanitize=undefined"],
+        [zig_path, "cc", "-x", "c", gen_i_path, "-o", exe_path, "-std=c11", "-fno-sanitize=undefined"],
         timeout=timeout
     )
     if rc != 0:
