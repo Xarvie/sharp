@@ -83,8 +83,6 @@ class ZigBackend(CompilerBackend):
     name = "zig"
     label = "zig"
     include_flag = "-I"
-    _triple_cache = None
-    _cached_sys_includes: List[str] = []
 
     @classmethod
     def _detect_target(cls, zig_path: str) -> str:
@@ -105,10 +103,8 @@ class ZigBackend(CompilerBackend):
 
     @classmethod
     def detect_target(cls, compiler_path: Optional[str] = None) -> str:
-        if cls._triple_cache:
-            return cls._triple_cache
-        cls._triple_cache = cls._detect_target(compiler_path) if compiler_path else "native"
-        return cls._triple_cache
+        # No caching — always detect fresh
+        return cls._detect_target(compiler_path) if compiler_path else "native"
 
     @classmethod
     def find(cls, explicit_path: Optional[str] = None) -> Tuple[str, dict]:
@@ -118,9 +114,7 @@ class ZigBackend(CompilerBackend):
                 raise SystemExit(f"ERROR: zig not found at {p}")
             target = cls.detect_target(str(p))
             sys_includes = cls._detect_sys_includes(str(p), target)
-            if sys_includes:
-                cls._cached_sys_includes = sys_includes
-            return str(p), os.environ.copy()
+            return str(p), os.environ.copy(), sys_includes
 
         for p in os.environ.get("PATH", "").split(os.pathsep):
             for name in ("zig", "zig.exe"):
@@ -128,9 +122,7 @@ class ZigBackend(CompilerBackend):
                 if Path(c).is_file():
                     target = cls.detect_target(c)
                     sys_includes = cls._detect_sys_includes(c, target)
-                    if sys_includes:
-                        cls._cached_sys_includes = sys_includes
-                    return c, os.environ.copy()
+                    return c, os.environ.copy(), sys_includes
 
         raise SystemExit("ERROR: cannot find zig in PATH")
 
@@ -157,8 +149,10 @@ class ZigBackend(CompilerBackend):
             return []
 
     @classmethod
-    def system_includes(cls) -> List[str]:
-        return cls._cached_sys_includes
+    def system_includes(cls, zig_path: str = "", target: str = "") -> List[str]:
+        """Detect system includes on every call — no caching."""
+        zig = zig_path or "zig"
+        return cls._detect_sys_includes(zig, target)
 
     @classmethod
     def preprocess_cmd(cls, compiler_path: str, source: str, includes: List[str],
@@ -334,17 +328,17 @@ def _get_sharpc_env() -> dict:
     return env
 
 
-def _run_sharpc_codegen(src_path: str, sharpc_path: str, timeout: int = 30,
+def _run_sharpc_codegen(src_path: str, sharpc_path: str, zig_path: str = "",
+                        timeout: int = 30,
                         extra_args: Optional[List[str]] = None) -> Tuple[bool, str, str]:
     """Run sharpc -c. Returns (success, output_path, error_detail)."""
     tmp_out = src_path + ".gen.c"
     try:
         cmd = [sharpc_path, "-c", src_path, "-o", tmp_out]
-        # v0.13: propagate zig cc's system include path (which includes
-        # multiarch glibc and zig's bundled libc headers) to sharpc so
-        # tests that #include <stdio.h> etc. resolve bits/* correctly.
-        for inc in ZigBackend.system_includes():
-            cmd.extend(["-isystem", inc])
+        # Note: sharpc now auto-detects zig's include paths internally via
+        # cpp_detect_zig_sys_paths_from_zig(), so we don't need to pass
+        # -isystem flags here. This ensures consistent output regardless
+        # of the test script's working directory.
         if extra_args:
             cmd.extend(extra_args)
         r = subprocess.run(cmd, capture_output=True, text=True,
@@ -456,7 +450,7 @@ def _compile_and_run(gen_c_path: str, zig_path: str, timeout: int = 30) -> Tuple
 def test_c_probe(c_path: str, sharpc_path: str, zig_path: str = "",
                  timeout: int = 30,
                  extra_args: Optional[List[str]] = None) -> Tuple[int, str]:
-    ok, tmp_out, err = _run_sharpc_codegen(c_path, sharpc_path, timeout, extra_args)
+    ok, tmp_out, err = _run_sharpc_codegen(c_path, sharpc_path, zig_path, timeout, extra_args)
     if not ok:
         _cleanup_files(tmp_out)
         return 2, err
@@ -469,7 +463,7 @@ def test_sp_probe(sp_path: str, sharpc_path: str, ref_path: Optional[str] = None
                   zig_path: str = "",
                   timeout: int = 30,
                   extra_args: Optional[List[str]] = None) -> Tuple[int, str]:
-    ok, tmp_out, err = _run_sharpc_codegen(sp_path, sharpc_path, timeout, extra_args)
+    ok, tmp_out, err = _run_sharpc_codegen(sp_path, sharpc_path, zig_path, timeout, extra_args)
     if not ok:
         _cleanup_files(tmp_out)
         return 2, err
@@ -656,7 +650,7 @@ def run_unit_tests(
     def test_unit_sp(rel_path: str) -> Tuple[int, str]:
         sp_path = str(base_dir / rel_path)
         ref_path = sp_path[:-3] + ".ref.c"
-        ok, tmp_out, err = _run_sharpc_codegen(sp_path, sharpc_path, timeout)
+        ok, tmp_out, err = _run_sharpc_codegen(sp_path, sharpc_path, zig_path, timeout)
         if not ok:
             return 2, err
 

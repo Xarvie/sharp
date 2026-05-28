@@ -11,11 +11,9 @@
 
 #define X 1
 #include "macro_include_b.h"
-#undef X
 
-#if defined(X)
-int this_should_not_exist = 999;
-#endif
+int Y = X;
+
 
 int main(void) {
     return 0;
