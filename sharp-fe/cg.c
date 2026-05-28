@@ -8069,40 +8069,52 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
         /* Track which typedefs have been forward-declared */
         bool *td_fwd = calloc(ntds, sizeof(bool));
 
-        /* Helper: emit a forward typedef for a typedef at index ti */
+        /* Collect and emit typedefs that a given typedef index depends on
+         * (chain support), then emit the typedef itself.  DFS with explicit
+         * stack; post-order ensures deps are emitted before dependents. */
         #define _EMIT_TD_FWD(ti) do { \
             if (ti < ntds && !td_fwd[ti]) { \
-                const AstNode *_td = tds[ti].decl; \
-                const char *_a = _td->u.typedef_decl.alias; \
-                const AstNode *_t = _td->u.typedef_decl.target; \
-                if (_t && _t->kind == AST_TYPE_NAME && _t->u.type_name.name) { \
-                    const char *_tn = _t->u.type_name.name; \
-                    Symbol *_sym = ctx->file_scope ? \
-                        scope_lookup_struct_tag(ctx->file_scope, _tn) : NULL; \
-                    if (_sym && _sym->decl && _sym->decl->kind == AST_STRUCT_DEF) { \
-                        const char *_kw = _sym->decl->u.struct_def.is_union ? "union" : "struct"; \
-                        cg_printf(ctx, "typedef %s %s %s;\n", _kw, _tn, _a); \
+                /* First pass: collect all dependent typedefs via DFS */ \
+                size_t _stk[32], _top2 = 0, _emit[32], _ne = 0; \
+                _stk[_top2++] = ti; \
+                while (_top2 > 0 && _ne < 32) { \
+                    size_t _cur = _stk[_top2 - 1]; \
+                    if (_cur >= ntds || td_fwd[_cur]) { _top2--; continue; } \
+                    bool _already = false; \
+                    for (size_t _k = 0; _k < _ne; _k++) if (_emit[_k] == _cur) { _already = true; break; } \
+                    if (_already) { _top2--; continue; } \
+                    const AstNode *_td2 = tds[_cur].decl; \
+                    const AstNode *_tgt2 = _td2->u.typedef_decl.target; \
+                    if (_tgt2 && _tgt2->kind == AST_TYPE_NAME && _tgt2->u.type_name.name) { \
+                        bool _all_done = true; \
+                        for (size_t _ji = 0; _ji < ntds; _ji++) { \
+                            if (td_fwd[_ji]) continue; \
+                            if (strcmp(tds[_ji].alias, _tgt2->u.type_name.name) == 0) { \
+                                bool _in_emit = false; \
+                                for (size_t _k = 0; _k < _ne; _k++) if (_emit[_k] == _ji) { _in_emit = true; break; } \
+                                if (!_in_emit) { _all_done = false; _stk[_top2++] = _ji; } \
+                            } \
+                        } \
+                        if (_all_done) { _emit[_ne++] = _cur; _top2--; } \
                     } else { \
-                        cg_printf(ctx, "typedef %s %s;\n", _tn, _a); \
+                        _emit[_ne++] = _cur; _top2--; \
                     } \
-                } else if (_t && _t->kind == AST_STRUCT_DEF) { \
-                    const char *_kw = _t->u.struct_def.is_union ? "union" : "struct"; \
-                    const char *_sn = _t->u.struct_def.name; \
-                    if (_sn) cg_printf(ctx, "typedef %s %s %s;\n", _kw, _sn, _a); \
-                    else cg_printf(ctx, "typedef %s %s;\n", _kw, _a); \
-                } else { \
-                    cg_printf(ctx, "typedef int %s;\n", _a); \
                 } \
-                td_fwd[ti] = true; \
+                /* Second pass: emit in dependency order */ \
+                for (size_t _ei = 0; _ei < _ne; _ei++) { \
+                    cg_emit_decl_sharp(ctx, (AstNode *)tds[_emit[_ei]].decl); \
+                    td_fwd[_emit[_ei]] = true; \
+                } \
             } \
         } while(0)
 
         /* Helper: for a type AST, find and emit forward decls for any
-         * referenced typedefs that are defined after function position fpos */
+         * referenced typedefs.  No pos check: even typedefs defined BEFORE
+         * the function in source order haven't been emitted yet (Phase 3a
+         * runs after Phase 1.5), so we must emit the full typedef here. */
         #define _CHECK_TYPE_TD(ty, fpos) do { \
             for (size_t _ti = 0; _ti < ntds; _ti++) { \
                 if (td_fwd[_ti]) continue; \
-                if (tds[_ti].pos <= (fpos)) continue; \
                 if (type_refs_name((ty), tds[_ti].alias)) { \
                     _EMIT_TD_FWD(_ti); \
                 } \
@@ -8305,23 +8317,24 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
             }
         }
         free(fns);
+
+        /* Store typedef aliases emitted in Phase 1.5 so Phase 3a can skip
+         * them and avoid redefinition.  Reuse ctx->fwd_typedef_names. */
+        if (ntds > 0) {
+            size_t cnt = 0;
+            for (size_t ti = 0; ti < ntds; ti++)
+                if (td_fwd[ti]) cnt++;
+            if (cnt > 0) {
+                ctx->fwd_typedef_names = malloc((cnt + 1) * sizeof(char *));
+                ctx->n_fwd_typedef_names = cnt;
+                size_t j = 0;
+                for (size_t ti = 0; ti < ntds; ti++)
+                    if (td_fwd[ti]) ctx->fwd_typedef_names[j++] = tds[ti].alias;
+                ctx->fwd_typedef_names[cnt] = NULL;
+            }
+        }
         free(td_fwd);
         free(tds);
-    }
-
-    /* Store forward-declared struct names in ctx for Phase 3 to check */
-    {
-        size_t cnt = 0;
-        for (size_t si = 0; si < ndefined; si++)
-            if (fwd_decl_emitted[si]) cnt++;
-        if (cnt > 0) {
-            ctx->fwd_typedef_names = malloc((cnt + 1) * sizeof(char *));
-            ctx->n_fwd_typedef_names = cnt;
-            size_t j = 0;
-            for (size_t si = 0; si < ndefined; si++)
-                if (fwd_decl_emitted[si]) ctx->fwd_typedef_names[j++] = defined[si];
-            ctx->fwd_typedef_names[cnt] = NULL;
-        }
     }
     free(fwd_decl_emitted);
     free(defined);
@@ -8596,8 +8609,16 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                 deferred_tds[deferred_td_count++] = d;
                 continue;
             }
+            /* Skip typedefs already fully emitted in Phase 1.5 (forward ref fix) */
+            if (ctx->n_fwd_typedef_names > 0 && d->u.typedef_decl.alias) {
+                for (size_t _fi = 0; _fi < ctx->n_fwd_typedef_names; _fi++) {
+                    if (strcmp(ctx->fwd_typedef_names[_fi], d->u.typedef_decl.alias) == 0)
+                        goto skip_td;
+                }
+            }
         }
         cg_emit_decl_sharp(ctx, d);
+skip_td:;
     }
 
     /* Phase 3.5: now that user typedefs/structs are emitted, dump the
