@@ -126,6 +126,7 @@ void ast_node_free(AstNode *node) {
     case AST_TYPE_PTR:    ast_node_free(node->u.type_ptr.base); break;
     case AST_TYPE_CONST:  ast_node_free(node->u.type_const.base); break;
     case AST_TYPE_VOLATILE: ast_node_free(node->u.type_volatile.base); break;
+    case AST_TYPE_ATOMIC:   ast_node_free(node->u.type_atomic.base); break;
     case AST_TYPE_ARRAY:
         ast_node_free(node->u.type_array.base);
         ast_node_free(node->u.type_array.size);
@@ -384,6 +385,9 @@ AstNode *ast_clone_type(const AstNode *node) {
     case AST_TYPE_VOLATILE:
         n->u.type_volatile.base = ast_clone_type(node->u.type_volatile.base);
         break;
+    case AST_TYPE_ATOMIC:
+        n->u.type_atomic.base = ast_clone_type(node->u.type_atomic.base);
+        break;
     case AST_TYPE_ARRAY:
         n->u.type_array.base = ast_clone_type(node->u.type_array.base);
         n->u.type_array.size = clone_size_expr(node->u.type_array.size);
@@ -440,7 +444,7 @@ const char *ast_kind_name(AstKind k) {
         "EXTERN_INST", "GCC_VERBATIM",
         "STRUCT_DEF", "FUNC_DEF", "TYPEDEF_DECL", "VAR_DECL",
         "ENUM_DEF", "ENUMERATOR",
-        "TYPE_NAME", "TYPE_PTR", "TYPE_CONST", "TYPE_VOLATILE",
+        "TYPE_NAME", "TYPE_PTR", "TYPE_CONST", "TYPE_VOLATILE", "TYPE_ATOMIC",
         "TYPE_ARRAY", "TYPE_FUNC",
         "TYPE_GENERIC", "TYPE_AUTO", "TYPE_VOID", "TYPEOF_TYPE", "TYPE_PARAM",
         "FIELD_DECL", "PARAM_DECL", "GENERIC_PARAM",
@@ -569,6 +573,10 @@ void ast_print(const AstNode *node, int depth, FILE *fp) {
     case AST_TYPE_VOLATILE:
         fprintf(fp, "(TYPE_VOLATILE\n");
         ast_print(node->u.type_volatile.base, depth+1, fp);
+        indent_print(depth, fp); fprintf(fp, ")\n");              break;
+    case AST_TYPE_ATOMIC:
+        fprintf(fp, "(TYPE_ATOMIC\n");
+        ast_print(node->u.type_atomic.base, depth+1, fp);
         indent_print(depth, fp); fprintf(fp, ")\n");              break;
     case AST_TYPE_ARRAY:
         fprintf(fp, "(TYPE_ARRAY\n");

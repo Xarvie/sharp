@@ -42,6 +42,7 @@ typedef enum {
     TY_PTR,        /* T*                                                   */
     TY_ARRAY,      /* T[N]  (size==-1 means incomplete T[])               */
     TY_CONST,      /* const T                                              */
+    TY_ATOMIC,     /* _Atomic(T)  (C11 atomic qualifier)                    */
     TY_FUNC,       /* ret(params…)  — not interned in Phase 5             */
     TY_STRUCT,     /* named struct, may carry generic args                 */
     TY_PARAM,      /* unbound generic parameter T                         */
@@ -61,6 +62,8 @@ struct Type {
         struct { Type *base; int64_t size; } array;
         /* TY_CONST */
         struct { Type *base; } const_;
+        /* TY_ATOMIC */
+        struct { Type *base; } atomic;
         /* TY_FUNC */
         struct { Type *ret; Type **params; size_t nparams; bool is_vararg;
                  bool params_unspecified; /* C8: true for ()  vs (void) */ } func;
@@ -113,6 +116,7 @@ Type *ty_longdouble(TyStore *ts, const char *name);
 Type *ty_ptr(TyStore *ts, Type *base);
 Type *ty_array(TyStore *ts, Type *base, int64_t size);
 Type *ty_const(TyStore *ts, Type *base);
+Type *ty_atomic(TyStore *ts, Type *base);
 Type *ty_func(TyStore *ts, Type *ret, Type **params, size_t nparams);
 Type *ty_struct_type(TyStore *ts, const char *name,
                      Type **args, size_t nargs, AstNode *decl);

@@ -116,6 +116,7 @@ typedef enum {
     AST_TYPE_PTR,        /* T*                                              */
     AST_TYPE_CONST,      /* const T                                         */
     AST_TYPE_VOLATILE,   /* volatile T  (S1: C type qualifier)              */
+    AST_TYPE_ATOMIC,     /* _Atomic(T) or _Atomic T  (C11 atomic qualifier) */
     AST_TYPE_ARRAY,      /* T[N]  (N may be NULL for incomplete)            */
     AST_TYPE_FUNC,       /* RetType (*)(ParamTypes…)                        */
     AST_TYPE_GENERIC,    /* Vec<int>,  Pair<K,V>                            */
@@ -398,7 +399,8 @@ struct AstNode {
                  const char *nullability;  /* macOS: "_Nullable", "_Nonnull", "_Null_unspecified" */
                } type_ptr;
         struct { AstNode *base; bool is_postfix; const char *kw; } type_const;
-        struct { AstNode *base; const char *kw; bool is_postfix; bool is_atomic; bool is_atomic_paren; } type_volatile;
+        struct { AstNode *base; const char *kw; bool is_postfix; } type_volatile;
+        struct { AstNode *base; bool is_paren; } type_atomic;
         struct { AstNode *base; AstNode *size;
                  bool has_static;   /* C8: int a[static 10]  */
                  bool has_restrict; /* C8: char *v[restrict] */

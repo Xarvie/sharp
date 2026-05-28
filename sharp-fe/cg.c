@@ -382,12 +382,12 @@ static void cg_type(CgCtx *ctx, Type *t);
  *   myint arr[N]        (array of alias)
  * Returns true on success; false means fall back to type-machinery path. */
 /* C8: Check whether the type AST contains a true AST_TYPE_VOLATILE node
- * (not _Atomic, which uses is_atomic flag) at any depth.  Used to
- * choose the AST-based emission path that preserves volatile in types. */
+ * or an _Atomic node at any depth.  Used to choose the AST-based emission
+ * path that preserves volatile/atomic in types. */
 static bool ast_type_has_volatile(const AstNode *ty) {
     while (ty) {
-        /* _Atomic uses AST_TYPE_VOLATILE with is_atomic=true flag */
         if (ty->kind == AST_TYPE_VOLATILE && ty->loc.line != 0) return true;
+        if (ty->kind == AST_TYPE_ATOMIC) return true;
         if (ty->kind == AST_TYPE_CONST)
             { ty = ty->u.type_const.base; continue; }
         if (ty->kind == AST_TYPE_PTR)
@@ -411,6 +411,7 @@ static bool ast_type_is_flat_emittable(const AstNode *ty) {
     case AST_TYPE_PARAM:   return true;  /* handled by cg_type_from_ast */
     case AST_TYPE_CONST:   return ast_type_is_flat_emittable(ty->u.type_const.base);
     case AST_TYPE_VOLATILE:return ast_type_is_flat_emittable(ty->u.type_volatile.base);
+    case AST_TYPE_ATOMIC:  return ast_type_is_flat_emittable(ty->u.type_atomic.base);
     case AST_TYPE_PTR:     return ast_type_is_flat_emittable(ty->u.type_ptr.base);
     default:               return false;
     }
@@ -926,15 +927,6 @@ static void cg_type_from_ast(CgCtx *ctx, const AstNode *n) {
     case AST_TYPE_VOLATILE: {
         const char *kw = n->u.type_volatile.kw
                          ? n->u.type_volatile.kw : "volatile";
-        /* _Atomic uses is_atomic flag on AST_TYPE_VOLATILE */
-        if (n->u.type_volatile.is_atomic) kw = "_Atomic";
-        /* _Atomic(T) parenthesised form — emit _Atomic(inner) */
-        if (n->u.type_volatile.is_atomic && n->u.type_volatile.is_atomic_paren) {
-            cg_puts(ctx, kw); cg_puts(ctx, "(");
-            cg_type_from_ast(ctx, n->u.type_volatile.base);
-            cg_puts(ctx, ")");
-            break;
-        }
         /* Post-type __attribute__ OR volatile declared after base type
          * (e.g. `void volatile **`): emit base first then qualifier. */
         if ((kw && strncmp(kw, "__attribute__", 13) == 0) || n->u.type_volatile.is_postfix) {
@@ -943,6 +935,19 @@ static void cg_type_from_ast(CgCtx *ctx, const AstNode *n) {
         } else {
             cg_puts(ctx, kw); cg_puts(ctx, " ");
             cg_type_from_ast(ctx, n->u.type_volatile.base);
+        }
+        break;
+    }
+    case AST_TYPE_ATOMIC: {
+        if (n->u.type_atomic.is_paren) {
+            /* _Atomic(T) parenthesised form — C11 6.7.2.4p4 */
+            cg_puts(ctx, "_Atomic(");
+            cg_type_from_ast(ctx, n->u.type_atomic.base);
+            cg_puts(ctx, ")");
+        } else {
+            /* _Atomic T postfix/qualifier form — C11 6.7.2.4p5 */
+            cg_puts(ctx, "_Atomic ");
+            cg_type_from_ast(ctx, n->u.type_atomic.base);
         }
         break;
     }
@@ -1877,7 +1882,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
         const AstNode *fty = fd->u.field_decl.type;
         bool fhas_qual = fty &&
             (ast_type_has_volatile(fty) ||
-             (fty->kind == AST_TYPE_VOLATILE && fty->u.type_volatile.is_atomic));
+             fty->kind == AST_TYPE_ATOMIC);
         /* C8/C5: for function-pointer fields, use cg_type_from_ast for the
          * return type to preserve typedef aliases (e.g. `my_int_t (*fn)(int)`
          * instead of `int (*fn)(int)` when my_int_t is a typedef for int). */
@@ -3810,8 +3815,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
              * directly to preserve the qualifier -- the Type* path strips both. */
             bool has_vol = vd->u.var_decl.type &&
                            (ast_type_has_volatile(vd->u.var_decl.type) ||
-                            (vd->u.var_decl.type->kind == AST_TYPE_VOLATILE &&
-                             vd->u.var_decl.type->u.type_volatile.is_atomic));
+                            vd->u.var_decl.type->kind == AST_TYPE_ATOMIC);
             if (has_vol && vd->u.var_decl.type) {
                 cg_type_from_ast(ctx, vd->u.var_decl.type);
                 if (vd->u.var_decl.name)
@@ -6650,7 +6654,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
          * C8: if target is __anon_struct_N (anonymous struct in a typedef),
          * find its body in file_ast and emit it inline: typedef struct { ... } Alias. */
         bool tgt_has_qual = ast_type_has_volatile(target) ||
-            (target->kind == AST_TYPE_VOLATILE && target->u.type_volatile.is_atomic);
+            target->kind == AST_TYPE_ATOMIC;
         /* Peek through AST_TYPE_VOLATILE wrapper (post-type __attribute__) to
          * detect anonymous struct/union in typedef:
          *   typedef struct { ... } __attribute__((packed)) Name; */
@@ -6822,6 +6826,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
             bool use_ast = (target->kind == AST_TYPE_NAME ||
                             target->kind == AST_TYPE_CONST ||
                             target->kind == AST_TYPE_VOLATILE ||
+                            target->kind == AST_TYPE_ATOMIC ||
                             target->kind == AST_TYPE_PTR ||
                             target->kind == AST_TYPE_ARRAY);
             /* Don't use cg_type_from_ast for fn-ptr typedefs: PTR(FUNC) needs
@@ -7324,7 +7329,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
      * preserve the qualifier -- the Type* path strips both. */
     bool has_qual = ty_ast &&
         (ast_type_has_volatile(ty_ast) ||
-         (ty_ast->kind == AST_TYPE_VOLATILE && ty_ast->u.type_volatile.is_atomic));
+         ty_ast->kind == AST_TYPE_ATOMIC);
     if (has_qual && d->u.var_decl.name) {
         cg_type_from_ast(ctx, ty_ast);
         cg_printf(ctx, " %s", cg_resolve_name(ctx, d->u.var_decl.name));
@@ -7530,6 +7535,7 @@ static bool type_refs_name(const AstNode *ty, const char *name) {
     case AST_TYPE_PTR:    return type_refs_name(ty->u.type_ptr.base, name);
     case AST_TYPE_CONST:  return type_refs_name(ty->u.type_const.base, name);
     case AST_TYPE_VOLATILE: return type_refs_name(ty->u.type_volatile.base, name);
+    case AST_TYPE_ATOMIC: return type_refs_name(ty->u.type_atomic.base, name);
     case AST_TYPE_ARRAY:  return type_refs_name(ty->u.type_array.base, name);
     case AST_TYPE_FUNC: {
         if (type_refs_name(ty->u.type_func.ret, name)) return true;
@@ -7606,6 +7612,7 @@ static bool type_refs_struct(const AstNode *ty, const char *name) {
     case AST_TYPE_PTR:    return type_refs_struct(ty->u.type_ptr.base, name);
     case AST_TYPE_CONST:  return type_refs_struct(ty->u.type_const.base, name);
     case AST_TYPE_VOLATILE: return type_refs_struct(ty->u.type_volatile.base, name);
+    case AST_TYPE_ATOMIC: return type_refs_struct(ty->u.type_atomic.base, name);
     case AST_TYPE_ARRAY:  return type_refs_struct(ty->u.type_array.base, name);
     case AST_TYPE_FUNC: {
         if (type_refs_struct(ty->u.type_func.ret, name)) return true;

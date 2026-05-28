@@ -178,6 +178,10 @@ Type *ty_const(TyStore *ts, Type *base) {
     if (base->kind == TY_CONST) return base; /* const const T == const T */
     return ts_intern(ts, (Type){ .kind = TY_CONST, .u.const_ = { base } });
 }
+Type *ty_atomic(TyStore *ts, Type *base) {
+    if (base->kind == TY_ATOMIC) return base; /* _Atomic(_Atomic(T)) == _Atomic(T) */
+    return ts_intern(ts, (Type){ .kind = TY_ATOMIC, .u.atomic = { base } });
+}
 Type *ty_func(TyStore *ts, Type *ret, Type **params, size_t nparams) {
     return ts_intern(ts, (Type){ .kind = TY_FUNC,
         .u.func = { ret, params, nparams } });
@@ -315,6 +319,7 @@ bool ty_has_error(const Type *t) {
     case TY_ERROR:   return true;
     case TY_PTR:     return ty_has_error(t->u.ptr.base);
     case TY_CONST:   return ty_has_error(t->u.const_.base);
+    case TY_ATOMIC:  return ty_has_error(t->u.atomic.base);
     case TY_ARRAY:   return ty_has_error(t->u.array.base);
     default:         return false;
     }
@@ -326,6 +331,7 @@ bool ty_is_scalar(const Type *t) {
     if (t && t->kind == TY_STRUCT && t->u.struct_.name &&
         strncmp(t->u.struct_.name, "__typeof__(", 11) == 0)
         return true;
+    if (t && t->kind == TY_ATOMIC) return ty_is_scalar(t->u.atomic.base);
     return ty_is_arithmetic(t) || ty_is_pointer(t);
 }
 
@@ -336,6 +342,7 @@ bool ty_is_scalar(const Type *t) {
 Type *ty_unconst(TyStore *ts, Type *t) {
     (void)ts;
     if (t && t->kind == TY_CONST) return t->u.const_.base;
+    if (t && t->kind == TY_ATOMIC) return t->u.atomic.base;
     return t;
 }
 
@@ -348,6 +355,10 @@ Type *ty_deref(const Type *t) {
         return t->u.const_.base->u.ptr.base;
     if (t->kind == TY_CONST && t->u.const_.base->kind == TY_ARRAY)
         return t->u.const_.base->u.array.base;
+    if (t->kind == TY_ATOMIC && t->u.atomic.base->kind == TY_PTR)
+        return t->u.atomic.base->u.ptr.base;
+    if (t->kind == TY_ATOMIC && t->u.atomic.base->kind == TY_ARRAY)
+        return t->u.atomic.base->u.array.base;
     return NULL;
 }
 
@@ -670,12 +681,11 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
         return ty_const(ts, base);
     }
     case AST_TYPE_VOLATILE: {
-        /* S1: volatile is a C type qualifier.  In Sharp's interned Type*
-         * world we don't track it (it has no semantic effect on type
-         * compatibility — only on access ordering, which the C compiler
-         * enforces).  We pass the qualifier through to the generated C
-         * via cg.c; here we return the unqualified base type. */
         return ty_from_ast(ts, node->u.type_volatile.base, scope, diags);
+    }
+    case AST_TYPE_ATOMIC: {
+        Type *base = ty_from_ast(ts, node->u.type_atomic.base, scope, diags);
+        return ty_atomic(ts, base);
     }
     case AST_TYPE_PTR: {
         Type *base = ty_from_ast(ts, node->u.type_ptr.base, scope, diags);
@@ -901,7 +911,7 @@ const char *ty_kind_name(TyKind k) {
         "char","short","int","long","long long",
         "unsigned char","unsigned short","unsigned int","unsigned long","unsigned long long",
         "float","double","long double",
-        "ptr","array","const","func","struct","param"
+        "ptr","array","const","atomic","func","struct","param"
     };
     if ((unsigned)k < TY_COUNT) return names[k];
     return "?";
@@ -915,6 +925,9 @@ void ty_print(const Type *t, FILE *fp) {
         break;
     case TY_CONST:
         fprintf(fp, "const "); ty_print(t->u.const_.base, fp);
+        break;
+    case TY_ATOMIC:
+        fprintf(fp, "_Atomic "); ty_print(t->u.atomic.base, fp);
         break;
     case TY_ARRAY:
         ty_print(t->u.array.base, fp);

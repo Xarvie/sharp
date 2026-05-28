@@ -44,7 +44,6 @@ int main(void) {
     obj.val = 1;
 
     g_atomic_int = 1;
-    atomic_ptr = 0;
     struct atomic_struct as;
     as.a = 2;
     as.b = 3;

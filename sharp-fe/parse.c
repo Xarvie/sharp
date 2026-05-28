@@ -932,17 +932,18 @@ static AstNode *parse_type(PS *ps) {
     if (t.kind == STOK__ATOMIC) {
         ps_advance(ps);
         AstNode *inner;
+        bool is_paren = false;
         if (ps_at(ps, STOK_LPAREN)) {
+            is_paren = true;
             ps_advance(ps);
             inner = parse_type(ps);
             ps_expect(ps, STOK_RPAREN, "_Atomic(T) closing ')'");
         } else {
-            inner = parse_type_unqual(ps);
+            inner = parse_type(ps);
         }
-        AstNode *an = ast_node_new(AST_TYPE_VOLATILE, t.loc);
-        an->u.type_volatile.base      = inner;
-        an->u.type_volatile.is_atomic = true;
-        an->u.type_volatile.is_atomic_paren = true;
+        AstNode *an = ast_node_new(AST_TYPE_ATOMIC, t.loc);
+        an->u.type_atomic.base     = inner;
+        an->u.type_atomic.is_paren  = is_paren;
         base = an;
         goto apply_suffix;
     }
@@ -1120,8 +1121,14 @@ apply_suffix:
             vn->u.type_volatile.base       = base;
             vn->u.type_volatile.is_postfix = true;  /* T volatile — postfix, symmetric with T const */
             base = vn;
-        } else if (ps_at(ps, STOK_RESTRICT) || ps_at(ps, STOK__ATOMIC)) {
-            ps_advance(ps);  /* discard */
+        } else if (ps_at(ps, STOK_RESTRICT)) {
+            ps_advance(ps);  /* discard — restrict is a hint, no AST node needed */
+        } else if (ps_at(ps, STOK__ATOMIC)) {
+            CppLoc al = ps_advance(ps).loc;
+            AstNode *an = ast_node_new(AST_TYPE_ATOMIC, al);
+            an->u.type_atomic.base     = base;
+            an->u.type_atomic.is_paren  = false;  /* postfix form: T _Atomic */
+            base = an;
         } else {
             break;
         }
@@ -1143,11 +1150,19 @@ apply_suffix:
             } else if (ps_at(ps, STOK_VOLATILE)) {
                 ps_advance(ps);
                 ptr->u.type_ptr.ptr_volatile = true;
-            } else if (ps_at(ps, STOK_RESTRICT) || ps_at(ps, STOK__ATOMIC)) {
+            } else if (ps_at(ps, STOK_RESTRICT)) {
                 SharpTok rk = ps_advance(ps);
                 ptr->u.type_ptr.ptr_restrict = true;
                 if (!ptr->u.type_ptr.restrict_kw)
                     ptr->u.type_ptr.restrict_kw = cpp_xstrndup(rk.text, rk.len);
+            } else if (ps_at(ps, STOK__ATOMIC)) {
+                ps_advance(ps);
+                /* T * _Atomic p  →  the _Atomic qualifies the pointee.
+                 * Represent as PTR(ATOMIC(base)) so CG emits correctly. */
+                AstNode *an = ast_node_new(AST_TYPE_ATOMIC, ps_peek(ps).loc);
+                an->u.type_atomic.base     = ptr->u.type_ptr.base;
+                an->u.type_atomic.is_paren  = false;
+                ptr->u.type_ptr.base = an;
             } else if (ps_at(ps, STOK__NULLABLE) || ps_at(ps, STOK__NONNULL) ||
                        ps_at(ps, STOK__NULL_UNSPEC)) {
                 SharpTok nk = ps_advance(ps);
@@ -1954,13 +1969,13 @@ static DeclSpecs parse_decl_specifiers(PS *ps) {
                 ps_advance(ps);  /* consume '(' */
                 AstNode *inner = parse_type(ps);
                 ps_expect(ps, STOK_RPAREN, "_Atomic(T) closing ')'");
-                AstNode *an = ast_node_new(AST_TYPE_VOLATILE, t.loc);
-                an->u.type_volatile.base      = inner;
-                an->u.type_volatile.is_atomic = true;
-                an->u.type_volatile.is_atomic_paren = true;
+                AstNode *an = ast_node_new(AST_TYPE_ATOMIC, t.loc);
+                an->u.type_atomic.base     = inner;
+                an->u.type_atomic.is_paren  = true;
                 ts.user_ty = an;
             } else {
-                /* _Atomic alone — type qualifier */
+                /* _Atomic alone — type qualifier form (C11 6.7.2.4p5).
+                 * Applied to resolved base type later via ds.is_atomic flag. */
                 ds.is_atomic = true;
             }
             continue;
@@ -2110,10 +2125,9 @@ static DeclSpecs parse_decl_specifiers(PS *ps) {
         base = v;
     }
     if (ds.is_atomic) {
-        /* C11 _Atomic qualifier — use is_atomic flag (not loc.line=0 sentinel) */
-        AstNode *a = ast_node_new(AST_TYPE_VOLATILE, ds.loc);
-        a->u.type_volatile.base      = base;
-        a->u.type_volatile.is_atomic = true;
+        AstNode *a = ast_node_new(AST_TYPE_ATOMIC, ds.loc);
+        a->u.type_atomic.base     = base;
+        a->u.type_atomic.is_paren  = false;
         base = a;
     }
     /* post-type __attribute__ (e.g. `void __attribute__((noreturn))`):
