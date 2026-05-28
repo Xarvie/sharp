@@ -1703,7 +1703,10 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                     cg_puts(ctx, "    ");
                     cg_emit_field_group(ctx, &inner_sd->u.struct_def.fields, j);
                 }
-                cg_printf(ctx, "} %s", fname);
+                if (inner_sd->u.struct_def.tail_attrs)
+                    cg_printf(ctx, "} %s %s", inner_sd->u.struct_def.tail_attrs, fname);
+                else
+                    cg_printf(ctx, "} %s", fname);
                 /* Emit array suffixes if the field type is an array */
                 const AstNode *arr = fd->u.field_decl.type;
                 while (arr && arr->kind == AST_TYPE_ARRAY) {
@@ -1761,7 +1764,10 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                     cg_puts(ctx, "    ");
                     cg_emit_field_group(ctx, &inner_sd->u.struct_def.fields, j);
                 }
-                cg_puts(ctx, "}");
+                if (inner_sd->u.struct_def.tail_attrs)
+                    cg_printf(ctx, "} %s", inner_sd->u.struct_def.tail_attrs);
+                else
+                    cg_puts(ctx, "}");
                 /* Emit pointer stars between struct body and name */
                 for (int _pi = 0; _pi < ptr_depth; _pi++) cg_puts(ctx, " *");
                 cg_printf(ctx, " %s", fname);
@@ -4976,12 +4982,22 @@ static void cg_struct(CgCtx *ctx, const AstNode *sd) {
         cg_puts(ctx, "    ");
         cg_field_decl_from_ast(ctx, fd);
     }
-    /* Emit leading attrs (from 'struct __attribute__((...)) Tag') as
-     * trailing attrs after '}'.  C treats both positions identically. */
-    if (sd->u.struct_def.leading_attrs)
-        cg_printf(ctx, "} %s;\n\n", sd->u.struct_def.leading_attrs);
-    else
-        cg_printf(ctx, "};\n\n");
+    /* Emit trailing attrs (from 'struct { ... } __attribute__((packed))').
+     * Also fall back to leading_attrs for backward compatibility (when
+     * the attribute appeared after the struct keyword before the tag).
+     * If both exist, output both space-separated. */
+    if (sd->u.struct_def.tail_attrs || sd->u.struct_def.leading_attrs) {
+        cg_puts(ctx, "} ");
+        if (sd->u.struct_def.leading_attrs)
+            cg_puts(ctx, sd->u.struct_def.leading_attrs);
+        if (sd->u.struct_def.tail_attrs && sd->u.struct_def.leading_attrs)
+            cg_puts(ctx, " ");
+        if (sd->u.struct_def.tail_attrs)
+            cg_puts(ctx, sd->u.struct_def.tail_attrs);
+        cg_puts(ctx, ";\n\n");
+    } else {
+        cg_puts(ctx, "};\n\n");
+    }
 
     /* Static member globals (file-scope C static variables) */
     for (size_t i = 0; i < sd->u.struct_def.fields.len; i++) {
@@ -6506,7 +6522,11 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                     cg_emit_field_group(ctx, &body_sd->u.struct_def.fields, i);
                 }
             }
-            if (d->u.typedef_decl.gcc_attrs)
+            if (d->u.typedef_decl.gcc_attrs && body_sd->u.struct_def.tail_attrs)
+                cg_printf(ctx, "} %s %s %s;\n", body_sd->u.struct_def.tail_attrs, cname, d->u.typedef_decl.gcc_attrs);
+            else if (body_sd->u.struct_def.tail_attrs)
+                cg_printf(ctx, "} %s %s;\n", body_sd->u.struct_def.tail_attrs, cname);
+            else if (d->u.typedef_decl.gcc_attrs)
                 cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs);
             else
                 cg_printf(ctx, "} %s;\n", cname);
@@ -6540,7 +6560,16 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                 if (!cg_emit_field_maybe_inline(ctx, target, &target->u.struct_def.fields, i))
                     cg_emit_field_group(ctx, &target->u.struct_def.fields, i);
             }
-            { if (d->u.typedef_decl.gcc_attrs) cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs); else cg_printf(ctx, "} %s;\n", cname); };
+            {
+                if (d->u.typedef_decl.gcc_attrs && target->u.struct_def.tail_attrs)
+                    cg_printf(ctx, "} %s %s %s;\n", target->u.struct_def.tail_attrs, cname, d->u.typedef_decl.gcc_attrs);
+                else if (target->u.struct_def.tail_attrs)
+                    cg_printf(ctx, "} %s %s;\n", target->u.struct_def.tail_attrs, cname);
+                else if (d->u.typedef_decl.gcc_attrs)
+                    cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs);
+                else
+                    cg_printf(ctx, "} %s;\n", cname);
+            }
         } else if (sname) {
             cg_printf(ctx, "typedef %s %s %s;\n", kw, sname, cname);
         }
@@ -6562,7 +6591,14 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                 target->u.enum_def.trailing_comma) cg_puts(ctx, ",");
             cg_nl(ctx);
         }
-        { if (d->u.typedef_decl.gcc_attrs) cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs); else cg_printf(ctx, "} %s;\n", cname); };
+        {
+            if (d->u.typedef_decl.gcc_attrs)
+                cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs);
+            else if (target->kind == AST_STRUCT_DEF && target->u.struct_def.tail_attrs)
+                cg_printf(ctx, "} %s;\n", target->u.struct_def.tail_attrs);
+            else
+                cg_printf(ctx, "} %s;\n", cname);
+        };
     } else if (target->kind == AST_TYPE_FUNC) {
         /* typedef void Fn(int x); -- function-type typedef (K&R style).
          * Emit directly from AST: typedef ret_type alias(params); */
@@ -6675,10 +6711,28 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                         if (!cg_emit_field_maybe_inline(ctx, anon_sd, &anon_sd->u.struct_def.fields, i))
                             cg_emit_field_group(ctx, &anon_sd->u.struct_def.fields, i);
                     }
-                    { if (d->u.typedef_decl.gcc_attrs) cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs); else cg_printf(ctx, "} %s;\n", cname); };
+                    {
+                        if (d->u.typedef_decl.gcc_attrs && anon_sd->u.struct_def.tail_attrs)
+                            cg_printf(ctx, "} %s %s %s;\n", anon_sd->u.struct_def.tail_attrs, cname, d->u.typedef_decl.gcc_attrs);
+                        else if (anon_sd->u.struct_def.tail_attrs)
+                            cg_printf(ctx, "} %s %s;\n", anon_sd->u.struct_def.tail_attrs, cname);
+                        else if (d->u.typedef_decl.gcc_attrs)
+                            cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs);
+                        else
+                            cg_printf(ctx, "} %s;\n", cname);
+                    };
                 } else {
                     /* Empty struct body: emit typedef struct/union {} alias; */
-                    { if (d->u.typedef_decl.gcc_attrs) cg_printf(ctx, "typedef %s {} %s %s;\n", kw, cname, d->u.typedef_decl.gcc_attrs); else cg_printf(ctx, "typedef %s {} %s;\n", kw, cname); };
+                    {
+                        if (d->u.typedef_decl.gcc_attrs && anon_sd->u.struct_def.tail_attrs)
+                            cg_printf(ctx, "typedef %s {} %s %s %s;\n", kw, anon_sd->u.struct_def.tail_attrs, cname, d->u.typedef_decl.gcc_attrs);
+                        else if (anon_sd->u.struct_def.tail_attrs)
+                            cg_printf(ctx, "typedef %s {} %s %s;\n", kw, anon_sd->u.struct_def.tail_attrs, cname);
+                        else if (d->u.typedef_decl.gcc_attrs)
+                            cg_printf(ctx, "typedef %s {} %s %s;\n", kw, cname, d->u.typedef_decl.gcc_attrs);
+                        else
+                            cg_printf(ctx, "typedef %s {} %s;\n", kw, cname);
+                    };
                 }
             } else {
                 /* Fallback: emit the tag reference */
@@ -6865,8 +6919,9 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                             cg_puts(ctx, "    ");
                             cg_emit_field_group(ctx, &body_sd2->u.struct_def.fields, i);
                         }
-                        if (post_attr)
-                            cg_printf(ctx, "} %s %s;\n", post_attr, cname);
+                        if (post_attr || body_sd2->u.struct_def.tail_attrs)
+                            cg_printf(ctx, "} %s %s;\n",
+                                post_attr ? post_attr : body_sd2->u.struct_def.tail_attrs, cname);
                         else
                             cg_printf(ctx, "} %s;\n", cname);
                         inlined_struct = true;
@@ -7825,8 +7880,9 @@ static void cg_emit_decl_sharp(CgCtx *ctx, AstNode *d) {
                 cg_puts(ctx, "    ");
                 cg_field_decl_from_ast(ctx, d->u.struct_def.fields.data[i]);
             }
-            if (d->u.struct_def.leading_attrs)
-                cg_printf(ctx, "} %s;\n", d->u.struct_def.leading_attrs);
+            if (d->u.struct_def.tail_attrs || d->u.struct_def.leading_attrs)
+                cg_printf(ctx, "} %s;\n",
+                    d->u.struct_def.tail_attrs ? d->u.struct_def.tail_attrs : d->u.struct_def.leading_attrs);
             else
                 cg_puts(ctx, "};\n");
             cg_emit_methods(ctx, d);
@@ -8441,8 +8497,9 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                     cg_puts(ctx, "    ");
                     cg_field_decl_from_ast(ctx, uw->u.struct_def.fields.data[fi]);
                 }
-                if (uw->u.struct_def.leading_attrs)
-                    cg_printf(ctx, "} %s;\n", uw->u.struct_def.leading_attrs);
+                if (uw->u.struct_def.tail_attrs || uw->u.struct_def.leading_attrs)
+                    cg_printf(ctx, "} %s;\n",
+                        uw->u.struct_def.tail_attrs ? uw->u.struct_def.tail_attrs : uw->u.struct_def.leading_attrs);
                 else
                     cg_puts(ctx, "};\n");
             }
