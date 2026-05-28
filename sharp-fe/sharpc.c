@@ -892,7 +892,7 @@ static char *compile_one_file(const char *input,
 
     CppCtx *cctx = cpp_ctx_new();
     cpp_probe_zig_macros(cctx, target);
-    cpp_emit_linemarkers(cctx, false);
+    cpp_emit_linemarkers(cctx, true);
     if (lang_std >= 0) cpp_set_lang_std(cctx, lang_std);
 
     /* ── Auto-detect system paths are already in sys_inc from main() ── */
@@ -979,11 +979,34 @@ static char *compile_one_file(const char *input,
                 bool is_builtin = (fname[0] == '<' || fname[0] == '\0' ||
                                    strcmp(fname, "<built-in>") == 0 ||
                                    strcmp(fname, "<command-line>") == 0);
-                if (from_root && !is_sys && !is_builtin) {
-                    char inc_str[600];
-                    snprintf(inc_str, sizeof inc_str,
-                             "#include \"%s\"", fname);
-                    file_add_include(ast, inc_str);
+                if (from_root && !is_builtin) {
+                    /* Skip .sph/.sp includes — they are Sharp files that
+                     * sharpc has already parsed and converted to C. */
+                    size_t flen = strlen(fname);
+                    bool is_sharp_file = (flen > 4 && 
+                        (strcmp(fname + flen - 4, ".sph") == 0 ||
+                         strcmp(fname + flen - 3, ".sp") == 0));
+                    if (!is_sharp_file) {
+                        char inc_str[600];
+                        if (is_sys) {
+                            /* Extract relative path from system include directory */
+                            const char *rel = fname;
+                            for (size_t di = 0; di < sys_inc->len; di++) {
+                                const char *dir = sys_inc->data[di];
+                                size_t dlen = strlen(dir);
+                                if (strncmp(fname, dir, dlen) == 0 && fname[dlen] == '/') {
+                                    rel = fname + dlen + 1;
+                                    break;
+                                }
+                            }
+                            snprintf(inc_str, sizeof inc_str,
+                                     "#include <%s>", rel);
+                        } else {
+                            snprintf(inc_str, sizeof inc_str,
+                                     "#include \"%s\"", fname);
+                        }
+                        file_add_include(ast, inc_str);
+                    }
                 }
                 if (stkdepth < (int)(sizeof stk / sizeof *stk))
                     stk[stkdepth++] = r.text + (fname_start - r.text);
@@ -1024,197 +1047,6 @@ static char *compile_one_file(const char *input,
             cg_set_sys_dirs(cg, (StrArr *)sys_inc);
 
         c_out = cg_generate(cg, ast);
-
-        /* Rebuild #include directives from system headers consumed by
-         * the preprocessor.  Rebuilds the preamble of needed system includes.
-         * Guards are applied for uid_t/gid_t, sa_handler, and socklen_t. */
-        if (sys_inc->len > 0 && c_out) {
-            StrArr needed = {0};
-
-            /* (a) Type-tracked includes from CG */
-            const StrArr *cg_inc = cg_needed_includes(cg);
-            if (cg_inc) {
-                for (size_t i = 0; i < cg_inc->len; i++)
-                    strarr_push(&needed, xstrdup(cg_inc->data[i]));
-            }
-
-            /* (b) Scan CPP tokens to find which system headers were touched */
-            for (size_t ti = 0; ti < r.ntokens; ti++) {
-                const char *file = r.tokens[ti].loc.file;
-                if (!file || !file[0]) continue;
-                for (size_t di = 0; di < sys_inc->len; di++) {
-                    const char *dir = sys_inc->data[di];
-                    size_t dlen = strlen(dir);
-                    if (strncmp(file, dir, dlen) != 0 || file[dlen] != '/')
-                        continue;
-                    const char *inc = file + dlen + 1;
-                    if (strncmp(inc, "bits/", 5) == 0) break;
-                    if (strncmp(inc, "gnu/", 4) == 0) break;
-                    if (strncmp(inc, "asm/", 4) == 0) break;
-                    if (strncmp(inc, "asm-generic/", 12) == 0) break;
-                    if (strncmp(inc, "linux/", 6) == 0) break;
-                    if (strncmp(inc, "sysdeps/", 8) == 0) break;
-                    if (strncmp(inc, "x86_64-linux-gnu/", 18) == 0) break;
-                    if (strncmp(inc, "rpc/", 4) == 0) break;
-                    if (strcmp(inc, "features.h") == 0) break;
-                    if (strcmp(inc, "stubs.h") == 0) break;
-                    if (strcmp(inc, "stubs-64.h") == 0) break;
-                    if (strcmp(inc, "sys/cdefs.h") == 0) break;
-                    if (strncmp(inc, "c++/14.2.0/", 11) == 0) break;
-                    if (strncmp(inc, "c++/", 4) == 0) break;
-                    if (strcmp(inc, "c++defs.h") == 0) break;
-                    if (strcmp(inc, "libc-header-start.h") == 0) break;
-                    if (strncmp(inc, "_mingw", 6) == 0) break;
-                    if (strcmp(inc, "vadefs.h") == 0) break;
-                    if (strcmp(inc, "corecrt.h") == 0) break;
-                    if (strncmp(inc, "corecrt_", 8) == 0) break;
-                    if (strncmp(inc, "msvcrt/", 7) == 0) break;
-                    if (strcmp(inc, "crtdefs.h") == 0) break;
-                    if (strcmp(inc, "vcruntime.h") == 0) break;
-                    if (strcmp(inc, "concurrencysal.h") == 0) break;
-                    if (strncmp(inc, "sal.h", 5) == 0) break;
-                    if (strncmp(inc, "codeanalysis/", 13) == 0) break;
-                    bool dup = false;
-                    for (size_t ni = 0; ni < needed.len; ni++)
-                        if (strcmp(needed.data[ni], inc) == 0) { dup = true; break; }
-                    if (!dup) strarr_push(&needed, xstrdup(inc));
-                    break;
-                }
-            }
-
-            /* Guard variable detection */
-            bool has_socket = false, has_netinet = false, has_signal = false;
-            for (size_t i = 0; i < needed.len; i++) {
-                const char *inc = needed.data[i];
-                if (strcmp(inc, "sys/socket.h") == 0) has_socket = true;
-                else if (strcmp(inc, "netinet/in.h") == 0) has_netinet = true;
-                else if (strcmp(inc, "signal.h") == 0) has_signal = true;
-            }
-
-
-            /* uid_t/gid_t guard: scan for `typedef X uid_t;` or `typedef X gid_t;` */
-            bool need_uid_guard = false;
-            if (c_out) {
-                /* Only guard when user code defines uid_t/gid_t as a TYPEDEF
-                 * TARGET: `typedef X uid_t;` or `typedef X gid_t;`.
-                 * Cases like `typedef uid_t X;` or `typedef gid_t X;` are
-                 * harmless — uid_t/gid_t is the SOURCE type there. */
-                for (const char *p = c_out; (p = strstr(p, "typedef")) != NULL; ) {
-                    const char *end = strchr(p, '\n');
-                    if (!end) end = p + strlen(p);
-                    /* Skip "typedef", whitespace, first identifier (source type) */
-                    const char *q = p + 7;
-                    while (q < end && (*q == ' ' || *q == '\t' || *q == '*')) q++;
-                    while (q < end && (*q == '_' || (*q >= 'a' && *q <= 'z') ||
-                                       (*q >= 'A' && *q <= 'Z') ||
-                                       (*q >= '0' && *q <= '9') || *q == '*')) q++;
-                    while (q < end && (*q == ' ' || *q == '\t')) q++;
-                    /* q now points at the typedef target */
-                    if ((strncmp(q, "uid_t", 5) == 0 || strncmp(q, "gid_t", 5) == 0) &&
-                        (q + 5 >= end || *(q + 5) == ';' || *(q + 5) == ' ' ||
-                         *(q + 5) == '\t' || *(q + 5) == ',' || *(q + 5) == '[' ||
-                         *(q + 5) == '(' || *(q + 5) == ')' || *(q + 5) == '=')) {
-                        need_uid_guard = true;
-                        break;
-                    }
-                    p = end + (end[0] != '\0' ? 1 : 0);
-                }
-            }
-
-            /* Ordered list of known system headers (conventional C order).
-             * Each is emitted iff present in the needed set. */
-            static const char *known[] = {
-                "stddef.h", "stdint.h", "stdbool.h", "stdarg.h",
-                "stdio.h", "stdlib.h", "string.h", "strings.h",
-                "ctype.h", "setjmp.h", "math.h", "locale.h", "errno.h",
-                "time.h", "sys/time.h", "fcntl.h", "unistd.h",
-                "signal.h", "pthread.h", "sys/types.h",
-                "sys/socket.h", "sys/stat.h", "sys/ioctl.h", "sys/mman.h",
-                "sys/uio.h", "sys/eventfd.h", "sys/timerfd.h",
-                "sys/epoll.h", "poll.h", "sys/select.h",
-                "netinet/in.h", "netinet/tcp.h", "arpa/inet.h",
-                "netdb.h", "ifaddrs.h", "malloc.h", "intrin.h",
-            };
-            size_t nknown = sizeof known / sizeof known[0];
-
-            char hdr[4096];
-            size_t pos = 0;
-            #define W(lit) do { \
-                size_t n = sizeof(lit)-1; \
-                if (pos + n > sizeof hdr) break; \
-                memcpy(hdr+pos, lit, n); pos+=n; \
-            } while(0)
-
-            if (need_uid_guard) {
-                W("#define uid_t __uid_t\n");
-                W("#define gid_t __gid_t\n");
-                W("#define __uid_t_defined\n");
-                W("#define __gid_t_defined\n");
-            }
-
-            for (size_t ki = 0; ki < nknown; ki++) {
-                for (size_t ni = 0; ni < needed.len; ni++) {
-                    if (strcmp(needed.data[ni], known[ki]) == 0) {
-                        char buf[256];
-                        int blen = snprintf(buf, sizeof buf,
-                                           "#include <%s>\n", known[ki]);
-                        if (blen > 0 && pos + (size_t)blen <= sizeof hdr) {
-                            memcpy(hdr + pos, buf, (size_t)blen);
-                            pos += (size_t)blen;
-                        }
-                        break;
-                    }
-                }
-            }
-
-            if (has_signal) {
-                W("#undef sa_handler\n");
-                W("#undef sa_sigaction\n");
-            }
-
-            /* Emit headers not in the known list (project-specific, etc.) */
-            for (size_t ni = 0; ni < needed.len; ni++) {
-                bool found = false;
-                for (size_t ki = 0; ki < nknown; ki++)
-                    if (strcmp(needed.data[ni], known[ki]) == 0)
-                        { found = true; break; }
-                if (!found) {
-                    char buf[256];
-                    int blen = snprintf(buf, sizeof buf,
-                                       "#include <%s>\n", needed.data[ni]);
-                    if (blen > 0 && pos + (size_t)blen <= sizeof hdr) {
-                        memcpy(hdr + pos, buf, (size_t)blen);
-                        pos += (size_t)blen;
-                    }
-                }
-            }
-
-            if (need_uid_guard) {
-                W("#undef uid_t\n");
-                W("#undef gid_t\n");
-                W("#undef __uid_t_defined\n");
-                W("#undef __gid_t_defined\n");
-            }
-            if (has_socket || has_netinet) {
-                W("#ifndef __socklen_t_defined\n");
-                W("typedef unsigned int socklen_t;\n");
-                W("#endif\n");
-            }
-            W("\n");
-
-            #undef W
-
-            size_t clen = strlen(c_out);
-            char *new_out = malloc(pos + clen + 1);
-            if (new_out) {
-                memcpy(new_out, hdr, pos);
-                memcpy(new_out + pos, c_out, clen + 1);
-                free(c_out);
-                c_out = new_out;
-            }
-
-            strarr_free_contents(&needed);
-        }
 
         cg_ctx_free(cg);
     }
