@@ -1290,3 +1290,181 @@ const char *cpp_sys_include(const CppCtx *ctx, size_t idx) {
     if (!ctx || idx >= ctx->sys_include_paths.len) return NULL;
     return ctx->sys_include_paths.data[idx];
 }
+
+/* -----------------------------------------------------------------
+ * cpp_detect_zig_sys_paths_from_zig — Discover system include paths
+ * by directly parsing `zig cc -E -v` output.
+ *
+ * This guarantees 100% consistency with zig cc's own search paths.
+ * ----------------------------------------------------------------- */
+
+/* Internal: capture stderr output from a command (zig -v goes to stderr) */
+static char *
+capture_zig_cc_verbose(const char *zig_exe, const char *target)
+{
+    char err_path[512];
+    char cmd[2048];
+
+#ifdef _WIN32
+    char out_path[512];
+    const char *tmp = getenv("TEMP");
+    if (!tmp) tmp = ".";
+    snprintf(out_path, sizeof(out_path), "%s\\zig_verbose_out_%lu.tmp",
+             tmp, (unsigned long)GetCurrentProcessId());
+    snprintf(err_path, sizeof(err_path), "%s\\zig_verbose_err_%lu.tmp",
+             tmp, (unsigned long)GetCurrentProcessId());
+    const char *empty_file = out_path;
+    FILE *efp = fopen(empty_file, "w");
+    if (!efp) return NULL;
+    fclose(efp);
+#else
+    const char *tmp = getenv("TMPDIR");
+    if (!tmp) tmp = "/tmp";
+    snprintf(err_path, sizeof(err_path), "%s/zig_verbose_err_%d.tmp",
+             tmp, (int)getpid());
+    const char *empty_file = "/dev/null";
+#endif
+
+    /* zig cc -E -v outputs verbose info to stderr */
+    snprintf(cmd, sizeof(cmd),
+             "%s cc -E -v -std=c11%s%s%s -x c %s >\"%s\" 2>\"%s\"",
+             zig_exe,
+             target ? " -target " : "",
+             target ? target : "",
+             /* -fno-blocks for darwin */
+             (target && (strstr(target, "macos") || strstr(target, "ios"))) ? " -fno-blocks" : "",
+             empty_file,
+#ifdef _WIN32
+             out_path,
+#else
+             "/dev/null",
+#endif
+             err_path);
+
+    int exit_code = system(cmd);
+
+#ifdef _WIN32
+    DeleteFileA(empty_file);
+    DeleteFileA(out_path);
+#endif
+
+    if (exit_code != 0) {
+        remove(err_path);
+        return NULL;
+    }
+
+    /* Read stderr output */
+    FILE *f = fopen(err_path, "r");
+    if (!f) {
+        remove(err_path);
+        return NULL;
+    }
+
+    /* Get file size */
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (fsize <= 0) {
+        fclose(f);
+        remove(err_path);
+        return NULL;
+    }
+
+    char *buf = malloc((size_t)fsize + 1);
+    if (!buf) {
+        fclose(f);
+        remove(err_path);
+        return NULL;
+    }
+
+    size_t nread = fread(buf, 1, (size_t)fsize, f);
+    buf[nread] = '\0';
+    fclose(f);
+    remove(err_path);
+
+    return buf;
+}
+
+/**
+ * cpp_detect_zig_sys_paths_from_zig — Parse `zig cc -E -v` output to
+ * discover system include directories.  This guarantees that sharpc
+ * uses exactly the same include paths as zig cc.
+ */
+void cpp_detect_zig_sys_paths_from_zig(CppCtx *ctx, const char *target)
+{
+    const char *zig_exe = cpp_find_zig_exe();
+    if (!zig_exe) {
+        /* Fallback to host-native detection */
+        cpp_detect_sys_include_paths(ctx);
+        return;
+    }
+
+    char *verbose = capture_zig_cc_verbose(zig_exe, target);
+    if (!verbose) {
+        cpp_detect_sys_include_paths(ctx);
+        return;
+    }
+
+    /* Parse the output for include paths.
+     * Format:
+     *   #include <...> search starts here:
+     *    /path/to/include1
+     *    /path/to/include2
+     *   End of search list.
+     */
+    const char *start_marker = "#include <...> search starts here:";
+    const char *end_marker = "End of search list.";
+
+    const char *start = strstr(verbose, start_marker);
+    if (!start) {
+        free(verbose);
+        cpp_detect_sys_include_paths(ctx);
+        return;
+    }
+    start += strlen(start_marker);
+    const char *end = strstr(start, end_marker);
+    if (!end) end = verbose + strlen(verbose);
+
+    /* Parse each line between start and end */
+    const char *p = start;
+    while (p < end) {
+        /* Find next newline or end */
+        const char *line_end = p;
+        while (line_end < end && *line_end != '\n' && *line_end != '\r') line_end++;
+        
+        /* Extract line content */
+        size_t line_len = (size_t)(line_end - p);
+        if (line_len == 0) { p++; continue; }
+        
+        /* Skip leading spaces */
+        const char *path_start = p;
+        while (path_start < line_end && (*path_start == ' ' || *path_start == '\t')) path_start++;
+        if (path_start >= line_end) { p = line_end + 1; continue; }
+        
+        size_t path_len = (size_t)(line_end - path_start);
+        char path_buf[MAX_PATH];
+        if (path_len >= sizeof(path_buf)) path_len = sizeof(path_buf) - 1;
+        memcpy(path_buf, path_start, path_len);
+        path_buf[path_len] = '\0';
+
+        /* Resolve relative paths against current working directory.
+         * zig cc -E -v outputs paths relative to the cwd when run. */
+        if (path_buf[0] != '/') {
+            char cwd[MAX_PATH];
+            if (getcwd(cwd, sizeof(cwd))) {
+                char full_path[MAX_PATH];
+                snprintf(full_path, sizeof(full_path), "%s/%s", cwd, path_buf);
+                add_sys_path_if_valid(ctx, full_path);
+            }
+        } else {
+            add_sys_path_if_valid(ctx, path_buf);
+        }
+        
+        /* Move to next line */
+        p = line_end;
+        while (p < end && (*p == '\n' || *p == '\r')) p++;
+    }
+
+    free(verbose);
+}

@@ -1198,10 +1198,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* System include paths: detect for preamble injection and CG tracking.
-     * Query zig cc directly to get the correct search paths with priority. */
+    /* System include paths: directly parse zig cc -E -v output to get
+     * exactly the same search paths that zig cc uses. */
     CppCtx *path_probe = cpp_ctx_new();
-    cpp_detect_zig_sys_paths(path_probe, target);
+    cpp_detect_zig_sys_paths_from_zig(path_probe, target);
     for (size_t i = 0; i < cpp_sys_include_count(path_probe); i++)
         sv_push(&sys_inc, xstrdup(cpp_sys_include(path_probe, i)));
     cpp_ctx_free(path_probe);

@@ -51,6 +51,13 @@ void cpp_detect_target_sys_paths(CppCtx *ctx, const char *target);
 void cpp_detect_zig_sys_paths(CppCtx *ctx, const char *target);
 
 /**
+ * cpp_detect_zig_sys_paths_from_zig — Parse `zig cc -E -v` output to
+ * discover system include directories.  This guarantees that sharpc
+ * uses exactly the same include paths as zig cc.
+ */
+void cpp_detect_zig_sys_paths_from_zig(CppCtx *ctx, const char *target);
+
+/**
  * Return the number of system include directories currently registered
  * in ctx (populated by cpp_detect_sys_include_paths or
  * cpp_detect_target_sys_paths).  Returns 0 if ctx is NULL. */
