@@ -78,6 +78,8 @@ void ast_node_free(AstNode *node) {
         break;
     case AST_STRUCT_DEF:
         free(node->u.struct_def.name);
+        free(node->u.struct_def.leading_attrs);
+        free(node->u.struct_def.tail_attrs);
         astvec_deep_free(&node->u.struct_def.generic_params);
         astvec_deep_free(&node->u.struct_def.fields);
         astvec_deep_free(&node->u.struct_def.methods);

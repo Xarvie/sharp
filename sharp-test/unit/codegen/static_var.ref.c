@@ -1,69 +1,67 @@
 
-#include <stdlib.h>
-
-#line 4 "unit/codegen/static_var.sp"
+#line 4 "sharp-test/unit/codegen/static_var.sp"
 int g_counter = 0;
 
-#line 6 "unit/codegen/static_var.sp"
+#line 6 "sharp-test/unit/codegen/static_var.sp"
 int get_next() {
 
-#line 7 "unit/codegen/static_var.sp"
+#line 7 "sharp-test/unit/codegen/static_var.sp"
     static int local = 100;
 
-#line 8 "unit/codegen/static_var.sp"
+#line 8 "sharp-test/unit/codegen/static_var.sp"
     local = local + 1;
 
-#line 9 "unit/codegen/static_var.sp"
+#line 9 "sharp-test/unit/codegen/static_var.sp"
     return local;
 }
 
-#line 12 "unit/codegen/static_var.sp"
+#line 12 "sharp-test/unit/codegen/static_var.sp"
 void increment_global() {
 
-#line 13 "unit/codegen/static_var.sp"
+#line 13 "sharp-test/unit/codegen/static_var.sp"
     g_counter = g_counter + 1;
 }
 
-#line 16 "unit/codegen/static_var.sp"
+#line 16 "sharp-test/unit/codegen/static_var.sp"
 int main() {
 
-#line 18 "unit/codegen/static_var.sp"
+#line 18 "sharp-test/unit/codegen/static_var.sp"
     g_counter = 0;
 
-#line 19 "unit/codegen/static_var.sp"
+#line 19 "sharp-test/unit/codegen/static_var.sp"
     increment_global();
 
-#line 20 "unit/codegen/static_var.sp"
+#line 20 "sharp-test/unit/codegen/static_var.sp"
     increment_global();
 
-#line 21 "unit/codegen/static_var.sp"
+#line 21 "sharp-test/unit/codegen/static_var.sp"
     increment_global();
 
-#line 22 "unit/codegen/static_var.sp"
+#line 22 "sharp-test/unit/codegen/static_var.sp"
     if (g_counter != 3) 
         return 1;
 
-#line 25 "unit/codegen/static_var.sp"
+#line 25 "sharp-test/unit/codegen/static_var.sp"
     int a = get_next();
 
-#line 26 "unit/codegen/static_var.sp"
+#line 26 "sharp-test/unit/codegen/static_var.sp"
     int b = get_next();
 
-#line 27 "unit/codegen/static_var.sp"
+#line 27 "sharp-test/unit/codegen/static_var.sp"
     int c = get_next();
 
-#line 28 "unit/codegen/static_var.sp"
+#line 28 "sharp-test/unit/codegen/static_var.sp"
     if (a != 101) 
         return 2;
 
-#line 29 "unit/codegen/static_var.sp"
+#line 29 "sharp-test/unit/codegen/static_var.sp"
     if (b != 102) 
         return 3;
 
-#line 30 "unit/codegen/static_var.sp"
+#line 30 "sharp-test/unit/codegen/static_var.sp"
     if (c != 103) 
         return 4;
 
-#line 32 "unit/codegen/static_var.sp"
+#line 32 "sharp-test/unit/codegen/static_var.sp"
     return 0;
 }

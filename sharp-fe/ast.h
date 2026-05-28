@@ -303,6 +303,7 @@ struct AstNode {
             bool    is_nested_in_struct; /* defined inside another struct body */
             bool    from_inline_var;    /* defined inline in a var declaration */
             char   *leading_attrs;    /* __attribute__ after tag, before '{' */
+            char   *tail_attrs;       /* __attribute__ after '}', before ';' or declarator suffix */
             bool    has_body;         /* true if '{...}' was present (even if empty) */
         } struct_def;
 

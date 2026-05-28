@@ -2993,15 +2993,17 @@ static AstNode *parse_struct_def(PS *ps) {
     }
     ps->struct_body_depth--;
     ps_expect(ps, STOK_RBRACE, "struct closing '}'");
-    /* detect __attribute__((transparent_union)) on anonymous
-     * unions from glibc socket headers (__CONST_SOCKADDR_ARG).
-     * Mark the node so CG can emit the first member's type instead. */
-    if (sd->u.struct_def.is_union && ps_at(ps, STOK_ATTRIBUTE)) {
+    /* Capture ALL trailing __attribute__ after '}' and before ';' or declarator.
+     * This handles packed, aligned, may_alias, transparent_union, etc.
+     * Previous code only detected transparent_union and lost everything else. */
+    if (ps_at(ps, STOK_ATTRIBUTE)) {
         char *attr_text = NULL;
         eat_attribute_specifiers(ps, &attr_text);
-        if (attr_text && strstr(attr_text, "transparent_union"))
-            sd->u.struct_def.is_transparent_union = true;
-        free(attr_text);
+        if (attr_text) {
+            sd->u.struct_def.tail_attrs = attr_text;
+            if (sd->u.struct_def.is_union && strstr(attr_text, "transparent_union"))
+                sd->u.struct_def.is_transparent_union = true;
+        }
     }
     /* The trailing `;` is owned by the caller — for top-level
      * `struct X { ... };` parse_top_decl consumes it; for inline use
