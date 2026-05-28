@@ -100,10 +100,6 @@ struct CgCtx {
     bool           proto_only;    /* true → emit prototype only (no body)     */
     bool           uses_to_cstr;  /* true → @to_cstr() intrinsic is used      */
 
-    /* System include tracking */
-    StrArr         sys_dirs;        /* system include dirs (for is-sys-path check)  */
-    StrArr         needed_includes; /* #include names to inject in generated output */
-
     /* Forward typedef dedup (Sharp mode Phase 1.5) */
     const char   **fwd_typedef_names; /* struct names that got early typedef   */
     size_t         n_fwd_typedef_names;
@@ -131,30 +127,12 @@ struct CgCtx {
  * Context lifecycle and utilities
  * ====================================================================== */
 
-/** Check if a path belongs to a system (non-user) directory. */
-static bool cg_is_sys_path(const CgCtx *ctx, const char *path) {
-    if (!path || path[0] == '\0' || path[0] == '<') return true;
-    for (size_t i = 0; i < ctx->sys_dirs.len; i++) {
-        const char *dir = ctx->sys_dirs.data[i];
-        size_t dlen = strlen(dir);
-        if (strncmp(path, dir, dlen) == 0 && path[dlen] == '/')
-            return true;
-    }
-    static const char * const sys_pfx[] = {
-        "/usr/", "/lib/", "/include/",
-    };
-    for (size_t _i = 0; _i < sizeof sys_pfx / sizeof *sys_pfx; _i++)
-        if (strncmp(path, sys_pfx[_i], strlen(sys_pfx[_i])) == 0) return true;
-    return false;
-}
-
 static bool decl_is_user(const CgCtx *ctx, const AstNode *d) {
     if (!ctx->root_file || !d) return true;
     const char *f = d->loc.file;
     if (!f || f[0] == '\0') return false;
     if (strcmp(f, ctx->root_file) == 0) return true;
-    if (!cg_is_sys_path(ctx, f)) return true;
-    return false;
+    return true;
 }
 
 /* Forward declarations for output helpers.
@@ -209,19 +187,7 @@ void cg_ctx_free(CgCtx *ctx) {
         free(ctx->gfinsts[i].targs);
     }
     free(ctx->gfinsts);
-    strarr_free_contents(&ctx->sys_dirs);
-    strarr_free_contents(&ctx->needed_includes);
     free(ctx);
-}
-
-void cg_set_sys_dirs(CgCtx *ctx, StrArr *dirs) {
-    if (!ctx || !dirs) return;
-    for (size_t i = 0; i < dirs->len; i++)
-        strarr_push(&ctx->sys_dirs, cpp_xstrdup(dirs->data[i]));
-}
-
-const StrArr *cg_needed_includes(const CgCtx *ctx) {
-    return ctx ? &ctx->needed_includes : NULL;
 }
 
 /* =========================================================================
@@ -248,24 +214,19 @@ static void cg_puts(CgCtx *ctx, const char *s) { cgb_puts(&ctx->out, s); }
 
 static bool cg_loc_is_user_file(CgCtx *ctx, const char *file) {
     if (!file || file[0] == '\0' || file[0] == '<') return false;
-    if (ctx->root_file && cg_is_sys_path(ctx, file)) return false;
     /* If root_file is set, only track files matching it or its directory */
     if (ctx->root_file) {
-        /* Accept files with the same basename or in the same directory tree */
         const char *rb = strrchr(ctx->root_file, '/');
         rb = rb ? rb + 1 : ctx->root_file;
         const char *fb = strrchr(file, '/');
         fb = fb ? fb + 1 : file;
-        /* Accept if basename matches (handles temp file redirects) */
         if (strcmp(fb, rb) == 0) return true;
-        /* Accept if file is in same directory as root */
         size_t dlen = rb - ctx->root_file;
         if (strncmp(file, ctx->root_file, dlen) == 0 &&
             (file[dlen] == '/' || file[dlen] == '\0')) return true;
-        /* Otherwise, only accept explicitly non-system paths */
-        return !cg_is_sys_path(ctx, file);
+        return true;
     }
-    return !cg_is_sys_path(ctx, file);
+    return true;
 }
 
 /**
@@ -641,26 +602,6 @@ static void cg_func_params(CgCtx *ctx, const Type *fn) {
  */
 static void cg_type_from_ast(CgCtx *ctx, const AstNode *n) {
     if (!n) { cg_puts(ctx, "void"); return; }
-
-    /* C2: track system headers used by type references.  Each AST node
-     * carries loc.file; if it points into a system include directory,
-     * derive the #include name and add it to the needed set. */
-    if (ctx->sys_dirs.len > 0 && n->loc.file && n->loc.file[0]) {
-        for (size_t di = 0; di < ctx->sys_dirs.len; di++) {
-            const char *dir = ctx->sys_dirs.data[di];
-            size_t dlen = strlen(dir);
-            if (strncmp(n->loc.file, dir, dlen) == 0 && n->loc.file[dlen] == '/') {
-                const char *inc = n->loc.file + dlen + 1;
-                bool dup = false;
-                for (size_t ni = 0; ni < ctx->needed_includes.len; ni++)
-                    if (strcmp(ctx->needed_includes.data[ni], inc) == 0)
-                        { dup = true; break; }
-                if (!dup)
-                    strarr_push(&ctx->needed_includes, cpp_xstrdup(inc));
-                break;
-            }
-        }
-    }
 
     switch (n->kind) {
     case AST_TYPE_NAME: {
@@ -7925,12 +7866,6 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
 
     /* Emit @to_cstr preamble (sp_str_t typedef + __SP_MAGIC_TO_C_STR macro) */
     cg_emit_to_cstr_preamble(ctx);
-
-    /* Emit user's explicit #include directives (excluding .sph/.sp files) */
-    for (size_t i = 0; i < file->u.file.nuser_includes; i++) {
-        cg_puts(ctx, file->u.file.user_includes[i]);
-        cg_puts(ctx, "\n");
-    }
 
     /* ── Sharp-mode multi-pass emitter ──────────────────────────────────
      * Phase 1 → 1.5 → 2 → 3a → 3.5 → 3b → 4                           */

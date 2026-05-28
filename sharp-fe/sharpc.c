@@ -943,81 +943,6 @@ static char *compile_one_file(const char *input,
     AstNode *ast = parse_file_with_typedefs(toks, ntoks, input, &pd,
                                             NULL);
 
-    /* ── Extract #include lines from preprocessor linemarkers ────── */
-    if (ast && r.text) {
-        const char *p = r.text;
-        const char *stk[256];
-        int stkdepth = 0;
-        stk[stkdepth++] = input;
-        while (*p) {
-            if (*p != '#') { while (*p && *p != '\n') p++; if (*p) p++; continue; }
-            const char *line_start = p++;
-            while (*p == ' ' || *p == '\t') p++;
-            if (*p < '0' || *p > '9') { while (*p && *p != '\n') p++; if (*p) p++; continue; }
-            while (*p >= '0' && *p <= '9') p++;
-            while (*p == ' ' || *p == '\t') p++;
-            if (*p != '"') { while (*p && *p != '\n') p++; if (*p) p++; continue; }
-            p++;
-            const char *fname_start = p;
-            while (*p && *p != '"') p++;
-            size_t fname_len = (size_t)(p - fname_start);
-            if (*p) p++;
-            int flags = 0;
-            while (*p == ' ' || *p == '\t') p++;
-            while (*p >= '0' && *p <= '9') { flags |= (1 << (*p - '1')); p++; while (*p == ' ' || *p == '\t') p++; }
-            (void)line_start;
-            bool entering  = (flags & 1) != 0;
-            bool returning = (flags & 2) != 0;
-            bool is_sys    = (flags & 4) != 0;
-            char fname[512];
-            if (fname_len >= sizeof fname) fname_len = sizeof fname - 1;
-            memcpy(fname, fname_start, fname_len);
-            fname[fname_len] = '\0';
-            if (entering && !returning) {
-                bool from_root = (stkdepth == 1 &&
-                                  strcmp(stk[0], input) == 0);
-                bool is_builtin = (fname[0] == '<' || fname[0] == '\0' ||
-                                   strcmp(fname, "<built-in>") == 0 ||
-                                   strcmp(fname, "<command-line>") == 0);
-                if (from_root && !is_builtin) {
-                    /* Skip .sph/.sp includes — they are Sharp files that
-                     * sharpc has already parsed and converted to C. */
-                    size_t flen = strlen(fname);
-                    bool is_sharp_file = (flen > 4 && 
-                        (strcmp(fname + flen - 4, ".sph") == 0 ||
-                         strcmp(fname + flen - 3, ".sp") == 0));
-                    if (!is_sharp_file) {
-                        char inc_str[600];
-                        if (is_sys) {
-                            /* Extract relative path from system include directory */
-                            const char *rel = fname;
-                            for (size_t di = 0; di < sys_inc->len; di++) {
-                                const char *dir = sys_inc->data[di];
-                                size_t dlen = strlen(dir);
-                                if (strncmp(fname, dir, dlen) == 0 && fname[dlen] == '/') {
-                                    rel = fname + dlen + 1;
-                                    break;
-                                }
-                            }
-                            snprintf(inc_str, sizeof inc_str,
-                                     "#include <%s>", rel);
-                        } else {
-                            snprintf(inc_str, sizeof inc_str,
-                                     "#include \"%s\"", fname);
-                        }
-                        file_add_include(ast, inc_str);
-                    }
-                }
-                if (stkdepth < (int)(sizeof stk / sizeof *stk))
-                    stk[stkdepth++] = r.text + (fname_start - r.text);
-            } else if (returning && stkdepth > 0) {
-                stkdepth--;
-            }
-            while (*p && *p != '\n') p++;
-            if (*p) p++;
-        }
-    }
-
     Scope *scope = scope_build_with_prelude(ast, &sd, NULL);
 
     /* Type analysis + semantic check */
@@ -1043,11 +968,7 @@ static char *compile_one_file(const char *input,
     char *c_out = NULL;
     if (!had_error) {
         CgCtx *cg = cg_ctx_new(ts, scope);
-        if (sys_inc->len > 0)
-            cg_set_sys_dirs(cg, (StrArr *)sys_inc);
-
         c_out = cg_generate(cg, ast);
-
         cg_ctx_free(cg);
     }
 
@@ -1449,15 +1370,15 @@ int main(int argc, char *argv[]) {
                 continue;
             }
 
-            /* Write .c temp file */
-            char *tmp_c = make_tmp_name(inf->path, ".c");
-            if (!tmp_c) { ret = 2; goto cleanup; }
-            FILE *f = fopen(tmp_c, "w");
-            if (!f) { perror(tmp_c); ret = 2; goto cleanup; }
+            /* Write .i temp file */
+            char *tmp_i = make_tmp_name(inf->path, ".i");
+            if (!tmp_i) { ret = 2; goto cleanup; }
+            FILE *f = fopen(tmp_i, "w");
+            if (!f) { perror(tmp_i); ret = 2; goto cleanup; }
             fputs(inf->tmp_c, f);
             fclose(f);
 
-            const char *zig_argv[] = {zig_exe, "cc", "-S", tmp_c, "-o", out_file, NULL};
+            const char *zig_argv[] = {zig_exe, "cc", "-x", "c", "-S", tmp_i, "-o", out_file, NULL};
             if (g_sess.verbose) {
                 fprintf(stderr, "%s", zig_argv[0]);
                 for (int ai = 1; zig_argv[ai]; ai++) fprintf(stderr, " %s", zig_argv[ai]);
@@ -1478,19 +1399,22 @@ int main(int argc, char *argv[]) {
 
     if (action == ACTION_COMPILE_ONLY) {
         /* -c: compile to .o for each input via zig cc -c,
-         * or emit C text if -o target has .c extension. */
+         * or emit C text if -o target has .i extension. */
         const char *zig_exe = cpp_find_zig_exe();
         if (!zig_exe) {
             fprintf(stderr, "sharpc: zig not found\n");
             ret = 3; goto cleanup;
         }
-        /* Check if any -o target has .c extension */
-        bool emit_c_only = false;
-        if (output && strcmp(file_ext(output), ".c") == 0)
-            emit_c_only = true;
+        /* Check if -o target has .i or .c extension (emit C text only) */
+        bool emit_text_only = false;
+        if (output) {
+            const char *ext = file_ext(output);
+            if (strcmp(ext, ".i") == 0 || strcmp(ext, ".c") == 0)
+                emit_text_only = true;
+        }
 
-        if (emit_c_only && inputs.len == 1) {
-            /* Single file, -o *.c → emit C text directly */
+        if (emit_text_only && inputs.len == 1) {
+            /* Single file, -o *.i or -o *.c → emit C text directly */
             FILE *f = fopen(output, "w");
             if (!f) { perror(output); ret = 2; goto cleanup; }
             fputs(inputs.data[0].tmp_c, f);
@@ -1504,8 +1428,7 @@ int main(int argc, char *argv[]) {
             InputFile *inf = &inputs.data[fi];
             if (!inf->tmp_c) continue;
 
-            const char *obj_out = (inputs.len == 1 && output &&
-                                   strcmp(file_ext(output), ".c") != 0)
+            const char *obj_out = (inputs.len == 1 && output)
                                   ? output :
                                   replace_ext(inf->path, ".o");
 
@@ -1548,10 +1471,10 @@ int main(int argc, char *argv[]) {
                 continue;
             }
 
-            char *tmp_c = make_tmp_name(inf->path, ".c");
-            if (!tmp_c) { ret = 2; goto cleanup; }
-            FILE *f = fopen(tmp_c, "w");
-            if (!f) { perror(tmp_c); ret = 2; goto cleanup; }
+            char *tmp_i = make_tmp_name(inf->path, ".i");
+            if (!tmp_i) { ret = 2; goto cleanup; }
+            FILE *f = fopen(tmp_i, "w");
+            if (!f) { perror(tmp_i); ret = 2; goto cleanup; }
             fputs(inf->tmp_c, f);
             fclose(f);
 
@@ -1560,8 +1483,10 @@ int main(int argc, char *argv[]) {
             sv_push(&zig_args, zig_exe);
             sv_push(&zig_args, "cc");
             if (target && target[0]) { sv_push(&zig_args, "-target"); sv_push(&zig_args, (char *)target); }
+            sv_push(&zig_args, "-x");
+            sv_push(&zig_args, "c");
             sv_push(&zig_args, "-c");
-            sv_push(&zig_args, tmp_c);
+            sv_push(&zig_args, tmp_i);
             sv_push(&zig_args, "-o");
             sv_push(&zig_args, obj_out);
             for (size_t li = 0; li < link_other.len; li++)
@@ -1646,10 +1571,10 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        char *tmp_c = make_tmp_name(inf->path, ".c");
-        if (!tmp_c) { ret = 2; goto cleanup; }
-        FILE *f = fopen(tmp_c, "w");
-        if (!f) { perror(tmp_c); ret = 2; goto cleanup; }
+        char *tmp_i = make_tmp_name(inf->path, ".i");
+        if (!tmp_i) { ret = 2; goto cleanup; }
+        FILE *f = fopen(tmp_i, "w");
+        if (!f) { perror(tmp_i); ret = 2; goto cleanup; }
         fputs(inf->tmp_c, f);
         fclose(f);
 
@@ -1660,8 +1585,10 @@ int main(int argc, char *argv[]) {
         sv_push(&zig_args, zig_exe);
         sv_push(&zig_args, "cc");
         if (target && target[0]) { sv_push(&zig_args, "-target"); sv_push(&zig_args, (char *)target); }
+        sv_push(&zig_args, "-x");
+        sv_push(&zig_args, "c");
         sv_push(&zig_args, "-c");
-        sv_push(&zig_args, tmp_c);
+        sv_push(&zig_args, tmp_i);
         sv_push(&zig_args, "-o");
         sv_push(&zig_args, obj_tmp);
         for (size_t li = 0; li < link_other.len; li++)

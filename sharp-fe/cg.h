@@ -34,9 +34,6 @@ typedef struct CgCtx CgCtx;
  * ts and file_scope must outlive the context.
  */
 CgCtx *cg_ctx_new(TyStore *ts, Scope *file_scope);
-
-void cg_set_sys_dirs(CgCtx *ctx, StrArr *dirs);
-const StrArr *cg_needed_includes(const CgCtx *ctx);
 void   cg_ctx_free(CgCtx *ctx);
 
 /**
