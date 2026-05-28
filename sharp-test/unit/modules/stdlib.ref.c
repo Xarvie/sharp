@@ -228,22 +228,28 @@ typedef struct _G_fpos64_t {
 } __fpos64_t;
 
 #line 4 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/types/__FILE.h"
+struct _IO_FILE;
 
 #line 5 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/types/__FILE.h"
 typedef struct _IO_FILE __FILE;
 
 #line 4 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/types/FILE.h"
+struct _IO_FILE;
 
 #line 7 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/types/FILE.h"
 typedef struct _IO_FILE FILE;
 
 #line 37 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/types/struct_FILE.h"
+struct _IO_FILE;
 
 #line 38 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/types/struct_FILE.h"
+struct _IO_marker;
 
 #line 39 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/types/struct_FILE.h"
+struct _IO_codecvt;
 
 #line 40 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/types/struct_FILE.h"
+struct _IO_wide_data;
 
 #line 45 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/types/struct_FILE.h"
 typedef void _IO_lock_t;

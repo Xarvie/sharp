@@ -7810,6 +7810,15 @@ static void cg_emit_decl_sharp(CgCtx *ctx, AstNode *d) {
         if (d->u.struct_def.is_class && has_body && enm) {
             cg_printf(ctx, "typedef %s %s %s;\n", kw, enm, enm);
         }
+        /* Forward declaration (e.g., `struct tm;`) — must be emitted so
+         * that functions using `struct tm *` parameters compile correctly. */
+        if (!has_body) {
+            if (enm)
+                cg_printf(ctx, "%s %s;\n", kw, enm);
+            else
+                cg_printf(ctx, "%s %s;\n", kw, nm);
+            break;
+        }
         if (has_body) {
             cg_printf(ctx, "%s %s {\n", kw, enm);
             for (size_t i = 0; i < d->u.struct_def.fields.len; i++) {
