@@ -1,0 +1,163 @@
+/*
+ * libringbuf — 零分配环形缓冲区 (基于用户内存, 无 malloc)
+ *
+ * 设计原则:
+ *   - ringbuf_t 是栈值类型, 用户自备 backing buffer (栈/静态/堆)
+ *   - 零堆分配, 零内部拷贝 — 操作期内不 malloc, 不 memcpy 环形数据
+ *   - reserve/commit 模式直达 socket recv 的 scatter 空间, 省一次拷贝
+ *   - peek/consume 模式直达 socket send, 同理零拷贝
+ *   - 便利函数 write/read 内部处理 wrap 和拷贝, 小数据直接用
+ *   - 线程不安全 — 单个 ringbuf 仅供单线程或外部加锁使用
+ *
+ * 典型用法 (零拷贝 recv):
+ *   char mem[65536];
+ *   ringbuf_t rb = ringbuf_make(mem, sizeof(mem));
+ *
+ *   void* wr;
+ *   size_t n = ringbuf_reserve(&rb, &wr, ringbuf_space(&rb));
+ *   ssize_t got = recv(fd, wr, n, 0);
+ *   if (got > 0) ringbuf_commit(&rb, (size_t)got);
+ *
+ * 典型用法 (零拷贝 send):
+ *   const void* rd;
+ *   size_t n = ringbuf_peek(&rb, &rd);
+ *   ssize_t sent = send(fd, rd, n, 0);
+ *   if (sent > 0) ringbuf_consume(&rb, (size_t)sent);
+ */
+
+#ifndef SHARP_RINGBUF_H
+#define SHARP_RINGBUF_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ========================================================================
+ * 值类型
+ * ======================================================================== */
+
+typedef struct {
+    uint8_t* buf;   /* user-provided backing memory */
+    size_t   cap;   /* total capacity */
+    size_t   rpos;  /* read cursor: next byte to read */
+    size_t   wpos;  /* write cursor: next byte to write */
+} ringbuf_t;
+
+/* ========================================================================
+ * 初始化
+ * ======================================================================== */
+
+/**
+ * 从用户提供的 backing buffer 创建 ring buffer.
+ * buf: 用户内存, cap: 字节数. cap 必须 >= 2 (cap=1 无法区分空/满).
+ *
+ * 调用者负责 buf 的生命周期 — ringbuf 不会释放它.
+ */
+ringbuf_t ringbuf_make(void* buf, size_t cap);
+
+/* ========================================================================
+ * 查询
+ * ======================================================================== */
+
+/** 当前可读字节数. */
+size_t ringbuf_len(const ringbuf_t* rb);
+
+/** 当前可写字节数 (= cap - len - 1, 保留 1 字节区分空/满). */
+size_t ringbuf_space(const ringbuf_t* rb);
+
+/** 总容量 (等于初始化时传入的 cap). */
+size_t ringbuf_cap(const ringbuf_t* rb);
+
+/** 是否为空 (无可读数据). */
+bool   ringbuf_empty(const ringbuf_t* rb);
+
+/** 是否已满 (无可写空间). */
+bool   ringbuf_full(const ringbuf_t* rb);
+
+/** 清空所有数据 (重置读写游标). */
+void   ringbuf_clear(ringbuf_t* rb);
+
+/* ========================================================================
+ * 零拷贝写入: reserve → fill → commit
+ *
+ * reserve 返回可写入的 连续 空间 (不含 wrap 后的尾部).
+ * 如果 need 大于连续空间, 只返回连续部分 — 调用者可分两次 reserve.
+ *
+ * 警告: reserve/commit 与 write 互斥. 不要在 reserve 尚未 commit 期间
+ * 调用 write, 否则 wpos 错乱导致数据损坏.
+ * ======================================================================== */
+
+/**
+ * 预留连续写入空间.
+ * need: 期望字节数. wr: 出参, 指向可写入的连续区域起始.
+ * 返回实际预留字节数 (<= need, 可能因 wrap 限制).
+ */
+size_t ringbuf_reserve(ringbuf_t* rb, void** wr, size_t need);
+
+/**
+ * 提交已写入的数据. n 必须 <= 最近一次 reserve 的返回值.
+ * 每次 reserve 后只能 commit 一次 (不可累积).
+ * 无需显式"取消": 不 commit = wpos 不动, 下次 reserve 返回同一段空间.
+ */
+void ringbuf_commit(ringbuf_t* rb, size_t n);
+
+/* ========================================================================
+ * 零拷贝读取: peek → process → consume
+ *
+ * peek 返回可读取的 连续 数据 (不含 wrap 后的尾部).
+ * 调用者不应修改 rd 指向的数据 (实现中 rd 直接指向 ring buffer 内部).
+ *
+ * 警告: peek/consume 与 read / discard 互斥. 不要在 peek 尚未 consume
+ * 期间调用 read 或 discard, 否则 rpos 错乱导致数据损坏.
+ * ======================================================================== */
+
+/**
+ * 获取可读数据的连续视图.
+ * rd: 出参, 指向可读数据的起始.
+ * 返回实际可 peek 的字节数 (可能因 wrap 而小于 ringbuf_len).
+ */
+size_t ringbuf_peek(const ringbuf_t* rb, const void** rd);
+
+/**
+ * 消费已处理的字节. n 必须 <= 最近一次 peek 的返回值.
+ * 每次 peek 后只能 consume 一次 (不可累积).
+ * 无需显式"取消": 不 consume = 数据保留, 下次 peek 返回相同数据.
+ */
+void ringbuf_consume(ringbuf_t* rb, size_t n);
+
+/**
+ * 跳过 (丢弃) ring buffer 中的 n 字节而不读取.
+ * 正确处理 wrap — 可跨越环形边界, 一次性丢弃所有可读字节.
+ * n 超过可读字节时丢弃全部.
+ */
+void ringbuf_discard(ringbuf_t* rb, size_t n);
+
+/* ========================================================================
+ * 便利函数: 拷贝式读写 (内部处理 wrap, 小数据直接用)
+ *
+ * write / read 各自与对应的零拷贝路径互斥:
+ *   write 与 reserve/commit 互斥
+ *   read  与 peek/consume/discard 互斥
+ * ======================================================================== */
+
+/**
+ * 向 ring buffer 写入数据.
+ * 返回实际写入字节数: 空间充足时 = len, 不足时写满可用空间 (可能为 0).
+ */
+size_t ringbuf_write(ringbuf_t* rb, const void* src, size_t len);
+
+/**
+ * 从 ring buffer 读取数据.
+ * 返回实际读取字节数: 数据充足时 = len, 不足时读尽可用数据 (可能为 0).
+ */
+size_t ringbuf_read(ringbuf_t* rb, void* dst, size_t len);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SHARP_RINGBUF_H */

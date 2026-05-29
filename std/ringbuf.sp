@@ -1,0 +1,148 @@
+/*
+ * ringbuf.c — 零分配环形缓冲区实现
+ *
+ * 实现要点:
+ *   - 所有指针与游标运算均为 O(1), 无分支预测惩罚
+ *   - reserve/peek 区分连续与 wrap 两种情况, 返回连续段长度
+ *   - write/read/discard 内部 memcpy 处理跨 wrap 双段拷贝
+ *   - ringbuf_make 自动 clamp cap >= 1, 防御 cap=0 导致 space() 溢出
+ */
+
+#include "ringbuf.sph"
+#include <string.h>
+
+/* ========================================================================
+ * Init
+ * ======================================================================== */
+
+ringbuf_t ringbuf_make(void* buf, size_t cap) {
+    ringbuf_t rb;
+    rb.buf  = (uint8_t*)buf;
+    rb.cap  = cap < 2 ? 2 : cap;
+    rb.rpos = 0;
+    rb.wpos = 0;
+    return rb;
+}
+
+/* ========================================================================
+ * Queries
+ * ======================================================================== */
+
+size_t ringbuf_len(const ringbuf_t* rb) {
+    if (rb->wpos >= rb->rpos)
+        return rb->wpos - rb->rpos;
+    return rb->cap - rb->rpos + rb->wpos;
+}
+
+size_t ringbuf_space(const ringbuf_t* rb) {
+    return rb->cap - ringbuf_len(rb) - 1;
+}
+
+size_t ringbuf_cap(const ringbuf_t* rb) {
+    return rb->cap;
+}
+
+bool ringbuf_empty(const ringbuf_t* rb) {
+    return rb->rpos == rb->wpos;
+}
+
+bool ringbuf_full(const ringbuf_t* rb) {
+    return ringbuf_space(rb) == 0;
+}
+
+void ringbuf_clear(ringbuf_t* rb) {
+    rb->rpos = 0;
+    rb->wpos = 0;
+}
+
+/* ========================================================================
+ * Zero-copy write: reserve / commit
+ * ======================================================================== */
+
+size_t ringbuf_reserve(ringbuf_t* rb, void** wr, size_t need) {
+    size_t space = ringbuf_space(rb);
+    if (need > space) need = space;
+    if (need == 0) { *wr = NULL; return 0; }
+
+    *wr = rb->buf + rb->wpos;
+
+    if (rb->wpos < rb->rpos) {
+        /* All free space is contiguous before rpos */
+        return need;
+    } else {
+        /* Free space wraps: contiguous = [wpos, cap-1] */
+        size_t contig = rb->cap - rb->wpos;
+        return need < contig ? need : contig;
+    }
+}
+
+void ringbuf_commit(ringbuf_t* rb, size_t n) {
+    rb->wpos = (rb->wpos + n) % rb->cap;
+}
+
+/* ========================================================================
+ * Zero-copy read: peek / consume
+ * ======================================================================== */
+
+size_t ringbuf_peek(const ringbuf_t* rb, const void** rd) {
+    size_t len = ringbuf_len(rb);
+    if (len == 0) { *rd = NULL; return 0; }
+
+    *rd = rb->buf + rb->rpos;
+
+    if (rb->rpos + len > rb->cap) {
+        /* Data wraps: return first contiguous segment */
+        return rb->cap - rb->rpos;
+    }
+    return len;
+}
+
+void ringbuf_consume(ringbuf_t* rb, size_t n) {
+    rb->rpos = (rb->rpos + n) % rb->cap;
+}
+
+/* ========================================================================
+ * Discard
+ * ======================================================================== */
+
+void ringbuf_discard(ringbuf_t* rb, size_t n) {
+    size_t len = ringbuf_len(rb);
+    if (n > len) n = len;
+    rb->rpos = (rb->rpos + n) % rb->cap;
+}
+
+/* ========================================================================
+ * Convenience: copy-based write / read
+ * ======================================================================== */
+
+size_t ringbuf_write(ringbuf_t* rb, const void* src, size_t len) {
+    size_t space = ringbuf_space(rb);
+    if (len > space) len = space;
+    if (len == 0) return 0;
+
+    size_t end = rb->cap - rb->wpos;
+    if (len <= end) {
+        memcpy(rb->buf + rb->wpos, src, len);
+    } else {
+        memcpy(rb->buf + rb->wpos, src, end);
+        memcpy(rb->buf, (const uint8_t*)src + end, len - end);
+    }
+    rb->wpos = (rb->wpos + len) % rb->cap;
+    return len;
+}
+
+size_t ringbuf_read(ringbuf_t* rb, void* dst, size_t len) {
+    size_t avail = ringbuf_len(rb);
+    if (len > avail) len = avail;
+    if (len == 0) return 0;
+
+    size_t end = rb->cap - rb->rpos;
+    if (len <= end) {
+        memcpy(dst, rb->buf + rb->rpos, len);
+    } else {
+        memcpy(dst, rb->buf + rb->rpos, end);
+        memcpy((uint8_t*)dst + end, rb->buf, len - end);
+    }
+    rb->rpos = (rb->rpos + len) % rb->cap;
+    return len;
+}

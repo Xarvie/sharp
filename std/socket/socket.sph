@@ -1,0 +1,412 @@
+/*
+ * libsocket — Sharp 语言标准库底层 (纯 C, 值类型, 零堆分配)
+ *
+ * 设计原则:
+ *   - socket_t 是 intptr_t 值句柄, 不 malloc
+ *   - socket_addr_t 是栈上 128B 透明结构体, 不 malloc
+ *   - 所有错误就地返回 (出参或返回值), 无全局 errno
+ *   - ssize_t/ptrdiff_t 承载字节数, 不做 int 截断
+ *   - 一个 .h + 一个 .c, 平台差异封闭在 .c 内
+ *
+ * 用法:
+ *   socket_init();
+ *
+ *   int err = 0;
+ *   socket_t s = socket_create(SOCKET_AF_INET, SOCKET_STREAM, 0, &err);
+ *
+ *   socket_addr_t addr;
+ *   socket_addr_set_ipv4(&addr, "127.0.0.1", 9, 8080);  // ip 走 ptr+len, 无 \0
+ *   socket_connect(s, &addr);
+ *
+ *   socket_io_result_t r = socket_send(s, "hello", 5, 0);
+ *   // r.nbytes >= 0 → 成功; r.nbytes < 0 → 失败, r.err = 错误码
+ *
+ *   socket_close(s);
+ *   socket_cleanup();
+ */
+
+#ifndef SHARP_SOCKET_H
+#define SHARP_SOCKET_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ========================================================================
+ * 值类型
+ * ======================================================================== */
+
+/** Opaque socket handle. Value type, zero-cost copy. */
+typedef intptr_t socket_t;
+
+#define SOCKET_INVALID ((socket_t)-1)
+
+/**
+ * Opaque network address. Stack-allocatable, 128 bytes.
+ * Same size as struct sockaddr_storage; fits IPv4 / IPv6.
+ */
+typedef struct {
+    uint64_t opaque[16];
+} socket_addr_t;
+
+/* ========================================================================
+ * I/O 结果 (就地错误返回, 无需 TLS/errno)
+ * ======================================================================== */
+
+typedef struct {
+    ptrdiff_t nbytes;  /* >= 0: 成功传输字节数; < 0: 失败, 见 err */
+    int       err;     /* 0 = OK; > 0 = 错误码 */
+} socket_io_result_t;
+
+/* ========================================================================
+ * Address families
+ * ======================================================================== */
+
+#define SOCKET_AF_INET  1  /* IPv4 */
+#define SOCKET_AF_INET6 2  /* IPv6 */
+#define SOCKET_AF_UNIX  3  /* Unix domain */
+
+/* ========================================================================
+ * Socket types
+ * ======================================================================== */
+
+#define SOCKET_STREAM 1  /* TCP */
+#define SOCKET_DGRAM  2  /* UDP */
+
+/* ========================================================================
+ * Protocol (0 = 按 type 自动选择默认协议)
+ * ======================================================================== */
+
+#define SOCKET_IPPROTO_TCP 6
+#define SOCKET_IPPROTO_UDP 17
+
+/* ========================================================================
+ * Shutdown
+ * ======================================================================== */
+
+#define SOCKET_SHUT_RD   0
+#define SOCKET_SHUT_WR   1
+#define SOCKET_SHUT_RDWR 2
+
+/* ========================================================================
+ * Message flags
+ * ======================================================================== */
+
+#define SOCKET_MSG_PEEK    0x01
+#define SOCKET_MSG_OOB     0x02
+#define SOCKET_MSG_WAITALL 0x04
+
+/* ========================================================================
+ * Constants
+ * ======================================================================== */
+
+/** Max IP string length (INET6_ADDRSTRLEN = 46). Use for stack buffers. */
+#define SOCKET_ADDR_STR_LEN 64  /* 46 covers standard IPv6; 64 safely fits scoped (e.g. fe80::1%eth0) */
+
+/* ========================================================================
+ * Error codes (> 0 = error; 0 = SOCKET_OK)
+ * ======================================================================== */
+
+#define SOCKET_OK              0
+#define SOCKET_ERR_UNKNOWN     1
+#define SOCKET_ERR_AGAIN       2   /* try again / would block */
+#define SOCKET_ERR_INTR        3   /* interrupted */
+#define SOCKET_ERR_BADF        4   /* bad fd */
+#define SOCKET_ERR_CONNRESET   5
+#define SOCKET_ERR_TIMEDOUT    6
+#define SOCKET_ERR_CONNREFUSED 7
+#define SOCKET_ERR_NOMEM       8
+#define SOCKET_ERR_INVAL       9
+#define SOCKET_ERR_NOTCONN     10
+#define SOCKET_ERR_ISCONN      11
+#define SOCKET_ERR_ADDRINUSE   12
+#define SOCKET_ERR_ADDRNOTAVAIL 13
+#define SOCKET_ERR_NETDOWN     14
+#define SOCKET_ERR_NETUNREACH  15
+#define SOCKET_ERR_HOSTUNREACH 16
+#define SOCKET_ERR_ACCESS      17
+#define SOCKET_ERR_MFILE       18
+#define SOCKET_ERR_NOTSOCK     19
+#define SOCKET_ERR_PROTONOSUPPORT 20
+#define SOCKET_ERR_OPNOTSUPP   21
+#define SOCKET_ERR_AFNOSUPPORT 22
+#define SOCKET_ERR_INPROGRESS  23
+#define SOCKET_ERR_ALREADY     24
+#define SOCKET_ERR_MSGSIZE     25
+#define SOCKET_ERR_HOSTDOWN    26
+#define SOCKET_ERR_RESOLVE     27  /* DNS resolution failed */
+#define SOCKET_ERR_CONNABORTED 28
+#define SOCKET_ERR_PIPE        29
+#define SOCKET_ERR_NETRESET    30
+#define SOCKET_ERR_CANCELED    31
+
+/* ========================================================================
+ * 错误码 → 字符串
+ * ======================================================================== */
+
+const char* socket_strerror(int err);
+
+/* ========================================================================
+ * Library lifecycle (内部调用; POSIX 下为空操作)
+ * ======================================================================== */
+
+/** 进程启动时调用一次. Windows 下初始化 WinSock. 返回 0 / err. */
+int  socket_init(void);
+
+/** 进程退出前调用一次. 返回 0 / err. */
+int  socket_cleanup(void);
+
+/* ========================================================================
+ * Address — 全部栈操作, 无 malloc
+ * ======================================================================== */
+
+/**
+ * 设置 IPv4 地址.
+ * ip = 点分十进制, 如 "192.168.1.1". 不需要 \0, 走 ptr + len.
+ * 返回 0 / err.
+ */
+int  socket_addr_set_ipv4(socket_addr_t* addr, const char* ip, size_t ip_len,
+                          uint16_t port);
+
+/**
+ * 设置 IPv6 地址.
+ * ip = 冒号十六进制, 如 "::1". 不需要 \0, 走 ptr + len.
+ * 返回 0 / err.
+ */
+int  socket_addr_set_ipv6(socket_addr_t* addr, const char* ip, size_t ip_len,
+                          uint16_t port);
+
+/**
+ * 绑定到任意本地地址 (INADDR_ANY / IN6ADDR_ANY).
+ * family: SOCKET_AF_INET 或 SOCKET_AF_INET6.
+ * 返回 0 / err.
+ */
+int  socket_addr_set_any(socket_addr_t* addr, int family, uint16_t port);
+
+/**
+ * 解析域名/IP 字符串, 填充 addr.
+ * host: 域名 ("example.com") 或 IP 字符串. 不需要 \0, 走 ptr + len.
+ * family: SOCKET_AF_INET, SOCKET_AF_INET6, 或 0 (自动).
+ * 取 getaddrinfo 第一个结果.
+ * 返回 0 / err.
+ */
+int  socket_addr_resolve(socket_addr_t* addr, const char* host, size_t host_len,
+                         uint16_t port, int family);
+
+/**
+ * 从 IP 字符串 + 端口直接构造地址, 不经过 DNS 解析.
+ * ip:    "192.168.1.1" 或 "::1" 等 IP 字符串. 不需要 \0, 走 ptr + len.
+ * ip_len: IP 字符串长度. family 必须显式指定 SOCKET_AF_INET 或 SOCKET_AF_INET6.
+ * 返回 0 / err.
+ */
+int  socket_addr_from_ip_port(socket_addr_t* addr,
+                              const char* ip, size_t ip_len,
+                              uint16_t port, int family);
+
+/**
+ * 设置 Unix domain socket 地址 (AF_UNIX).
+ * path: 文件系统路径. 不需要 \0, 走 ptr + len.
+ * path_len: 路径长度, 最大 sizeof(sockaddr_un.sun_path)-1 (约 107 字节).
+ * 返回 0 / err.
+ */
+int  socket_addr_set_unix(socket_addr_t* addr,
+                          const char* path, size_t path_len);
+
+/**
+ * 将地址转为 IP 字符串, 写入 buf. 不追加 \0.
+ * 成功返回实际写入字节数 (>0), 失败返回负数错误码 (<0).
+ * 写入长度绝不会超过 SOCKET_ADDR_STR_LEN.
+ */
+ptrdiff_t socket_addr_get_ip(const socket_addr_t* addr, char* buf, size_t len);
+
+/** 获取端口号 (主机字节序). */
+uint16_t socket_addr_get_port(const socket_addr_t* addr);
+
+/** 获取地址族 (SOCKET_AF_INET / SOCKET_AF_INET6 / SOCKET_AF_UNIX). */
+int  socket_addr_get_family(const socket_addr_t* addr);
+
+/** 比较两个地址是否完全相同 (family + addr + port). */
+int  socket_addr_equal(const socket_addr_t* a, const socket_addr_t* b);
+
+/**
+ * 将地址格式化为 "ip:port" 字符串, 写入 buf.
+ * len: buf 大小. 返回实际写入字节数 (>0), 负数错误 (<0).
+ */
+ptrdiff_t socket_addr_to_string(const socket_addr_t* addr, char* buf, size_t len);
+
+/**
+ * 从 "host:port" 或 "[ipv6]:port" 字符串一键解析地址.
+ * str: "127.0.0.1:8080" | "[::1]:9090" | "localhost:3000" | "example.com:443"
+ * 不含端口时 port 默认为 0. 内部自动识别 IPv4/IPv6 格式并决定是否走 DNS.
+ * 返回 0 / err.
+ */
+int  socket_addr_parse(socket_addr_t* addr, const char* str, size_t len,
+                       int family);
+
+/**
+ * 解析域名/IP 返回所有地址 (用于 dual-stack / Happy Eyeballs).
+ * addrs: 出参数组, 调用者分配. max_addrs: 数组容量.
+ * out_count: 实际写入数量. 返回 0 / err.
+ */
+int  socket_addr_resolve_all(socket_addr_t* addrs, size_t max_addrs,
+                             size_t* out_count,
+                             const char* host, size_t host_len,
+                             uint16_t port, int family);
+
+/* ========================================================================
+ * Address 分类
+ * ======================================================================== */
+
+int socket_addr_is_loopback(const socket_addr_t* addr);
+int socket_addr_is_multicast(const socket_addr_t* addr);
+int socket_addr_is_unspecified(const socket_addr_t* addr);
+int socket_addr_is_linklocal(const socket_addr_t* addr);
+int socket_addr_is_private(const socket_addr_t* addr);
+
+/** FNV-1a 64-bit hash, 用于将 socket_addr_t 作为哈希表 key. */
+uint64_t socket_addr_hash(const socket_addr_t* addr);
+
+/* ========================================================================
+ * Socket — 值句柄, 无 malloc
+ * ======================================================================== */
+
+/**
+ * 创建 socket.
+ * protocol = 0 则根据 type 自动选择.
+ * 成功返回有效 socket_t, *out_err = 0.
+ * 失败返回 SOCKET_INVALID, *out_err = 错误码.
+ */
+socket_t socket_create(int family, int type, int protocol, int* out_err);
+
+/**
+ * 关闭 socket.
+ * 返回 0 / err.
+ */
+int  socket_close(socket_t sock);
+
+/* ========================================================================
+ * 操作
+ * ======================================================================== */
+
+int  socket_bind(socket_t sock, const socket_addr_t* addr);
+int  socket_listen(socket_t sock, int backlog);
+
+/**
+ * 接受连接.
+ * peer 可为 NULL.
+ * 成功返回新 socket_t, *out_err = 0.
+ * 失败返回 SOCKET_INVALID, *out_err = 错误码.
+ */
+socket_t socket_accept(socket_t sock, socket_addr_t* peer, int* out_err);
+
+int  socket_connect(socket_t sock, const socket_addr_t* addr);
+int  socket_shutdown(socket_t sock, int how);
+
+/* ========================================================================
+ * I/O — 就地错误返回
+ * ======================================================================== */
+
+socket_io_result_t socket_recv(socket_t sock, void* buf, size_t len, int flags);
+socket_io_result_t socket_send(socket_t sock, const void* buf, size_t len, int flags);
+socket_io_result_t socket_recvfrom(socket_t sock, void* buf, size_t len,
+                                    int flags, socket_addr_t* from);
+socket_io_result_t socket_sendto(socket_t sock, const void* buf, size_t len,
+                                  int flags, const socket_addr_t* to);
+
+/* ========================================================================
+ * Socket 选项
+ * ======================================================================== */
+
+int socket_set_reuseaddr(socket_t sock, int enable);
+int socket_set_reuseport(socket_t sock, int enable);
+int socket_set_keepalive(socket_t sock, int enable);
+int socket_set_nodelay(socket_t sock, int enable);
+int socket_set_nonblock(socket_t sock, int enable);
+int socket_set_ipv6only(socket_t sock, int enable);
+int socket_set_recv_timeout(socket_t sock, int ms);
+int socket_set_send_timeout(socket_t sock, int ms);
+int socket_set_rcvbuf(socket_t sock, int bytes);
+int socket_set_sndbuf(socket_t sock, int bytes);
+
+/**
+ * TCP_DEFER_ACCEPT (Linux) / SO_ACCEPTFILTER (BSD).
+ * 延迟 accept 直至首个数据字节到达，减少惊群.
+ * enable: 1 = 开启, 0 = 关闭.
+ * 返回 0 / err. 不支持的平台静默返回 SOCKET_ERR_OPNOTSUPP.
+ */
+int socket_set_defer_accept(socket_t sock, int enable);
+
+/**
+ * 获取 socket 待处理错误 (getsockopt SO_ERROR).
+ * 异步 connect 后用于确认连接是否真正成功:
+ *   POLLER_OUT 触发 → socket_get_error(sock) → 返回 0 = 成功, 非 0 = 失败码.
+ *
+ * 返回 SOCKET_OK (0) / 错误码 (>0). 注意: 读取后内核会清除 SO_ERROR.
+ */
+int  socket_get_error(socket_t sock);
+
+/** 返回最近一次 socket syscall 失败的错误码. 跨平台封装 errno / WSAGetLastError. */
+int  socket_last_error(void);
+
+/**
+ * 设置 SO_LINGER 选项, 用于优雅关闭.
+ * onoff=0: 禁用 (默认), close() 立即返回, 内核继续尝试发送缓冲数据.
+ * onoff=1: 启用, close() 最多阻塞 seconds 秒等待数据发送完毕;
+ *          超时返回后内核丢弃缓冲区数据.
+ * 注意: 推荐先 tcp_shutdown_write() 发送 FIN, 再设 SO_LINGER, 最后 close.
+ */
+int  socket_set_linger(socket_t sock, int onoff, int seconds);
+
+/**
+ * SO_BROADCAST — 允许 UDP 发送广播包.
+ */
+int socket_set_broadcast(socket_t sock, int enable);
+
+/**
+ * TCP_CORK (Linux) / TCP_NOPUSH (BSD) — 发送合并, 减少小包.
+ * 配合 sendfile/writev 实现零拷贝 HTTP 响应 (header+body 合并).
+ * 返回 0 / err. 不支持的平台静默返回 SOCKET_ERR_OPNOTSUPP.
+ */
+int socket_set_cork(socket_t sock, int enable);
+
+/**
+ * TCP keep-alive 调优 (仅 Linux/BSD 有效).
+ * idle:     空闲多少秒后开始探测 (TCP_KEEPIDLE). 默认 7200.
+ * interval: 探测间隔秒数 (TCP_KEEPINTVL). 默认 75.
+ * count:    探测失败次数阈值 (TCP_KEEPCNT). 默认 9.
+ * 返回 0 / err. 不支持的平台静默返回 SOCKET_ERR_OPNOTSUPP.
+ */
+int socket_set_keepalive_idle(socket_t sock, int seconds);
+int socket_set_keepalive_interval(socket_t sock, int seconds);
+int socket_set_keepalive_count(socket_t sock, int count);
+
+/**
+ * IP_TOS (Type of Service) — 设置 DSCP/ECN 值用于 QoS.
+ * tos: 8-bit 值 (高 6 位 DSCP + 低 2 位 ECN).
+ * 返回 0 / err.
+ */
+int socket_set_tos(socket_t sock, int tos);
+
+/**
+ * IP_TTL (单播 TTL) — 设置出站包跳数限制.
+ * ttl: 0-255. 返回 0 / err.
+ */
+int socket_set_ttl(socket_t sock, int ttl);
+
+/* ========================================================================
+ * Socket 选项 — 读取 (getter)
+ * ======================================================================== */
+
+int socket_get_recv_timeout(socket_t sock, int* out_ms);
+int socket_get_send_timeout(socket_t sock, int* out_ms);
+int socket_get_rcvbuf(socket_t sock, int* out_bytes);
+int socket_get_sndbuf(socket_t sock, int* out_bytes);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SHARP_SOCKET_H */
