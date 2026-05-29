@@ -64,6 +64,8 @@ static bool ty_compound_eq(const Type *a, const Type *b) {
         for (size_t i = 0; i < a->u.struct_.nargs; i++)
             if (a->u.struct_.args[i] != b->u.struct_.args[i]) return false;
         return true;
+    case TY_ENUM:
+        return a->u.enum_.name == b->u.enum_.name;
     case TY_FUNC:
         if (a->u.func.ret    != b->u.func.ret)    return false;
         if (a->u.func.nparams != b->u.func.nparams) return false;
@@ -246,6 +248,26 @@ Type *ty_struct_type(TyStore *ts, const char *name,
     }
     if (ts->compound_len == ts->compound_cap) {
         size_t nc = ts->compound_cap ? ts->compound_cap * 2 : 32;
+        ts->compound = realloc(ts->compound, nc * sizeof *ts->compound);
+        if (!ts->compound) { perror("sharp-fe type"); abort(); }
+        ts->compound_cap = nc;
+    }
+    ts->compound[ts->compound_len++] = t;
+    return t;
+}
+Type *ty_enum_type(TyStore *ts, const char *name, AstNode *decl) {
+    const char *iname = ts_intern_str(ts, name);
+    Type candidate = { .kind = TY_ENUM, .u.enum_ = { iname, decl } };
+    for (size_t i = 0; i < ts->compound_len; i++) {
+        if (ty_compound_eq(ts->compound[i], &candidate)) {
+            return ts->compound[i];
+        }
+    }
+    Type *t = malloc(sizeof *t);
+    if (!t) { perror("sharp-fe type"); abort(); }
+    *t = candidate;
+    if (ts->compound_len == ts->compound_cap) {
+        size_t nc = ts->compound_cap ? ts->compound_cap * 2 : 16;
         ts->compound = realloc(ts->compound, nc * sizeof *ts->compound);
         if (!ts->compound) { perror("sharp-fe type"); abort(); }
         ts->compound_cap = nc;
@@ -801,10 +823,32 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
                     return ty_struct_type(ts, name,
                                          NULL, 0, sym->decl);
                 }
+                /* typedef enum { ... } Alias; — the target is an anonymous
+                 * AST_ENUM_DEF.  We must preserve the typedef alias name as
+                 * the enum type identity, otherwise function pointer typedefs
+                 * using `Alias*` will resolve to `int*` instead of
+                 * `enum Alias*`. */
+                if (target && target->kind == AST_ENUM_DEF) {
+                    const char *enum_name = target->u.enum_def.name;
+                    if (!enum_name || !enum_name[0])
+                        enum_name = name; /* use typedef alias as tag */
+                    return ty_enum_type(ts, enum_name, target);
+                }
                 return ty_from_ast(ts, sym->decl->u.typedef_decl.target,
                                    scope, diags);
             }
             if (sym->decl && sym->decl->kind == AST_ENUM_DEF) {
+                /* Preserve enum tag identity so that enum* and int* are
+                 * distinct pointer types.  The C compiler sees the original
+                 * `enum Tag` keyword via round-tripped definitions, but the
+                 * frontend must keep enum types separate for type matching
+                 * in function pointers and assignments. */
+                const char *enum_name = sym->decl->u.enum_def.name;
+                if (enum_name && enum_name[0])
+                    return ty_enum_type(ts, enum_name, sym->decl);
+                /* Anonymous enum with no tag — still needs a distinct type.
+                 * Use the typedef alias name if available, otherwise fall back
+                 * to int for backwards compatibility. */
                 return ty_int(ts);
             }
             /* transparent union — return first member's type. */
@@ -887,10 +931,15 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
         return t;
     }
 
-    case AST_ENUM_DEF:
+    case AST_ENUM_DEF: {
         /* Inline enum used as a type (e.g. typedef enum{...} OpCode stores
-         * AST_ENUM_DEF directly as typedef target). Enums are int-sized. */
+         * AST_ENUM_DEF directly as typedef target). Preserve enum identity. */
+        const char *enum_name = node->u.enum_def.name;
+        if (enum_name && enum_name[0])
+            return ty_enum_type(ts, enum_name, (AstNode *)node);
+        /* Anonymous enum without a tag — treat as int for backwards compat */
         return ty_int(ts);
+    }
 
     default:
         if (diags)
@@ -911,7 +960,7 @@ const char *ty_kind_name(TyKind k) {
         "char","short","int","long","long long",
         "unsigned char","unsigned short","unsigned int","unsigned long","unsigned long long",
         "float","double","long double",
-        "ptr","array","const","atomic","func","struct","param"
+        "ptr","array","const","atomic","func","struct","enum","param"
     };
     if ((unsigned)k < TY_COUNT) return names[k];
     return "?";
@@ -944,6 +993,9 @@ void ty_print(const Type *t, FILE *fp) {
             }
             fprintf(fp, ">");
         }
+        break;
+    case TY_ENUM:
+        fprintf(fp, "enum %s", t->u.enum_.name ? t->u.enum_.name : "(anon)");
         break;
     case TY_PARAM:
         fprintf(fp, "%s", t->u.param.name);
@@ -991,6 +1043,8 @@ Type *ty_subst(TyStore *ts, Type *t,
             free(na);
             return r;
         }
+        return t;
+    case TY_ENUM:
         return t;
     default: return t;
     }

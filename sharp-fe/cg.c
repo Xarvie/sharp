@@ -1168,6 +1168,29 @@ static void cg_type(CgCtx *ctx, Type *t) {
             cg_puts(ctx, nm);
         }
         break;
+    case TY_ENUM:
+        /* Enum type: emit `enum Tag` to preserve enum identity in C output.
+         * This ensures function pointer typedefs like `typedef void (*fp)(MyEnum*)`
+         * produce `void (*)(enum MyEnum *)` instead of `void (*)(int *)`,
+         * which would be incompatible with `void func(MyEnum* p)`.
+         * For anonymous enums with typedef alias, emit bare name (the typedef alias). */
+        if (t->u.enum_.name) {
+            /* Check if the enum has a typedef alias — prefer that over `enum Tag`. */
+            if (ctx->file_scope) {
+                Symbol *sym = scope_lookup(ctx->file_scope, t->u.enum_.name);
+                if (sym && sym->decl && sym->decl->kind == AST_TYPEDEF_DECL) {
+                    /* Found typedef alias: use the typedef name directly. */
+                    cg_puts(ctx, t->u.enum_.name);
+                    break;
+                }
+            }
+            /* Named enum without typedef alias: emit `enum Tag`. */
+            cg_puts(ctx, "enum ");
+            cg_puts(ctx, t->u.enum_.name);
+        } else {
+            cg_puts(ctx, "int");
+        }
+        break;
     case TY_PARAM:
         /* During generic function specialization, substitute concrete type. */
         for (size_t _i = 0; _i < ctx->ngp; _i++) {
@@ -5106,6 +5129,10 @@ static void cgb_mangle_type(CgSB *sb, Type *t) {
             cgb_mangle_type(sb, t->u.struct_.args[i]);
         }
         break;
+    case TY_ENUM:
+        cgb_puts(sb, "E");
+        cgb_puts(sb, t->u.enum_.name);
+        break;
     case TY_PARAM: cgb_puts(sb, t->u.param.name); break;
     default:       cgb_printf(sb, "T%d", t->kind); break;
     }
@@ -5155,6 +5182,8 @@ static Type *subst_type(TyStore *ts, Type *t,
             free(na);
             return r;
         }
+        return t;
+    case TY_ENUM:
         return t;
     default: return t;
     }

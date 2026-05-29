@@ -45,6 +45,7 @@ typedef enum {
     TY_ATOMIC,     /* _Atomic(T)  (C11 atomic qualifier)                    */
     TY_FUNC,       /* ret(params…)  — not interned in Phase 5             */
     TY_STRUCT,     /* named struct, may carry generic args                 */
+    TY_ENUM,       /* named enum tag — preserves enum identity             */
     TY_PARAM,      /* unbound generic parameter T                         */
     TY_COUNT
 } TyKind;
@@ -75,6 +76,11 @@ struct Type {
             size_t       nargs;
             AstNode     *decl;           /* originating AstNode (may be NULL) */
         } struct_;
+        /* TY_ENUM */
+        struct {
+            const char  *name;           /* interned enum tag name           */
+            AstNode     *decl;           /* originating AST_ENUM_DEF node    */
+        } enum_;
         /* TY_PARAM */
         struct { const char *name; } param;
         /* TY_LONGDOUBLE — extended-precision float with name for C emission */
@@ -120,6 +126,7 @@ Type *ty_atomic(TyStore *ts, Type *base);
 Type *ty_func(TyStore *ts, Type *ret, Type **params, size_t nparams);
 Type *ty_struct_type(TyStore *ts, const char *name,
                      Type **args, size_t nargs, AstNode *decl);
+Type *ty_enum_type(TyStore *ts, const char *name, AstNode *decl);
 Type *ty_param(TyStore *ts, const char *name);
 
 /* -------------------------------------------------------------------------

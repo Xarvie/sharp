@@ -447,6 +447,9 @@ def _compile_and_run(gen_i_path: str, zig_path: str, timeout: int = 30) -> Tuple
     return 0, "pass"
 
 
+BUGS_DIR_NAME = "bugs"
+
+
 def test_c_probe(c_path: str, sharpc_path: str, zig_path: str = "",
                  timeout: int = 30,
                  extra_args: Optional[List[str]] = None) -> Tuple[int, str]:
@@ -574,6 +577,98 @@ def run_all_probe_tests(
 
     # ── 非 verbose 模式：最终打印失败条目 ──
     if not verbose:
+        failures = [
+            (name, rc, detail)
+            for name, (rc, detail) in sorted(file_results.items())
+            if rc != 0
+        ]
+        if failures:
+            print()
+            for name, rc, detail in failures:
+                icon = "FAIL" if rc == 1 else "ERR "
+                print(f"  {icon}  {name}")
+                for line in detail.splitlines():
+                    print(f"         {line}")
+
+    return passed, failed, errors, file_results
+
+
+# ── Bugs 测试 (bugs/) ────────────────────────────────────────────────────
+
+def run_bugs_tests(
+    base_dir: Path,
+    sharpc_path: str,
+    zig_path: str = "",
+    verbose: bool = False,
+    timeout: int = 30,
+    jobs: int = 1,
+) -> Tuple[int, int, int, Dict[str, Tuple[int, str]]]:
+    """Run all bug regression tests from bugs/ directory.
+
+    Each .c file is:
+      1. compiled: sharpc -c bug.c → bug.c.gen.i
+      2. compiled with zig cc and linked
+    No .ref.c files are needed — we only check that sharpc can generate
+    valid C code that the backend compiler accepts.
+    """
+    bugs_dir = base_dir / BUGS_DIR_NAME
+    if not bugs_dir.is_dir():
+        print(f"  [bugs] {bugs_dir} not found, skipping.")
+        return 0, 0, 0, {}
+
+    c_files = sorted(
+        str(p.relative_to(bugs_dir))
+        for p in bugs_dir.glob("*.c")
+    )
+
+    if not c_files:
+        print("  [bugs] no .c files found, skipping.")
+        return 0, 0, 0, {}
+
+    total = len(c_files)
+    passed = failed = errors = 0
+    file_results: Dict[str, Tuple[int, str]] = {}
+
+    def _record(name: str, rc: int, detail: str):
+        nonlocal passed, failed, errors
+        file_results[name] = (rc, detail)
+        if rc == 0:
+            passed += 1
+        elif rc == 1:
+            failed += 1
+        else:
+            errors += 1
+
+    if verbose:
+        print(f"  [bugs] running {total} file(s) ...")
+    else:
+        print(f"  [bugs] running {total} file(s) ...", end="", flush=True)
+
+    max_workers = max(1, jobs)
+
+    def _test_one(name: str) -> Tuple[str, int, str]:
+        src = str(bugs_dir / name)
+        ok, tmp_out, err = _run_sharpc_codegen(src, sharpc_path, zig_path, timeout)
+        if not ok:
+            _cleanup_files(tmp_out)
+            return name, 2, err
+        rc, detail = _compile_and_run(tmp_out, zig_path, timeout)
+        _cleanup_files(tmp_out)
+        return name, rc, detail
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {
+            ex.submit(_test_one, f): f for f in c_files
+        }
+        for fut in as_completed(futures):
+            name, rc, detail = fut.result()
+            _record(name, rc, detail)
+            if verbose:
+                icon = "PASS" if rc == 0 else ("FAIL" if rc == 1 else "ERR ")
+                print(f"    {icon}  {name}")
+
+    if not verbose:
+        print(" done.")
         failures = [
             (name, rc, detail)
             for name, (rc, detail) in sorted(file_results.items())
@@ -814,6 +909,24 @@ def main():
     if not args.verbose:
         total_tests = sp_pass + sp_fail + sp_error
         print(f"  {sp_pass}/{total_tests} passed, {sp_fail} failed, {sp_error} errors")
+
+    # ── Bugs 测试 (bugs/) ──
+    print()
+    print("[bugs] Running bug regression tests (codegen + runtime) ...")
+    bugs_pass, bugs_fail, bugs_error, bugs_files = run_bugs_tests(
+        script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
+    )
+    results["bugs"] = {
+        "pass": bugs_pass, "fail": bugs_fail, "error": bugs_error,
+        "files": {k: list(v) for k, v in bugs_files.items()}
+    }
+    total_pass  += bugs_pass
+    total_fail  += bugs_fail
+    total_error += bugs_error
+
+    if not args.verbose:
+        total_bt = bugs_pass + bugs_fail + bugs_error
+        print(f"  {bugs_pass}/{total_bt} passed, {bugs_fail} failed, {bugs_error} errors")
 
     # ── Unit 测试 (unit/) ──
     print()
