@@ -7,7 +7,7 @@
 
 ## 总览统计
 
-| 分类目录 | .sp | .c (非 .ref.c) | .ref.c | .sph | 总计 |
+| 分类目录 | .ce | .c (非 .ref.i) | .ref.i | .he | 总计 |
 |----------|-----|---------------|--------|------|------|
 | c_superset_probes/ | 117 | 143 | 78 | 16 | 354 |
 | bugs/ | 5 | 0 | 0 | 0 | 5 |
@@ -28,233 +28,233 @@
 
 **核心泛型结构体** (12 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p101_generic_struct.sp | 单参数泛型结构体 | ✅ | `Vec<T>` 基础特化与字段访问 |
-| p103_generic_nested.sp | 双参数泛型结构体 | ✅ | `Pair<A, B>` 双类型参数 |
-| p104_generic_ptr.sp | 泛型含指针字段 | ❌ | `Box<T>` 含 T* 指针字段 |
-| p105_generic_method.sp | 泛型结构体方法 | ❌ | `Stack<T>` push/peek 方法 |
-| p106_generic_selfref.sp | 自引用泛型 | ❌ | 链表 `Node<T>` 含 `Node<T>* next` |
-| p107_generic_multitype.sp | 多类型参数结构体 | ❌ | `Map<K, V>` 键值对 |
-| p114_generic_assoc.sp | 泛型关联函数 | ✅ | `Stack<T>.new()` 工厂模式 |
-| p115_generic_struct_lit.sp | 泛型结构体字面量 | ❌ | `Pair<A, B>{ .field = val }` 语法 |
-| p233_generic_nested3.sp | 三层嵌套泛型 | ✅ | `Vec<Vec<Vec<int>>>` |
-| p234_generic_const_mix.sp | 泛型+const混合 | ✅ | `Pair<T,U>` const访问器 |
-| p235_generic_zeroinit.sp | 泛型零初始化 | ❌ | `Maybe<T> = {0}` |
-| p237_generic_embed.sp | 泛型嵌入裸结构体 | ✅ | `Labeled<T>` embed `Point` |
+| p101_generic_struct.ce | 单参数泛型结构体 | ✅ | `Vec<T>` 基础特化与字段访问 |
+| p103_generic_nested.ce | 双参数泛型结构体 | ✅ | `Pair<A, B>` 双类型参数 |
+| p104_generic_ptr.ce | 泛型含指针字段 | ❌ | `Box<T>` 含 T* 指针字段 |
+| p105_generic_method.ce | 泛型结构体方法 | ❌ | `Stack<T>` push/peek 方法 |
+| p106_generic_selfref.ce | 自引用泛型 | ❌ | 链表 `Node<T>` 含 `Node<T>* next` |
+| p107_generic_multitype.ce | 多类型参数结构体 | ❌ | `Map<K, V>` 键值对 |
+| p114_generic_assoc.ce | 泛型关联函数 | ✅ | `Stack<T>.new()` 工厂模式 |
+| p115_generic_struct_lit.ce | 泛型结构体字面量 | ❌ | `Pair<A, B>{ .field = val }` 语法 |
+| p233_generic_nested3.ce | 三层嵌套泛型 | ✅ | `Vec<Vec<Vec<int>>>` |
+| p234_generic_const_mix.ce | 泛型+const混合 | ✅ | `Pair<T,U>` const访问器 |
+| p235_generic_zeroinit.ce | 泛型零初始化 | ❌ | `Maybe<T> = {0}` |
+| p237_generic_embed.ce | 泛型嵌入裸结构体 | ✅ | `Labeled<T>` embed `Point` |
 
 **泛型函数** (5 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p102_generic_func.sp | 泛型函数 | ✅ | `max<T>` 函数 |
-| p117_gfunc_swap.sp | 泛型交换函数 | ❌ | `swap<T>(T*, T*)` |
-| p118_gfunc_infer.sp | 泛型函数类型推断 | ❌ | `max<T>` 推断类型 |
-| p119_gfunc_multiparam.sp | 多参数泛型函数 | ❌ | `pass<T, U>(T, U)` |
-| p120_gfunc_nested_gtgt.sp | 嵌套泛型类型签名 | ❌ | `Vec<Vec<int>>` 函数签名 |
+| p102_generic_func.ce | 泛型函数 | ✅ | `max<T>` 函数 |
+| p117_gfunc_swap.ce | 泛型交换函数 | ❌ | `swap<T>(T*, T*)` |
+| p118_gfunc_infer.ce | 泛型函数类型推断 | ❌ | `max<T>` 推断类型 |
+| p119_gfunc_multiparam.ce | 多参数泛型函数 | ❌ | `pass<T, U>(T, U)` |
+| p120_gfunc_nested_gtgt.ce | 嵌套泛型类型签名 | ❌ | `Vec<Vec<int>>` 函数签名 |
 
 **泛型边界与复杂场景** (5 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p151_vec_template.sp | Vec泛型模板 | ❌ | `Vec<T>` size/push/at |
-| p152_vec_stdlib.sp | 完整Vec库 | ❌ | `Vec<T>` 12个方法，operator[]，`<T> T` 返回语法 |
-| p153_generic_edge.sp | 泛型边界情况 | ❌ | 多参数、深层嵌套、独立泛型 |
-| p224_generic_typedef.sp | 泛型类型别名 | ❌ | `typedef Vec<int> IntVec`，链式别名 |
-| p236_generic_operator.sp | 泛型运算符重载 | ✅ | `Vec2<T>` equals/add/sum |
+| p151_vec_template.ce | Vec泛型模板 | ❌ | `Vec<T>` size/push/at |
+| p152_vec_stdlib.ce | 完整Vec库 | ❌ | `Vec<T>` 12个方法，operator[]，`<T> T` 返回语法 |
+| p153_generic_edge.ce | 泛型边界情况 | ❌ | 多参数、深层嵌套、独立泛型 |
+| p224_generic_typedef.ce | 泛型类型别名 | ❌ | `typedef Vec<int> IntVec`，链式别名 |
+| p236_generic_operator.ce | 泛型运算符重载 | ✅ | `Vec2<T>` equals/add/sum |
 
 **泛型跨引用与实例化** (4 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p238_generic_selfref.sp | 自引用泛型(重复) | ✅ | `Node<T>` 含 `Node* next` |
-| p238_generic_crossref.sp | 交叉引用泛型 | ✅ | `Node<T>` 含 `link()` 方法 |
-| p268_runtime_generic.sp | 运行时泛型单态化 | ✅ | `Pair<T>` swap，int/float测试 |
-| p270_codegen_multi_inst.sp | 同文件多实例化 | ✅ | `Wrap<int>`、`Wrap<float>` 共存 |
+| p238_generic_selfref.ce | 自引用泛型(重复) | ✅ | `Node<T>` 含 `Node* next` |
+| p238_generic_crossref.ce | 交叉引用泛型 | ✅ | `Node<T>` 含 `link()` 方法 |
+| p268_runtime_generic.ce | 运行时泛型单态化 | ✅ | `Pair<T>` swap，int/float测试 |
+| p270_codegen_multi_inst.ce | 同文件多实例化 | ✅ | `Wrap<int>`、`Wrap<float>` 共存 |
 
 **泛型+const** (2 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p142_generic_const_method.sp | 泛型+const方法 | ❌ | `Vec<T>` const size()/at() |
-| p149_generic_const_access.sp | 泛型const字段访问修复 | ❌ | `Arr<T>.size()` const方法字段访问 |
+| p142_generic_const_method.ce | 泛型+const方法 | ❌ | `Vec<T>` const size()/at() |
+| p149_generic_const_access.ce | 泛型const字段访问修复 | ❌ | `Arr<T>.size()` const方法字段访问 |
 
 **泛型extern** (1 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p150_extern_func_inst.sp | extern泛型实例化 | ❌ | `extern swap<int>` 阻止代码生成 |
+| p150_extern_func_inst.ce | extern泛型实例化 | ❌ | `extern swap<int>` 阻止代码生成 |
 
 ### 1.2 defer — 5 个文件
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p108_defer_return.sp | defer返回捕获、LIFO、void | ✅ | 返回值捕获、LIFO顺序、void defer |
-| p109_defer_loop.sp | 循环中defer(break/continue) | ✅ | break/continue 每迭代触发defer |
-| p155_defer_complex.sp | 复杂defer场景 | ❌ | 单次、LIFO、if、循环、嵌套作用域、返回、结构体 |
-| p257_multi_return_defer.sp | 多返回路径defer | ✅ | 每个返回路径触发defer |
-| p266_runtime_defer.sp | 运行时defer执行验证 | ✅ | 返回、LIFO、循环defer验证 |
+| p108_defer_return.ce | defer返回捕获、LIFO、void | ✅ | 返回值捕获、LIFO顺序、void defer |
+| p109_defer_loop.ce | 循环中defer(break/continue) | ✅ | break/continue 每迭代触发defer |
+| p155_defer_complex.ce | 复杂defer场景 | ❌ | 单次、LIFO、if、循环、嵌套作用域、返回、结构体 |
+| p257_multi_return_defer.ce | 多返回路径defer | ✅ | 每个返回路径触发defer |
+| p266_runtime_defer.ce | 运行时defer执行验证 | ✅ | 返回、LIFO、循环defer验证 |
 
 ### 1.3 运算符重载 (Operator Overloading) — 13 个文件
 
 **自由函数运算符** (3 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p110_free_operator.sp | 自由函数运算符 | ❌ | struct Vec2 operator+/-/= 自由函数 |
-| p112_operator_index.sp | operator[]重载 | ✅ | Arr.operator[] 下标访问 |
-| p113_unary_operator.sp | 一元运算符重载 | ❌ | Vec2.operator- (取反) 方法+自由函数 |
+| p110_free_operator.ce | 自由函数运算符 | ❌ | struct Vec2 operator+/-/= 自由函数 |
+| p112_operator_index.ce | operator[]重载 | ✅ | Arr.operator[] 下标访问 |
+| p113_unary_operator.ce | 一元运算符重载 | ❌ | Vec2.operator- (取反) 方法+自由函数 |
 
 **全面运算符测试** (2 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p154_operator_full.sp | 12种运算符完整组合 | ✅ | +, -, *, /, %, ==, !=, <, >, <=, >=, [] |
-| p225_operator_extension.sp | 运算符作为扩展方法 | ❌ | 前向引用：先使用后定义 |
+| p154_operator_full.ce | 12种运算符完整组合 | ✅ | +, -, *, /, %, ==, !=, <, >, <=, >=, [] |
+| p225_operator_extension.ce | 运算符作为扩展方法 | ❌ | 前向引用：先使用后定义 |
 
 **方法链与运算符优先级** (5 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p239_method_chain.sp | 方法链(返回*this) | ✅ | Counter*.inc()->inc()->add(5) |
-| p246_operator_chain.sp | 运算符链式 a+b+c | ✅ | 链式二元运算符调用 |
-| p247_operator_precedence.sp | 运算符优先级 | ❌ | a + b * c 尊重优先级 |
-| p248_comparison_ops.sp | 比较运算符 | ❌ | ==, !=, <, >, <=, >= 扩展方法 |
-| p249_unary_binary_mix.sp | 一元+二元混合 | ❌ | -a + b 表达式 |
+| p239_method_chain.ce | 方法链(返回*this) | ✅ | Counter*.inc()->inc()->add(5) |
+| p246_operator_chain.ce | 运算符链式 a+b+c | ✅ | 链式二元运算符调用 |
+| p247_operator_precedence.ce | 运算符优先级 | ❌ | a + b * c 尊重优先级 |
+| p248_comparison_ops.ce | 比较运算符 | ❌ | ==, !=, <, >, <=, >= 扩展方法 |
+| p249_unary_binary_mix.ce | 一元+二元混合 | ❌ | -a + b 表达式 |
 
 **跨类型与运行时** (3 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p222_mix_class_struct_op.sp | 跨类型运算符 | ❌ | class + struct 运算符 |
-| p242_ext_vs_freefunc.sp | 扩展方法vs自由函数 | ✅ | 同名不同派发 |
-| p267_runtime_operator.sp | 运行时运算符重载 | ✅ | Point operator+/- 运行时验证 |
+| p222_mix_class_struct_op.ce | 跨类型运算符 | ❌ | class + struct 运算符 |
+| p242_ext_vs_freefunc.ce | 扩展方法vs自由函数 | ✅ | 同名不同派发 |
+| p267_runtime_operator.ce | 运行时运算符重载 | ✅ | Point operator+/- 运行时验证 |
 
 ### 1.4 auto 类型推导 — 3 个文件
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p111_auto_type.sp | 基础auto推导 | ✅ | `auto x = expr`，for循环中的auto |
-| p157_auto_deduction.sp | auto边界情况 | ❌ | int, float, char, string, pointer, generic |
-| p231_auto_complex.sp | auto复杂表达式 | ❌ | 算术、三元、函数返回 |
+| p111_auto_type.ce | 基础auto推导 | ✅ | `auto x = expr`，for循环中的auto |
+| p157_auto_deduction.ce | auto边界情况 | ❌ | int, float, char, string, pointer, generic |
+| p231_auto_complex.ce | auto复杂表达式 | ❌ | 算术、三元、函数返回 |
 
 ### 1.5 const 方法与限定符 — 9 个文件
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p141_const_method.sp | 基础const方法 | ❌ | `Vec.size() const` |
-| p146_pointer_const_mangle.sp | const泛型命名修饰 | ❌ | `first<const int>` vs `first<float>` |
-| p147_const_nonconst_mix.sp | const/non-const方法混合 | ❌ | Counter.inc() non-const, get() const |
-| p148_const_method_params.sp | const方法含参数 | ❌ | BBox.area/move/at with const |
-| p156_assoc_const.sp | 关联函数+const | ❌ | 工厂方法，const链式调用 |
-| p226_const_pointer.sp | const指针嵌套 | ❌ | `const T*`, `T* const`, `const T* const` |
-| p244_ext_const_overload.sp | const重载 | ✅ | Buffer.read() const vs write() non-const |
-| p271_codegen_const_method.sp | const方法代码生成 | ❌ | const指针调用const方法 |
-| p278_volatile_const.sp | volatile+const限定符 | ✅ | volatile int 读取，const int id |
+| p141_const_method.ce | 基础const方法 | ❌ | `Vec.size() const` |
+| p146_pointer_const_mangle.ce | const泛型命名修饰 | ❌ | `first<const int>` vs `first<float>` |
+| p147_const_nonconst_mix.ce | const/non-const方法混合 | ❌ | Counter.inc() non-const, get() const |
+| p148_const_method_params.ce | const方法含参数 | ❌ | BBox.area/move/at with const |
+| p156_assoc_const.ce | 关联函数+const | ❌ | 工厂方法，const链式调用 |
+| p226_const_pointer.ce | const指针嵌套 | ❌ | `const T*`, `T* const`, `const T* const` |
+| p244_ext_const_overload.ce | const重载 | ✅ | Buffer.read() const vs write() non-const |
+| p271_codegen_const_method.ce | const方法代码生成 | ❌ | const指针调用const方法 |
+| p278_volatile_const.ce | volatile+const限定符 | ✅ | volatile int 读取，const int id |
 
 ### 1.6 模块与导入 (Modules & Imports) — 11 个文件
 
 **模块基础** (4 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p158_module_basic.sp | 基础模块交叉引用 | ❌ | `#include .sph` 含函数、结构体、typedef、枚举 |
-| p159_main.sp | 多头文件消费者 | ❌ | 多.sph include (math, collections) |
-| p162_main.sp | 多头条式传递包含 | ❌ | Types + strwrap headers |
-| p260_module_class.sp | 模块含class+方法 | ❌ | Calculator class from module |
+| p158_module_basic.ce | 基础模块交叉引用 | ❌ | `#include .he` 含函数、结构体、typedef、枚举 |
+| p159_main.ce | 多头文件消费者 | ❌ | 多.he include (math, collections) |
+| p162_main.ce | 多头条式传递包含 | ❌ | Types + strwrap headers |
+| p260_module_class.ce | 模块含class+方法 | ❌ | Calculator class from module |
 
 **模块泛型与交叉** (3 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p261_module_cross.sp | 模块交叉引用 | ❌ | Point2D class with distance computation |
-| p262_module_generic.sp | 模块泛型类型 | ❌ | RingBuf<int> from module |
-| p163_main.sp | 泛型实例化头文件 | ❌ | Vec_int, Pair_int_double from module |
+| p261_module_cross.ce | 模块交叉引用 | ❌ | Point2D class with distance computation |
+| p262_module_generic.ce | 模块泛型类型 | ❌ | RingBuf<int> from module |
+| p163_main.ce | 泛型实例化头文件 | ❌ | Vec_int, Pair_int_double from module |
 
 **stdlib集成** (2 个):
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p161_stdlib_integration.sp | stdlib集成 | ❌ | std.str, std.string, std.vec 集成 |
-| p164_main.sp | 模块结构体方法 | ❌ | Counter class with methods |
+| p161_stdlib_integration.ce | stdlib集成 | ❌ | std.str, std.string, std.vec 集成 |
+| p164_main.ce | 模块结构体方法 | ❌ | Counter class with methods |
 
-**模块头文件 (.sph)** (16 个):
+**模块头文件 (.he)** (16 个):
 
 | 文件 | 所属模块 | 描述 |
 |------|----------|------|
-| p158_module_basic.sph | 模块基础 | 函数/结构体/typedef/enum 定义 |
-| p159_core_math.sph | 数学模块 | 数学函数 |
-| p159_collections_vec.sph | 集合模块 | Vec 集合 |
-| p161_std_types.sph | std类型 | 标准类型定义 |
-| p161_std_str.sph | std字符串 | 字符串处理 |
-| p161_std_string.sph | std string | String 库 |
-| p161_std_vec.sph | std Vec | Vec 容器 |
-| p162_types.sph | 类型定义 | 类型声明 |
-| p162_strwrap.sph | 字符串包装 | Str 包装器 |
-| p163_genvec.sph | 泛型Vec | Vec 泛型实例化 |
-| p164_ops.sph | 运算符 | 运算符定义 |
-| p218_str.sph | 字符串扩展 | Str 扩展方法 |
-| p218_types.sph | 类型 | 类型定义 |
-| p260_mymath.sph | 自定义数学 | 数学函数 |
-| p261_shape.sph | 形状 | 几何形状 |
-| p262_ringbuf.sph | 环形缓冲 | RingBuf 定义 |
+| p158_module_basic.he | 模块基础 | 函数/结构体/typedef/enum 定义 |
+| p159_core_math.he | 数学模块 | 数学函数 |
+| p159_collections_vec.he | 集合模块 | Vec 集合 |
+| p161_std_types.he | std类型 | 标准类型定义 |
+| p161_std_str.he | std字符串 | 字符串处理 |
+| p161_std_string.he | std string | String 库 |
+| p161_std_vec.he | std Vec | Vec 容器 |
+| p162_types.he | 类型定义 | 类型声明 |
+| p162_strwrap.he | 字符串包装 | Str 包装器 |
+| p163_genvec.he | 泛型Vec | Vec 泛型实例化 |
+| p164_ops.he | 运算符 | 运算符定义 |
+| p218_str.he | 字符串扩展 | Str 扩展方法 |
+| p218_types.he | 类型 | 类型定义 |
+| p260_mymath.he | 自定义数学 | 数学函数 |
+| p261_shape.he | 形状 | 几何形状 |
+| p262_ringbuf.he | 环形缓冲 | RingBuf 定义 |
 
 ### 1.7 编译期内省 (Compile-Time Introspection) — 7 个文件
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p50_if_has_operator.sp | @has_operator编译期分支 | ❌ | `if(@has_operator(T, op))` 死枝剪除 |
-| p219_v013_intrinsics.sp | v0.13内省原语 | ❌ | @has_method, @has_field, @is_arithmetic, @is_pointer, @type_name |
-| p220_hashmap.sp | HashMap+编译期检查 | ❌ | @static_assert + @has_method/operator 门控 |
-| p250_has_method.sp | @has_method+扩展方法 | ❌ | 检测扩展方法 |
-| p251_has_field.sp | @has_field+嵌套结构体 | ❌ | 字段检测 |
-| p252_is_arithmetic.sp | @is_arithmetic+typedef | ❌ | typedef'd 类型识别 |
-| p253_static_assert.sp | 复杂@static_assert | ❌ | &&, \|\|, ! 组合，死枝剪除 |
+| p50_if_has_operator.ce | @has_operator编译期分支 | ❌ | `if(@has_operator(T, op))` 死枝剪除 |
+| p219_v013_intrinsics.ce | v0.13内省原语 | ❌ | @has_method, @has_field, @is_arithmetic, @is_pointer, @type_name |
+| p220_hashmap.ce | HashMap+编译期检查 | ❌ | @static_assert + @has_method/operator 门控 |
+| p250_has_method.ce | @has_method+扩展方法 | ❌ | 检测扩展方法 |
+| p251_has_field.ce | @has_field+嵌套结构体 | ❌ | 字段检测 |
+| p252_is_arithmetic.ce | @is_arithmetic+typedef | ❌ | typedef'd 类型识别 |
+| p253_static_assert.ce | 复杂@static_assert | ❌ | &&, \|\|, ! 组合，死枝剪除 |
 
 ### 1.8 扩展方法 (Extension Methods) — 9 个文件
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p223_str_extensions.sp | std::Str扩展 | ❌ | count_byte, contains on Str |
-| p228_array_struct.sp | 数组在结构体中+方法 | ✅ | Matrix 4x4 with extension methods |
-| p229_func_ptr.sp | 函数指针字段 | ✅ | Button with callback function pointer |
-| p240_ext_method_call.sp | 方法调用另一方法 | ❌ | Stats.record_many calls record |
-| p241_ext_method_samename.sp | 同名不同类分发 | ❌ | A.get_val vs B.get_val dispatch |
-| p243_ext_escape.sp | 返回this指针 | ✅ | Counter* escape pattern |
-| p245_composition_inherit.sp | 组合继承 | ✅ | Dog embeds Animal, delegates methods |
-| p264_runtime_struct.sp | 运行时结构体布局 | ❌ | Vec3D field access, copy |
-| p265_runtime_extmethod.sp | 运行时扩展链 | ❌ | Accumulator reset/add/get |
+| p223_str_extensions.ce | std::Str扩展 | ❌ | count_byte, contains on Str |
+| p228_array_struct.ce | 数组在结构体中+方法 | ✅ | Matrix 4x4 with extension methods |
+| p229_func_ptr.ce | 函数指针字段 | ✅ | Button with callback function pointer |
+| p240_ext_method_call.ce | 方法调用另一方法 | ❌ | Stats.record_many calls record |
+| p241_ext_method_samename.ce | 同名不同类分发 | ❌ | A.get_val vs B.get_val dispatch |
+| p243_ext_escape.ce | 返回this指针 | ✅ | Counter* escape pattern |
+| p245_composition_inherit.ce | 组合继承 | ✅ | Dog embeds Animal, delegates methods |
+| p264_runtime_struct.ce | 运行时结构体布局 | ❌ | Vec3D field access, copy |
+| p265_runtime_extmethod.ce | 运行时扩展链 | ❌ | Accumulator reset/add/get |
 
 ### 1.9 C 互操作 (C Interop) — 4 个文件
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p218_to_cstr.sp | Str→C字符串转换 | ❌ | @to_cstr 替换，Str slice |
-| p221_std_include.sp | 直接std库include | ✅ | types.sph, vec.sph, str.sph, hashmap.sph |
-| p227_voidptr_erasure.sp | void*类型擦除 | ❌ | AnyBox with void* fields |
-| pc00220_c_struct_bare.sp | C头文件结构体 | ❌ | Bare struct name from C header |
+| p218_to_cstr.ce | Str→C字符串转换 | ❌ | @to_cstr 替换，Str slice |
+| p221_std_include.ce | 直接std库include | ✅ | types.he, vec.he, str.he, hashmap.he |
+| p227_voidptr_erasure.ce | void*类型擦除 | ❌ | AnyBox with void* fields |
+| pc00220_c_struct_bare.ce | C头文件结构体 | ❌ | Bare struct name from C header |
 
 ### 1.10 控制流 (Control Flow) — 6 个文件
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p254_switch.sp | switch语句边界 | ❌ | 穿透、break、default、case中return |
-| p255_do_while.sp | do-while循环 | ❌ | 基础、break、continue |
-| p256_nested_loop.sp | 嵌套循环 | ❌ | break内层、continue、while in for |
-| p258_for_edge.sp | for循环边界 | ❌ | 空init/cond/incr、无限循环、逗号 |
-| p259_goto.sp | goto与标签 | ❌ | 前后goto、多标签 |
-| p274_string_literal.sp | 字符串字面量模式 | ✅ | str_len, str_eq, null check |
+| p254_switch.ce | switch语句边界 | ❌ | 穿透、break、default、case中return |
+| p255_do_while.ce | do-while循环 | ❌ | 基础、break、continue |
+| p256_nested_loop.ce | 嵌套循环 | ❌ | break内层、continue、while in for |
+| p258_for_edge.ce | for循环边界 | ❌ | 空init/cond/incr、无限循环、逗号 |
+| p259_goto.ce | goto与标签 | ❌ | 前后goto、多标签 |
+| p274_string_literal.ce | 字符串字面量模式 | ✅ | str_len, str_eq, null check |
 
 ### 1.11 代码生成与运行时验证 (Codegen & Runtime) — 8 个文件
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
-| p269_codegen_typedef.sp | typedef解析链 | ❌ | int→MyInt→YourInt→OurInt |
-| p272_codegen_enum.sp | 枚举代码生成 | ❌ | enum 含命名常量 |
-| p273_struct_array.sp | 结构体数组 | ✅ | Vec2[4] 初始化 |
-| p275_sizeof.sp | sizeof复杂类型 | ✅ | struct, pointer, array, typedef |
-| p276_compound_literal.sp | 复合字面量/临时结构体 | ✅ | 函数返回结构体，链式调用 |
-| p277_static_var.sp | 静态变量 | ✅ | 静态局部、全局变量 |
+| p269_codegen_typedef.ce | typedef解析链 | ❌ | int→MyInt→YourInt→OurInt |
+| p272_codegen_enum.ce | 枚举代码生成 | ❌ | enum 含命名常量 |
+| p273_struct_array.ce | 结构体数组 | ✅ | Vec2[4] 初始化 |
+| p275_sizeof.ce | sizeof复杂类型 | ✅ | struct, pointer, array, typedef |
+| p276_compound_literal.ce | 复合字面量/临时结构体 | ✅ | 函数返回结构体，链式调用 |
+| p277_static_var.ce | 静态变量 | ✅ | 静态局部、全局变量 |
 
 ### 1.12 C 兼容性探针 (C Compatibility Probes) — 100+ 个文件
 
@@ -311,7 +311,7 @@
 
 | 文件 | 功能类别 | 描述 |
 |------|----------|------|
-| p50_if_has_operator.sp | 编译期内省 | @has_operator编译期分支 |
+| p50_if_has_operator.ce | 编译期内省 | @has_operator编译期分支 |
 | p51_computed_goto.c | 控制流 | 计算goto (GCC扩展) |
 | p52_anon_typedef_arr.c | 类型别名 | 匿名typedef数组 |
 | p53_const_ptr_param.c | const | const指针参数 |
@@ -453,10 +453,10 @@
 
 ### 1.13 其他独立测试文件
 
-| 文件 | 功能点 | .ref.c | 描述 |
+| 文件 | 功能点 | .ref.i | 描述 |
 |------|--------|--------|------|
 | p_brace_init.c | 大括号初始化 | ❌ | C 风格大括号初始化语法 |
-| p50_if_has_operator.sp | @has_operator条件编译 | ❌ | 编译期运算符检测分支 |
+| p50_if_has_operator.ce | @has_operator条件编译 | ❌ | 编译期运算符检测分支 |
 
 ---
 
@@ -464,26 +464,26 @@
 
 | 文件 | Bug类型 | 描述 |
 |------|---------|------|
-| bug001_stddef_preamble.sp | 编译基础 | 最小程序返回42，测试基本编译流程 |
-| bug002_const_auto.sp | const+auto交互 | `const auto k = 42` const auto推导 |
-| bug003_ptr_return_method.sp | 解析器bug | 方法返回指针被误认为字段声明 |
-| bug004_typedef_return.sp | 类型解析bug | 函数返回typedef结构体类型 |
-| bug005_local_func_decl.sp | 作用域bug | main()内前向函数声明 |
+| bug001_stddef_preamble.ce | 编译基础 | 最小程序返回42，测试基本编译流程 |
+| bug002_const_auto.ce | const+auto交互 | `const auto k = 42` const auto推导 |
+| bug003_ptr_return_method.ce | 解析器bug | 方法返回指针被误认为字段声明 |
+| bug004_typedef_return.ce | 类型解析bug | 函数返回typedef结构体类型 |
+| bug005_local_func_decl.ce | 作用域bug | main()内前向函数声明 |
 
 ---
 
 ## 三、根目录独立测试文件 — 8 个文件
 
-### 3.1 功能测试 (.sp)
+### 3.1 功能测试 (.ce)
 
 | 文件 | 功能类别 | 描述 |
 |------|----------|------|
-| raw_string_test.sp | 字符串语法 | r#"..."# 原始字符串，含 r"", r#"..."#, r##"..."## 多hash语法 |
-| cjson_test.sp | 库集成测试 | cJSON 1.7.19 完整测试(30+测试): 解析、打印、创建、比较、复制、压缩等 |
-| webgui_counter.sp | WebGUI演示 | 简单计数器应用，wg_app, wg_button, 事件处理 (端口9002) |
-| webgui_todo.sp | WebGUI动态子元素 | 待办列表，表单提交，动态添加/删除，userdata (端口9001) |
-| webgui_settings.sp | WebGUI设置面板 | 复选框、选择框、输入框、可见性切换、事件绑定 (端口9003) |
-| webgui_clock.sp | WebGUI定时器 | 时钟显示，启停定时器 wg_set_timer (端口9004) |
+| raw_string_test.ce | 字符串语法 | r#"..."# 原始字符串，含 r"", r#"..."#, r##"..."## 多hash语法 |
+| cjson_test.ce | 库集成测试 | cJSON 1.7.19 完整测试(30+测试): 解析、打印、创建、比较、复制、压缩等 |
+| webgui_counter.ce | WebGUI演示 | 简单计数器应用，wg_app, wg_button, 事件处理 (端口9002) |
+| webgui_todo.ce | WebGUI动态子元素 | 待办列表，表单提交，动态添加/删除，userdata (端口9001) |
+| webgui_settings.ce | WebGUI设置面板 | 复选框、选择框、输入框、可见性切换、事件绑定 (端口9003) |
+| webgui_clock.ce | WebGUI定时器 | 时钟显示，启停定时器 wg_set_timer (端口9004) |
 
 ### 3.2 工具文件 (.c)
 
@@ -577,13 +577,13 @@
 
 | 合并组 | 文件 | 建议 |
 |--------|------|------|
-| 自引用泛型 | p106_generic_selfref.sp, p238_generic_selfref.sp | 合并为一个，保留更全面的版本 |
-| 运算符链式 | p239_method_chain.sp, p246_operator_chain.sp | 合并为方法+运算符链式测试 |
-| auto推导基础 | p111_auto_type.sp, p157_auto_deduction.sp | 合并边界情况到单一文件 |
-| const方法基础 | p141_const_method.sp, p147_const_nonconst_mix.sp | 合并const方法基础与混合 |
-| 模块入口点 | p159_main.sp, p162_main.sp, p163_main.sp, p164_main.sp | 合并为单一模块消费者测试 |
-| 泛型实例化 | p268_runtime_generic.sp, p270_codegen_multi_inst.sp | 合并泛型运行时与多实例化 |
-| 扩展方法调用 | p240_ext_method_call.sp, p265_runtime_extmethod.sp | 合并扩展方法调用测试 |
+| 自引用泛型 | p106_generic_selfref.ce, p238_generic_selfref.ce | 合并为一个，保留更全面的版本 |
+| 运算符链式 | p239_method_chain.ce, p246_operator_chain.ce | 合并为方法+运算符链式测试 |
+| auto推导基础 | p111_auto_type.ce, p157_auto_deduction.ce | 合并边界情况到单一文件 |
+| const方法基础 | p141_const_method.ce, p147_const_nonconst_mix.ce | 合并const方法基础与混合 |
+| 模块入口点 | p159_main.ce, p162_main.ce, p163_main.ce, p164_main.ce | 合并为单一模块消费者测试 |
+| 泛型实例化 | p268_runtime_generic.ce, p270_codegen_multi_inst.ce | 合并泛型运行时与多实例化 |
+| 扩展方法调用 | p240_ext_method_call.ce, p265_runtime_extmethod.ce | 合并扩展方法调用测试 |
 
 ### 9.2 中优先级合并 (部分重叠)
 
@@ -592,7 +592,7 @@
 | defer多场景 | p108, p109, p155, p257, p266 | 可整合为2-3个文件(返回/循环/复杂) |
 | 运算符全组合 | p110, p112, p113, p154 | p154已覆盖全部，p110/p112/p113可作为子场景保留 |
 | 编译期内省 | p50, p219, p250, p251, p252, p253 | 按@intrinsic类型分组整合 |
-| WebGUI演示 | 4个webgui*.sp | 保留为演示，但标记为非回归测试 |
+| WebGUI演示 | 4个webgui*.ce | 保留为演示，但标记为非回归测试 |
 
 ### 9.3 pc系列去重策略
 
@@ -642,8 +642,8 @@ python3 run_regression.py --json
 | pXXX_ | Sharp 特性探针 (p05–p278) |
 | pcXXXXX | C 兼容性探针 (pc00001–pc00220) |
 | bugXXX_ | Bug 回归测试 |
-| pXXX_*.sph | 模块头文件 |
-| pXXX_*.ref.c | 预期生成的 C 代码参考 |
+| pXXX_*.he | 模块头文件 |
+| pXXX_*.ref.i | 预期生成的 C 代码参考 |
 
 ---
 

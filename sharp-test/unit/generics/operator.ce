@@ -1,0 +1,121 @@
+// Merged generic operator tests
+// Sources: p236_generic_operator.ce, p234_generic_const_mix.ce,
+//          p142_generic_const_method.ce, p146_pointer_const_mangle.ce
+
+#include <stdbool.h>
+
+/* Generic struct with extension methods (p236) */
+class Vec2<T> {
+    T x;
+    T y;
+}
+
+bool Vec2<T>.equals(this, Vec2<T> other) const {
+    return this->x == other.x && this->y == other.y;
+}
+
+void Vec2<T>.add_into(this, Vec2<T> other) {
+    this->x = this->x + other.x;
+    this->y = this->y + other.y;
+}
+
+T Vec2<T>.sum(this) const {
+    return this->x + this->y;
+}
+
+/* Generic + const mixed (p234) */
+class Pair<T, U> {
+    T first;
+    U second;
+}
+
+T Pair<T, U>.first_val(this) const {
+    return this->first;
+}
+
+U Pair<T, U>.second_val(this) const {
+    return this->second;
+}
+
+void Pair<T, U>.set_first(this, T val) {
+    this->first = val;
+}
+
+/* Generic + const method (p142) */
+class Arr<T> {
+    T* data;
+    long len;
+    long cap;
+}
+
+long Arr<T>.size(this) const {
+    return this->len;
+}
+
+T Arr<T>.at(this, long i) const {
+    return this->data[i];
+}
+
+void Arr<T>.push(this, T item) {
+    this->data[this->len] = item;
+    this->len = this->len + 1;
+}
+
+/* Generic with const in function signature (p146) */
+void first<T>(T* a, T* b) {
+    (void)a; (void)b;
+}
+
+/* Free function with const generic pointer (p234) */
+int read_pair(const Pair<int, float>* p) {
+    return p->first_val();
+}
+
+int main() {
+    /* Test generic operators (p236) */
+    Vec2<int> a;
+    a.x = 1; a.y = 2;
+    Vec2<int> b;
+    b.x = 1; b.y = 2;
+    Vec2<int> c;
+    c.x = 3; c.y = 4;
+
+    if (!a.equals(b)) return 1;
+    if (a.equals(c)) return 2;
+
+    a.add_into(c);
+    if (a.x != 4) return 3;
+    if (a.y != 6) return 4;
+
+    if (a.sum() != 10) return 5;
+
+    /* Test generic const mixed (p234) */
+    Pair<int, float> p = {0};
+    p.set_first(42);
+    p.second = 3.14f;
+
+    if (p.first_val() != 42) return 6;
+    if (p.second_val() < 3.13f || p.second_val() > 3.15f) return 7;
+
+    int r = read_pair(&p);
+    if (r != 42) return 8;
+
+    /* Test generic const methods (p142) */
+    int arr[5];
+    Arr<int> v = { arr, 0, 5 };
+    v.push(10);
+    v.push(20);
+    v.push(30);
+    long s = v.size();
+    int val = v.at(1);
+    if (val + (int)s - 23 != 0) return 9;
+
+    /* Test const in function signature (p146) */
+    int ia = 3, ib = 4;
+    first<const int>(&ia, &ib);
+
+    float fa = 1.0f, fb = 2.0f;
+    first<float>(&fa, &fb);
+
+    return 0;
+}

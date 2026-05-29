@@ -1,0 +1,77 @@
+// 来源: p157_auto_deduction.ce (边界), p231_auto_complex.ce
+// auto 类型推导边界测试: 泛型、运算符索引、复杂表达式
+
+#include <stdbool.h>
+
+// === p157: 泛型 struct + auto ===
+class Value<T> {
+    T data;
+}
+T Value<T>.get(this) const { return this->data; }
+
+// === p157: operator[] + auto ===
+class DataContainer {
+    int storage[3];
+}
+int DataContainer.operator[](this, long i) const { return this->storage[i]; }
+
+// === p231: helper functions ===
+int get_int() { return 42; }
+float get_float() { return 3.14f; }
+
+// === p231: struct with methods for auto ===
+class Data {
+    int value;
+};
+int Data.read(this) const { return this->value; }
+void Data.init(this, int v) { this->value = v; }
+
+int main() {
+    // --- p157: auto from generic get() ---
+    Value<int> v;
+    v.data = 42;
+    auto x = v.get();
+    if (x != 42) return 1;
+
+    Value<float> vf;
+    vf.data = 7.0f;
+    auto y = vf.get();
+    if ((int)y != 7) return 2;
+
+    // --- p157: auto from operator[] ---
+    DataContainer dc;
+    dc.storage[0] = 10;
+    dc.storage[1] = 20;
+    auto a = dc[0];
+    auto b = dc[1];
+    if (a != 10) return 3;
+    if (b != 20) return 4;
+
+    // --- p231: basic arithmetic ---
+    auto i1 = 1 + 2;
+    if (i1 != 3) return 5;
+    auto f1 = 1.0f + 2.0f;
+    if (f1 < 2.9f || f1 > 3.1f) return 6;
+
+    // --- p231: mixed int/float ---
+    auto m1 = 1 + 2.5f;
+    if (m1 < 3.4f || m1 > 3.6f) return 7;
+
+    // --- p231: function return ---
+    auto r1 = get_int();
+    if (r1 != 42) return 8;
+    auto r2 = get_float();
+    if (r2 < 3.13f || r2 > 3.15f) return 9;
+
+    // --- p231: ternary ---
+    auto t1 = 1 ? 10 : 20;
+    if (t1 != 10) return 10;
+
+    // --- p231: struct member ---
+    Data d;
+    d.init(77);
+    auto v1 = d.read();
+    if (v1 != 77) return 11;
+
+    return 0;
+}

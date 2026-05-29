@@ -265,13 +265,13 @@ CppReader *reader_new_from_file(const char *filename,
     /* Convert Rust-style raw strings r#"..."# to standard C string
      * literals before the tokenizer sees them.  This prevents '#' chars
      * inside raw strings from being interpreted as preprocessor directives.
-     * Only apply to Sharp source files (.sp, .sph), not standard C files. */
+     * Only apply to Sharp source files (.ce, .he), not standard C files. */
     {
         int is_sharp = 0;
         {
             const char *ext = strrchr(filename, '.');
             if (ext) {
-                if (strcmp(ext, ".sp") == 0 || strcmp(ext, ".sph") == 0)
+                if (strcmp(ext, ".ce") == 0 || strcmp(ext, ".he") == 0)
                     is_sharp = 1;
             }
         }
@@ -413,13 +413,13 @@ CppReader *reader_new_from_buf(const char *buf, size_t len,
     copy[len] = '\0';
 
     /* Raw string conversion (same as reader_new_from_file) — only for
-     * Sharp source files (.sp, .sph). */
+     * Sharp source files (.ce, .he). */
     {
         int is_sharp = 0;
         if (filename) {
             const char *ext = strrchr(filename, '.');
             if (ext) {
-                if (strcmp(ext, ".sp") == 0 || strcmp(ext, ".sph") == 0)
+                if (strcmp(ext, ".ce") == 0 || strcmp(ext, ".he") == 0)
                     is_sharp = 1;
             }
         }

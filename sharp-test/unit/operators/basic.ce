@@ -1,0 +1,138 @@
+// 来源: p110_free_operator.ce, p154_operator_full.ce
+// 运算符重载基础测试: 自由函数运算符 + 类方法运算符（算术+比较）
+
+#include <stdbool.h>
+
+// === p110: 自由函数运算符 ===
+struct Vec2 { float x; float y; }
+
+struct Vec2 operator+(struct Vec2 a, struct Vec2 b) {
+    struct Vec2 r; r.x = a.x + b.x; r.y = a.y + b.y; return r;
+}
+struct Vec2 operator-(struct Vec2 a, struct Vec2 b) {
+    struct Vec2 r; r.x = a.x - b.x; r.y = a.y - b.y; return r;
+}
+int operator==(struct Vec2 a, struct Vec2 b) {
+    return a.x == b.x && a.y == b.y;
+}
+
+// 类方法运算符 * (dot product)
+class Vec2m {
+    float x; float y;
+}
+float Vec2m.operator*(this, Vec2m rhs) {
+    return this->x * rhs.x + this->y * rhs.y;
+}
+
+// === p154: 类方法运算符 (IntBox 算术 + 比较) ===
+class IntBox {
+    int value;
+}
+IntBox IntBox.operator+(this, IntBox other) const {
+    IntBox r; r.value = this->value + other.value; return r;
+}
+IntBox IntBox.operator-(this, IntBox other) const {
+    IntBox r; r.value = this->value - other.value; return r;
+}
+IntBox IntBox.operator*(this, IntBox other) const {
+    IntBox r; r.value = this->value * other.value; return r;
+}
+IntBox IntBox.operator/(this, IntBox other) const {
+    IntBox r; r.value = this->value / other.value; return r;
+}
+IntBox IntBox.operator%(this, IntBox other) const {
+    IntBox r; r.value = this->value % other.value; return r;
+}
+bool IntBox.operator==(this, IntBox other) const {
+    return this->value == other.value;
+}
+bool IntBox.operator!=(this, IntBox other) const {
+    return this->value != other.value;
+}
+bool IntBox.operator<(this, IntBox other) const {
+    return this->value < other.value;
+}
+bool IntBox.operator>(this, IntBox other) const {
+    return this->value > other.value;
+}
+bool IntBox.operator<=(this, IntBox other) const {
+    return this->value <= other.value;
+}
+bool IntBox.operator>=(this, IntBox other) const {
+    return this->value >= other.value;
+}
+
+// === p154: 自由函数运算符 (Point) ===
+struct Point {
+    int x; int y;
+}
+struct Point operator+(struct Point a, struct Point b) {
+    struct Point r;
+    r.x = a.x + b.x;
+    r.y = a.y + b.y;
+    return r;
+}
+
+int main() {
+    // --- p110: 自由函数 Vec2 测试 ---
+    struct Vec2 a; a.x = 1.0f; a.y = 2.0f;
+    struct Vec2 b; b.x = 3.0f; b.y = 4.0f;
+
+    struct Vec2 s = a + b;
+    if (s.x != 4.0f) return 1;
+    if (s.y != 6.0f) return 2;
+
+    struct Vec2 d = b - a;
+    if (d.x != 2.0f) return 3;
+    if (d.y != 2.0f) return 4;
+
+    struct Vec2 c; c.x = 1.0f; c.y = 2.0f;
+    if (!(a == c)) return 5;
+    if (a == b)    return 6;
+
+    // 类方法 operator* (dot product)
+    Vec2m u; u.x = 3.0f; u.y = 4.0f;
+    Vec2m v; v.x = 1.0f; v.y = 0.0f;
+    float dot = u * v;
+    if (dot != 3.0f) return 7;
+
+    // --- p154: IntBox 算术测试 ---
+    IntBox ia; ia.value = 10;
+    IntBox ib; ib.value = 3;
+
+    IntBox iadd = ia + ib;
+    if (iadd.value != 13) return 8;
+    IntBox isub = ia - ib;
+    if (isub.value != 7) return 9;
+    IntBox imul = ia * ib;
+    if (imul.value != 30) return 10;
+    IntBox idiv = ia / ib;
+    if (idiv.value != 3) return 11;
+    IntBox imod = ia % ib;
+    if (imod.value != 1) return 12;
+
+    // --- p154: IntBox 比较测试 ---
+    IntBox ic; ic.value = 10;
+    if (!(ia == ic)) return 13;
+    if (!(ia == ia)) return 14;  // self
+    if (ia == ib) return 15;     // false
+    if (!(ia != ib)) return 16;
+    if (ia != ic) return 17;     // != false
+    if (!(ib < ia)) return 18;
+    if (ia < ib) return 19;      // < false
+    if (!(ia > ib)) return 20;
+    if (ib > ia) return 21;      // > false
+    if (!(ib <= ia)) return 22;
+    if (!(ia <= ic)) return 23;  // <= equal
+    if (!(ia >= ib)) return 24;
+    if (!(ia >= ic)) return 25;  // >= equal
+
+    // --- p154: 自由函数 Point 测试 ---
+    struct Point pa; pa.x = 1; pa.y = 2;
+    struct Point pb; pb.x = 3; pb.y = 4;
+    struct Point pr = pa + pb;
+    if (pr.x != 4) return 26;
+    if (pr.y != 6) return 27;
+
+    return 0;
+}

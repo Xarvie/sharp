@@ -1,6 +1,6 @@
 # Sharp Frontend
 
-C11 superset language frontend — parses `.sp` (Sharp) and `.c` (C11) files,
+C11 superset language frontend — parses `.ce` (Sharp) and `.c` (C11) files,
 produces C11 output for downstream compilation.
 
 ## Repository layout

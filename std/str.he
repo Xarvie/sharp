@@ -1,0 +1,112 @@
+#include "types.he"
+
+class Str {
+    const char* ptr;
+    isize       len;
+}
+
+static inline isize Str.find_byte(this, char c) const {
+    isize i = 0;
+    while (i < this->len) {
+        if (this->ptr[i] == c) return i;
+        i = i + 1;
+    }
+    return -1;
+}
+
+static inline isize Str.size(this) const {
+    return this->len;
+}
+
+static inline bool Str.operator==(this, Str other) const {
+    if (this->len != other.len) return false;
+    isize i = 0;
+    while (i < this->len) {
+        if (this->ptr[i] != other.ptr[i]) return false;
+        i = i + 1;
+    }
+    return true;
+}
+
+static inline bool Str.eq(this, Str other) const {
+    return *this == other;
+}
+
+/* FNV-1a 64-bit hash over the byte range.  Used by std.hashmap when
+ * Str is the key type. */
+static inline usize Str.hash(this) const {
+    usize h = (usize)14695981039346656037UL;
+    isize i = 0;
+    while (i < this->len) {
+        h = h ^ (usize)(unsigned char)this->ptr[i];
+        h = h * (usize)1099511628211UL;
+        i = i + 1;
+    }
+    return h;
+}
+
+static inline bool Str.starts_with(this, Str prefix) const {
+    if (prefix.len > this->len) return false;
+    isize i = 0;
+    while (i < prefix.len) {
+        if (this->ptr[i] != prefix.ptr[i]) return false;
+        i = i + 1;
+    }
+    return true;
+}
+
+static inline bool Str.ends_with(this, Str suffix) const {
+    if (suffix.len > this->len) return false;
+    isize off = this->len - suffix.len;
+    isize i = 0;
+    while (i < suffix.len) {
+        if (this->ptr[off + i] != suffix.ptr[i]) return false;
+        i = i + 1;
+    }
+    return true;
+}
+
+static inline Str Str.slice(this, isize start, isize end) const {
+    if (start < 0 || end < start || end > this->len) __builtin_trap();
+    Str s;
+    s.ptr = this->ptr + start;
+    s.len = end - start;
+    return s;
+}
+
+static inline Str str_from_lit(const char* lit) {
+    Str s;
+    s.ptr = lit;
+    s.len = 0;
+    while (lit[s.len] != 0) s.len = s.len + 1;
+    return s;
+}
+
+static inline Str str_from_parts(const char* p, isize len) {
+    Str s;
+    s.ptr = p;
+    s.len = len;
+    return s;
+}
+
+struct StrSplit {
+    Str  left;
+    Str  right;
+    bool found;
+}
+
+static inline StrSplit str_split_once(Str s, char sep) {
+    isize idx = s.find_byte(sep);
+    if (idx < 0) {
+        StrSplit r;
+        r.left  = s;
+        r.right = str_from_parts(s.ptr + s.len, 0);
+        r.found = false;
+        return r;
+    }
+    StrSplit r;
+    r.left  = str_from_parts(s.ptr, idx);
+    r.right = str_from_parts(s.ptr + idx + 1, s.len - idx - 1);
+    r.found = true;
+    return r;
+}

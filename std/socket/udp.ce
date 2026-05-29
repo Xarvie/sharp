@@ -1,0 +1,341 @@
+/*
+ * udp.c — UDP datagram socket (基于 socket)
+ *
+ * 设计:
+ *   - udp_t 为栈上 32B 不透明结构体, 内部仅含 socket_t
+ *   - 创建 socket 时自动 nonblock
+ *   - Connected UDP: connect() 不产生握手, 仅绑定默认对端
+ *   - disconnect 用 AF_UNSPEC 实现, 不走 socket_connect (其 addrlen 硬编码)
+ */
+
+#define _DEFAULT_SOURCE
+#include "udp.he"
+
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+
+#ifndef _WIN32
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#endif
+
+#if defined(__linux__)
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#elif defined(_WIN32)
+#include <ws2tcpip.h>
+#endif
+
+/* ========================================================================
+ * Opaque layout + static assert
+ * ======================================================================== */
+
+typedef struct {
+    socket_t sock;
+} real_udp_t;
+
+_Static_assert(sizeof(real_udp_t) <= sizeof(udp_t),
+               "real_udp_t exceeds udp_t opaque limit");
+
+/* Opaque access via memcpy — avoids strict-aliasing UB */
+static inline socket_t get_sock(const uint64_t opaque[4]) {
+    socket_t sock;
+    memcpy(&sock, opaque, sizeof(socket_t));
+    return sock;
+}
+static inline void set_sock(uint64_t opaque[4], socket_t sock) {
+    memcpy(opaque, &sock, sizeof(socket_t));
+}
+
+/* ========================================================================
+ * Helpers
+ * ======================================================================== */
+
+static socket_t make_udp_sock(int family, int* out_err) {
+    int err;
+    socket_t s = socket_create(family, SOCKET_DGRAM, 0, &err);
+    if (s == SOCKET_INVALID) { if (out_err) *out_err = err; return SOCKET_INVALID; }
+    socket_set_reuseaddr(s, 1);
+    if (socket_set_nonblock(s, 1) != SOCKET_OK) {
+        err = socket_last_error();
+        socket_close(s);
+        if (out_err) *out_err = err;
+        return SOCKET_INVALID;
+    }
+    if (out_err) *out_err = SOCKET_OK;
+    return s;
+}
+
+/* ========================================================================
+ * Bind
+ * ======================================================================== */
+
+int udp_bind(udp_t* u, const char* ip, size_t ip_len,
+             uint16_t port, int family) {
+    *u = UDP_INIT;
+
+    socket_addr_t addr;
+    int err;
+
+    if (ip && ip_len > 0) {
+        err = socket_addr_resolve(&addr, ip, ip_len, port, family);
+    } else {
+        if (family == 0) family = SOCKET_AF_INET;
+        err = socket_addr_set_any(&addr, family, port);
+    }
+    if (err) return err;
+
+    int af = socket_addr_get_family(&addr);
+    socket_t sock = make_udp_sock(af, &err);
+    if (err) return err;
+
+    err = socket_bind(sock, &addr);
+    if (err) { socket_close(sock); return err; }
+
+    set_sock(u->opaque, sock);
+    return SOCKET_OK;
+}
+
+socket_t udp_socket(const udp_t* u) {
+    return get_sock(u->opaque);
+}
+
+int udp_local_addr(const udp_t* u, socket_addr_t* out_addr) {
+    struct sockaddr_storage ss;
+#ifdef _WIN32
+    int slen = sizeof(ss);
+    SOCKET fd = (SOCKET)(intptr_t)get_sock(u->opaque);
+#else
+    socklen_t slen = sizeof(ss);
+    int fd = (int)(intptr_t)get_sock(u->opaque);
+#endif
+    if (getsockname(fd, (struct sockaddr*)&ss, &slen) < 0)
+        return socket_last_error();
+    memcpy(out_addr, &ss, sizeof(ss));
+    return SOCKET_OK;
+}
+
+#ifndef _WIN32
+/* ========================================================================
+ * Unix domain datagram socket
+ * ======================================================================== */
+
+int udp_bind_unix(udp_t* u, const char* path, size_t path_len) {
+    *u = UDP_INIT;
+
+    if (!path || path_len == 0) return SOCKET_ERR_INVAL;
+
+    /* Unlink any existing socket file */
+    char pathz[108];
+    size_t n = path_len < sizeof(pathz) - 1 ? path_len : sizeof(pathz) - 1;
+    memcpy(pathz, path, n);
+    pathz[n] = '\0';
+    unlink(pathz);
+
+    int err;
+    socket_t sock = socket_create(SOCKET_AF_UNIX, SOCKET_DGRAM, 0, &err);
+    if (err) return err;
+
+    socket_set_reuseaddr(sock, 1);
+    if (socket_set_nonblock(sock, 1) != SOCKET_OK) {
+        err = socket_last_error();
+        socket_close(sock);
+        return err;
+    }
+
+    socket_addr_t addr;
+    err = socket_addr_set_unix(&addr, path, path_len);
+    if (err) { socket_close(sock); return err; }
+
+    err = socket_bind(sock, &addr);
+    if (err) { socket_close(sock); return err; }
+
+    set_sock(u->opaque, sock);
+    return SOCKET_OK;
+}
+#endif /* !_WIN32 */
+
+/* ========================================================================
+ * I/O
+ * ======================================================================== */
+
+socket_io_result_t udp_recvfrom(udp_t* u, void* buf, size_t len,
+                                socket_addr_t* from) {
+    return socket_recvfrom(get_sock(u->opaque), buf, len, 0, from);
+}
+
+socket_io_result_t udp_sendto(const udp_t* u, const void* buf, size_t len,
+                              const socket_addr_t* to) {
+    return socket_sendto(get_sock(u->opaque), buf, len, 0, to);
+}
+
+/* ========================================================================
+ * Connected UDP
+ * ======================================================================== */
+
+int udp_connect(udp_t* u, const socket_addr_t* peer) {
+    return socket_connect(get_sock(u->opaque), peer);
+}
+
+socket_io_result_t udp_send(const udp_t* u, const void* buf, size_t len) {
+    return socket_send(get_sock(u->opaque), buf, len, 0);
+}
+
+socket_io_result_t udp_recv(udp_t* u, void* buf, size_t len) {
+    return socket_recv(get_sock(u->opaque), buf, len, 0);
+}
+
+int udp_disconnect(udp_t* u) {
+    /*
+     * Disconnect UDP by re-connecting to AF_UNSPEC.
+     * socket_connect() hardcodes addrlen to AF_INET/AF_INET6 sizes,
+     * so we issue connect() directly with a minimal sockaddr.
+     */
+    struct sockaddr sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_family = AF_UNSPEC;
+
+#ifdef _WIN32
+    SOCKET fd = (SOCKET)(intptr_t)get_sock(u->opaque);
+    if (connect(fd, &sa, (int)sizeof(sa)) < 0)
+#else
+    int fd = (int)(intptr_t)get_sock(u->opaque);
+    if (connect(fd, &sa, sizeof(sa)) < 0)
+#endif
+        return socket_last_error();
+    return SOCKET_OK;
+}
+
+#ifndef _WIN32
+#define UDP_SOCKOPT_CAST(x) (x)
+#else
+#define UDP_SOCKOPT_CAST(x) ((const char*)(x))
+#endif
+
+/* ========================================================================
+ * Multicast
+ * ======================================================================== */
+
+int udp_join_group(udp_t* u, const char* group_ip, size_t group_len) {
+    int fd = (int)(intptr_t)get_sock(u->opaque);
+    char ipz[46];
+    size_t n = group_len < sizeof(ipz) - 1 ? group_len : sizeof(ipz) - 1;
+    memcpy(ipz, group_ip, n);
+    ipz[n] = '\0';
+
+    /* Try IPv4 first */
+    struct in_addr addr4;
+    if (inet_pton(AF_INET, ipz, &addr4) == 1) {
+        struct ip_mreq mreq;
+        mreq.imr_multiaddr = addr4;
+        mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+        if (setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                       UDP_SOCKOPT_CAST(&mreq), sizeof(mreq)) < 0)
+            return socket_last_error();
+        return SOCKET_OK;
+    }
+
+    /* Try IPv6 */
+    struct in6_addr addr6;
+    if (inet_pton(AF_INET6, ipz, &addr6) == 1) {
+        struct ipv6_mreq mreq6;
+        mreq6.ipv6mr_multiaddr = addr6;
+        mreq6.ipv6mr_interface = 0;
+        if (setsockopt(fd, IPPROTO_IPV6, IPV6_JOIN_GROUP,
+                       UDP_SOCKOPT_CAST(&mreq6), sizeof(mreq6)) < 0)
+            return socket_last_error();
+        return SOCKET_OK;
+    }
+
+    return SOCKET_ERR_RESOLVE;
+}
+
+int udp_leave_group(udp_t* u, const char* group_ip, size_t group_len) {
+    int fd = (int)(intptr_t)get_sock(u->opaque);
+    char ipz[46];
+    size_t n = group_len < sizeof(ipz) - 1 ? group_len : sizeof(ipz) - 1;
+    memcpy(ipz, group_ip, n);
+    ipz[n] = '\0';
+
+    struct in_addr addr4;
+    if (inet_pton(AF_INET, ipz, &addr4) == 1) {
+        struct ip_mreq mreq;
+        mreq.imr_multiaddr = addr4;
+        mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+        if (setsockopt(fd, IPPROTO_IP, IP_DROP_MEMBERSHIP,
+                       UDP_SOCKOPT_CAST(&mreq), sizeof(mreq)) < 0)
+            return socket_last_error();
+        return SOCKET_OK;
+    }
+
+    struct in6_addr addr6;
+    if (inet_pton(AF_INET6, ipz, &addr6) == 1) {
+        struct ipv6_mreq mreq6;
+        mreq6.ipv6mr_multiaddr = addr6;
+        mreq6.ipv6mr_interface = 0;
+        if (setsockopt(fd, IPPROTO_IPV6, IPV6_LEAVE_GROUP,
+                       UDP_SOCKOPT_CAST(&mreq6), sizeof(mreq6)) < 0)
+            return socket_last_error();
+        return SOCKET_OK;
+    }
+
+    return SOCKET_ERR_RESOLVE;
+}
+
+int udp_set_multicast_ttl(udp_t* u, int ttl) {
+    int fd = (int)(intptr_t)get_sock(u->opaque);
+
+    /* Detect socket family to choose correct option */
+    struct sockaddr_storage ss;
+    socklen_t sslen = sizeof(ss);
+    if (getsockname(fd, (struct sockaddr*)&ss, &sslen) == 0) {
+        if (ss.ss_family == AF_INET6) {
+            int hops = ttl;
+            if (setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_HOPS,
+                           UDP_SOCKOPT_CAST(&hops), sizeof(hops)) < 0)
+                return socket_last_error();
+            return SOCKET_OK;
+        }
+    }
+    /* Default: try IPv4 */
+    uint8_t val = (uint8_t)(ttl & 0xff);
+    if (setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, UDP_SOCKOPT_CAST(&val), sizeof(val)) < 0)
+        return socket_last_error();
+    return SOCKET_OK;
+}
+
+int udp_set_multicast_loop(udp_t* u, int enable) {
+    int fd = (int)(intptr_t)get_sock(u->opaque);
+
+    /* Detect socket family to choose correct option */
+    struct sockaddr_storage ss;
+    socklen_t sslen = sizeof(ss);
+    if (getsockname(fd, (struct sockaddr*)&ss, &sslen) == 0) {
+        if (ss.ss_family == AF_INET6) {
+            unsigned int v6 = enable ? 1 : 0;
+            if (setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_LOOP,
+                           UDP_SOCKOPT_CAST(&v6), sizeof(v6)) < 0)
+                return socket_last_error();
+            return SOCKET_OK;
+        }
+    }
+    /* Default: try IPv4 */
+    uint8_t val = enable ? 1 : 0;
+    if (setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, UDP_SOCKOPT_CAST(&val), sizeof(val)) < 0)
+        return socket_last_error();
+    return SOCKET_OK;
+}
+
+/* ========================================================================
+ * Close
+ * ======================================================================== */
+
+void udp_close(udp_t* u) {
+    socket_t s = get_sock(u->opaque);
+    if (s != SOCKET_INVALID) {
+        socket_close(s);
+        *u = UDP_INIT;
+    }
+}

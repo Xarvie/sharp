@@ -1,0 +1,74 @@
+// 来源: p230_zero_init.ce, p232_typedef_chain.ce
+// C互通: 零值初始化 + typedef 链
+
+#include <stdbool.h>
+
+typedef long isize;
+
+// === p230: zero-init semantics ===
+class Pair {
+    int a;
+    int b;
+};
+class Container {
+    int val;
+    int* ptr;
+    Pair inner;
+};
+
+// === p232: typedef chain ===
+typedef isize MySize;
+typedef MySize MyLen;
+typedef MyLen  MyCount;
+
+class Vec3 {
+    float x; float y; float z;
+};
+typedef Vec3 Point3D;
+typedef Point3D Position;
+
+float Vec3.dot(this, Vec3 other) const {
+    return this->x * other.x + this->y * other.y + this->z * other.z;
+}
+MyCount add_counts(MyCount a, MyCount b) {
+    return a + b;
+}
+
+int main() {
+    // --- p230: zero-init ---
+    int x = {0};
+    if (x != 0) return 1;
+    float f = {0};
+    if (f != 0.0f) return 2;
+    bool b = {0};
+    if (b != false) return 3;
+
+    Container c = {0};
+    if (c.val != 0) return 4;
+    if (c.ptr != 0) return 5;
+    if (c.inner.a != 0) return 6;
+    if (c.inner.b != 0) return 7;
+
+    int* np = {0};
+    if (np != 0) return 8;
+
+    // --- p232: typedef chain ---
+    MyCount n = 10;
+    if (n != 10) return 9;
+    MyLen l1 = 3; MyLen l2 = 5;
+    MyCount r = add_counts(l1, l2);
+    if (r != 8) return 10;
+
+    Position p;
+    p.x = 1.0f; p.y = 2.0f; p.z = 3.0f;
+    Position q;
+    q.x = 4.0f; q.y = 5.0f; q.z = 6.0f;
+    float d = p.dot(q);
+    if (d < 31.99f || d > 32.01f) return 11;
+
+    Point3D r3;
+    r3.x = 0.0f; r3.y = 0.0f; r3.z = 1.0f;
+    if (r3.dot(p) < 2.99f || r3.dot(p) > 3.01f) return 12;
+
+    return 0;
+}

@@ -502,9 +502,9 @@ def run_all_probe_tests(
     # ── 文件分类 ──
     c_files = sorted(
         f for f in os.listdir(probes_dir)
-        if f.endswith(".c") and not f.endswith(".ref.c")
+        if f.endswith(".c") and not f.endswith(".ref.i")
     )
-    sp_files = sorted(f for f in os.listdir(probes_dir) if f.endswith(".sp"))
+    sp_files = sorted(f for f in os.listdir(probes_dir) if f.endswith(".ce"))
 
     total_files = len(c_files) + len(sp_files)
 
@@ -562,7 +562,7 @@ def run_all_probe_tests(
             ex.submit(
                 test_sp_probe,
                 str(probes_dir / f), sharpc_path,
-                str(probes_dir / f"{f[:-3]}.ref.c"),
+                str(probes_dir / f"{f[:-3]}.ref.i"),
                 zig_path,
                 timeout
             ): f
@@ -608,7 +608,7 @@ def run_bugs_tests(
     Each .c file is:
       1. compiled: sharpc -c bug.c → bug.c.gen.i
       2. compiled with zig cc and linked
-    No .ref.c files are needed — we only check that sharpc can generate
+    No .ref.i files are needed — we only check that sharpc can generate
     valid C code that the backend compiler accepts.
     """
     bugs_dir = base_dir / BUGS_DIR_NAME
@@ -739,17 +739,17 @@ def run_unit_tests(
 ) -> Tuple[int, int, int, Dict[str, Tuple[int, str]]]:
     """Run all unit tests from unit/ directory.
 
-    Each .sp file is:
-      1. compiled: sharpc -c test.sp → test.ref.c
-      2. compared: diff generated vs .ref.c (if .ref.c exists)
-      3. compiled: zig cc test.ref.c → test.exe
+    Each .ce file is:
+      1. compiled: sharpc -c test.ce → test.ref.i
+      2. compared: diff generated vs .ref.i (if .ref.i exists)
+      3. compiled: zig cc test.ref.i → test.exe
       4. run: ./test.exe → exit code 0 = pass
     """
     unit_dir = base_dir / UNIT_DIR_NAME
     if not unit_dir.is_dir():
         return 0, 0, 0, {}
 
-    sp_files = sorted(str(p.relative_to(base_dir)) for p in unit_dir.rglob("*.sp"))
+    sp_files = sorted(str(p.relative_to(base_dir)) for p in unit_dir.rglob("*.ce"))
     if not sp_files:
         return 0, 0, 0, {}
 
@@ -786,7 +786,7 @@ def run_unit_tests(
 
     def test_unit_sp(rel_path: str) -> Tuple[int, str]:
         sp_path = str(base_dir / rel_path)
-        ref_path = sp_path[:-3] + ".ref.c"
+        ref_path = sp_path[:-3] + ".ref.i"
         ok, tmp_out, err = _run_sharpc_codegen(sp_path, sharpc_path, zig_path, timeout)
         if not ok:
             return 2, err
@@ -842,7 +842,7 @@ def run_special_probe_tests(base_dir: Path, sharpc_path: str,
 
     c_files = sorted(
         f for f in os.listdir(special_dir)
-        if f.endswith(".c") and not f.endswith(".ref.c")
+        if f.endswith(".c") and not f.endswith(".ref.i")
     )
     if not c_files:
         return 0, 0, 0, {}

@@ -1,0 +1,54 @@
+// 来源: p141_const_method.ce, p147_const_nonconst_mix.ce, p148_const_method_params.ce
+// const 方法测试: 基础 const 方法 + const/non-const 混合 + const 方法参数
+
+// === p141: const 方法基础 (size vs push) ===
+class Vec {
+    int* data;
+    long len;
+    long cap;
+}
+long Vec.size(this) const { return this->len; }
+void Vec.push(this, int item) { this->data[this->len] = item; this->len++; }
+
+// === p147: const/non-const 方法混合 ===
+class Counter {
+    long count;
+};
+void Counter.inc(this) { this->count = this->count + 1; }
+long Counter.get(this) const { return this->count; }
+
+// === p148: const 方法参数 (area, move, at_x, at_y) ===
+class BBox {
+    long x, y, w, h;
+};
+long BBox.area(this) const { return this->w * this->h; }
+void BBox.move(this, long dx, long dy) { this->x = this->x + dx; this->y = this->y + dy; }
+long BBox.at_x(this) const { return this->x; }
+long BBox.at_y(this) const { return this->y; }
+
+int main(void) {
+    // --- p141 ---
+    int arr[10];
+    Vec v = { arr, 0, 10 };
+    v.push(42);
+    v.push(99);
+    long s = v.size();
+    if (s != 2) return 1;
+
+    // --- p147 ---
+    Counter c = { 0 };
+    c.inc();
+    c.inc();
+    long cv = c.get();
+    if (cv != 2) return 2;
+
+    // --- p148 ---
+    BBox b = { 1, 2, 10, 20 };
+    long a = b.area();        // 200
+    b.move(3, 4);             // x=4, y=6
+    long sx = b.at_x();       // 4
+    long sy = b.at_y();       // 6
+    if (a + sx + sy != 210) return 3;
+
+    return 0;
+}

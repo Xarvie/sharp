@@ -2,7 +2,7 @@
  * sharpc.c — Sharp compiler driver (clang-compatible CLI).
  *
  * Sharp is a superset of C (cf. C++ ⊃ C).  The same driver compiles
- * `.sp` Sharp source and `.c` C source — input is always parsed as
+ * `.ce` Sharp source and `.c` C source — input is always parsed as
  * Sharp.  The driver can preprocess, compile, assemble, link, or
  * compile+link in one invocation — just like clang.
  *
@@ -11,7 +11,7 @@
  *   sharpc -c <input> [-o <obj>]                    # compile to .o
  *   sharpc -S <input> [-o <asm>]                    # emit .s
  *   sharpc -E <input> [-o <pp>]                     # preprocess only
- *   sharpc file1.sp file2.sp -o app                  # multi-file link
+ *   sharpc file1.ce file2.ce -o app                  # multi-file link
  *
  *   sharpc -                              # read from stdin
  *
@@ -422,7 +422,7 @@ static bool is_dot_S(const char *path) {
 }
 
 static char *replace_ext(const char *path, const char *new_ext) {
-    /* e.g. /a/b/foo.sp → /a/b/foo.o */
+    /* e.g. /a/b/foo.ce → /a/b/foo.o */
     const char *dot = strrchr(path, '.');
     if (!dot) {
         char *r = malloc(strlen(path) + strlen(new_ext) + 1);
@@ -498,7 +498,7 @@ static void usage(FILE *out) {
 "       sharpc -E <input> [options]                   preprocess only\n"
 "\n"
 "Input files:\n"
-"  <file>.sp/.c/.i     source files (compiled via Sharp frontend)\n"
+"  <file>.ce/.c/.i     source files (compiled via Sharp frontend)\n"
 "  <file>.S             assembly with preprocessor (cpp + zig cc)\n"
 "  <file>.o/.obj        pre-built objects (passed to linker)\n"
 "  <file>.a/.so         static / shared libraries (passed to linker)\n"
@@ -881,8 +881,8 @@ static char *compile_one_file(const char *input,
     /* Convert r#"..."# raw strings to standard C string literals
      * BEFORE the preprocessor runs.  Only for Sharp source files. */
     const char *input_ext = strrchr(input, '.');
-    int is_sharp_input = input_ext && (strcmp(input_ext, ".sp") == 0 ||
-                                        strcmp(input_ext, ".sph") == 0);
+    int is_sharp_input = input_ext && (strcmp(input_ext, ".ce") == 0 ||
+                                        strcmp(input_ext, ".he") == 0);
     if (is_sharp_input) {
         char *src2 = convert_raw_strings(src, input);
         free(src);

@@ -1,0 +1,46 @@
+// Merged generic function tests
+// Sources: p102_generic_func.ce, p117_gfunc_swap.ce, p118_gfunc_infer.ce, p119_gfunc_multiparam.ce
+
+/* Generic max function (p102) */
+T max<T>(T a, T b) {
+    if (a > b) {
+        return a;
+    } else {
+        return b;
+    }
+}
+
+/* Generic swap function (p117) */
+void swap<T>(T* a, T* b) {
+    T tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+/* Generic pass with multiple type params (p119) */
+int pass<T, U>(T a, U b) {
+    return 0;
+}
+
+int main(void) {
+    /* Test generic max with explicit type (p102) */
+    if (max<int>(3, 5) != 5) return 1;
+    if (max<int>(7, 2) != 7) return 2;
+
+    /* Test generic swap (p117) */
+    int a = 10, b = 20;
+    swap<int>(&a, &b);
+    if (a != 20) return 3;
+    if (b != 10) return 4;
+
+    /* Test generic swap with float */
+    float fa = 1.0f, fb = 2.0f;
+    swap<float>(&fa, &fb);
+    if (fa < 1.99f || fa > 2.01f) return 5;
+    if (fb < 0.99f || fb > 1.01f) return 6;
+
+    /* Test generic pass with type inference (p118/p119) */
+    if (pass(1, 2.5) != 0) return 7;
+
+    return 0;
+}

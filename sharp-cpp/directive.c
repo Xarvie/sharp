@@ -739,12 +739,12 @@ static void handle_include(CppState *st, TokList *line, CppLoc loc,
         tl_free(&expanded);
     }
 
-    /* #include of .sp files: treat as regular include. */
+    /* #include of .ce files: treat as regular include. */
     if (!is_sys) {
         size_t _nlen = strlen(name);
-        if (_nlen >= 3 && memcmp(name + _nlen - 3, ".sp", 3) == 0) {
+        if (_nlen >= 3 && memcmp(name + _nlen - 3, ".ce", 3) == 0) {
             emit_diag(st, CPP_DIAG_ERROR, loc,
-                "#include \"%s\": use #include with .sph header, not .sp file",
+                "#include \"%s\": use #include with .he header, not .ce file",
                 name);
             return;
         }

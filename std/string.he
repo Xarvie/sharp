@@ -1,0 +1,141 @@
+#include "types.he"
+#include "str.he"
+#include <stdlib.h>
+
+struct String {
+    char* ptr;
+    isize len;
+    isize cap;
+
+    void push_byte(char c) {
+        if (this->len >= this->cap) {
+            isize new_cap = (this->cap == 0) ? 8 : this->cap * 2;
+            char* nd = (char*)realloc(this->ptr, new_cap);
+            if (!nd) __builtin_trap();
+            this->ptr = nd;
+            this->cap = new_cap;
+        }
+        this->ptr[this->len] = c;
+        this->len = this->len + 1;
+    }
+
+    void push_str(Str s) {
+        if (this->len + s.len > this->cap) {
+            bool overlaps = (s.ptr >= this->ptr && s.ptr < this->ptr + this->cap);
+            char* tmp = (char*)0;
+            isize copy_len = s.len;
+            if (overlaps) {
+                tmp = (char*)malloc(copy_len);
+                if (!tmp) __builtin_trap();
+                isize i = 0;
+                while (i < copy_len) {
+                    tmp[i] = s.ptr[i];
+                    i = i + 1;
+                }
+                s.ptr = tmp;
+            }
+            isize new_cap = (this->cap == 0) ? 8 : this->cap * 2;
+            while (new_cap < this->len + copy_len) new_cap = new_cap * 2;
+            char* nd = (char*)realloc(this->ptr, new_cap);
+            if (!nd) { if (tmp) free(tmp); __builtin_trap(); }
+            this->ptr = nd;
+            this->cap = new_cap;
+            isize i = 0;
+            while (i < copy_len) {
+                this->ptr[this->len + i] = s.ptr[i];
+                i = i + 1;
+            }
+            this->len = this->len + copy_len;
+            if (tmp) free(tmp);
+        } else {
+            isize i = 0;
+            while (i < s.len) {
+                this->ptr[this->len + i] = s.ptr[i];
+                i = i + 1;
+            }
+            this->len = this->len + s.len;
+        }
+    }
+
+    Str as_str() const {
+        return str_from_parts(this->ptr, this->len);
+    }
+
+    void clear() {
+        this->len = 0;
+    }
+
+    void reserve(isize n) {
+        if (n <= this->cap) return;
+        char* nd = (char*)realloc(this->ptr, n);
+        if (!nd) __builtin_trap();
+        this->ptr = nd;
+        this->cap = n;
+    }
+
+    isize size() const {
+        return this->len;
+    }
+
+    isize capacity() const {
+        return this->cap;
+    }
+
+    bool is_empty() const {
+        return this->len == 0;
+    }
+
+    void destroy() {
+        free(this->ptr);
+        this->ptr = (char*)0;
+        this->len = 0;
+        this->cap = 0;
+    }
+
+    usize hash() const {
+        usize h = (usize)14695981039346656037UL;
+        isize i = 0;
+        while (i < this->len) {
+            h = h ^ (usize)(unsigned char)this->ptr[i];
+            h = h * (usize)1099511628211UL;
+            i = i + 1;
+        }
+        return h;
+    }
+
+    bool operator==(String other) const {
+        if (this->len != other.len) return false;
+        isize i = 0;
+        while (i < this->len) {
+            if (this->ptr[i] != other.ptr[i]) return false;
+            i = i + 1;
+        }
+        return true;
+    }
+}
+
+static inline String string_from_str(Str s) {
+    String r;
+    if (s.len == 0) {
+        r.ptr = (char*)0;
+        r.len = 0;
+        r.cap = 0;
+        return r;
+    }
+    r.len = s.len;
+    r.cap = s.len;
+    char* nd = (char*)malloc(r.cap);
+    if (!nd) __builtin_trap();
+    r.ptr = nd;
+    isize i = 0;
+    while (i < s.len) {
+        r.ptr[i] = s.ptr[i];
+        i = i + 1;
+    }
+    return r;
+}
+
+static inline String string_from_parts(const char* sptr, isize slen) {
+    Str tmp = str_from_parts(sptr, slen);
+    return string_from_str(tmp);
+}

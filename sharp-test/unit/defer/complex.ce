@@ -1,0 +1,119 @@
+// Merged complex defer tests
+// Source: p155_defer_complex.ce (kept standalone due to complexity)
+
+/* === Single defer cleanup === */
+void test_single_defer() {
+    int count = 10;
+    {
+        defer { count = count - 1; }
+        count = count + 5;
+    }
+    if (count != 14) return;  /* 10+5-1=14 */
+}
+
+/* === Multiple defers, LIFO order === */
+void test_multi_defer_lifo() {
+    int x = 0;
+    {
+        defer { x = x * 10; }
+        defer { x = x + 3; }
+        defer { x = x + 2; }
+        x = 1;
+    }
+    if (x != 60) return;  /* (1+2+3)*10=60 */
+}
+
+/* === Defer in if branch === */
+void test_defer_in_if() {
+    int val = 0;
+    {
+        if (val == 0) {
+            defer { val = 10; }
+            val = 5;
+        }
+    }
+    if (val != 10) return;
+}
+
+/* === Defer in loop, each iteration triggers === */
+void test_defer_in_loop() {
+    int sum = 0;
+    {
+        long i = 0;
+        while (i < 5) {
+            defer { sum = sum + 1; }
+            i = i + 1;
+        }
+    }
+    if (sum != 5) return;
+}
+
+/* === Defer in nested scopes === */
+void test_defer_nested_scope() {
+    int outer = 0;
+    int inner = 0;
+    {
+        defer { outer = 1; }
+        {
+            defer { inner = 1; }
+        }
+        if (inner != 1) return;
+    }
+    if (outer != 1) return;
+}
+
+/* === Defer with return === */
+int test_defer_with_return() {
+    int val = 0;
+    {
+        defer { val = 100; }
+        return val;
+    }
+    return val;
+}
+
+void test_defer_return() {
+    int r = test_defer_with_return();
+    if (r != 0) return;
+}
+
+/* === Defer modifying struct === */
+class Counter {
+    int value;
+}
+
+void test_defer_on_struct() {
+    Counter c;
+    c.value = 0;
+    {
+        defer { c.value = 42; }
+        c.value = 10;
+    }
+    if (c.value != 42) return;
+}
+
+/* === Multiple defers mixed === */
+void test_defer_mixed() {
+    int a = 0, b = 0, c = 0;
+    {
+        defer { c = 30; }
+        defer { b = 20; }
+        defer { a = 10; }
+    }
+    if (a != 10) return;
+    if (b != 20) return;
+    if (c != 30) return;
+}
+
+int main() {
+    test_single_defer();
+    test_multi_defer_lifo();
+    test_defer_in_if();
+    test_defer_in_loop();
+    test_defer_nested_scope();
+    test_defer_return();
+    test_defer_on_struct();
+    test_defer_mixed();
+
+    return 0;
+}

@@ -1,0 +1,11 @@
+// 来源: p261_shape.he
+// 模块: 带扩展方法的 Point2D 类
+
+class Point2D {
+    int x;
+    int y;
+};
+
+void Point2D.move_to(this, int nx, int ny) { this->x = nx; this->y = ny; }
+int  Point2D.get_x(this) const { return this->x; }
+int  Point2D.get_y(this) const { return this->y; }

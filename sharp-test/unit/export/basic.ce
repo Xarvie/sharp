@@ -1,0 +1,36 @@
+// 来源: p143_export_inst.ce, p144_export_only.ce, p145_export_gfunc.ce
+// export 关键字: 泛型函数实例化标记
+
+void swap<T>(T* a, T* b) {
+    T tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+extern swap<int>;
+extern swap<float>;
+
+int test_export_int() {
+    int x = 5, y = 10;
+    swap<int>(&x, &y);
+    return x - 10 + y - 5;  /* x=10, y=5, result=0 */
+}
+int test_export_float() {
+    float a = 1.0f, b = 2.0f;
+    swap<float>(&a, &b);
+    return (int)(a + b - 3.0f);  /* a=2, b=1, result=0 */
+}
+int test_export_gfunc() {
+    int x = 1, y = 2;
+    swap<int>(&x, &y);
+    return x - 2 + y - 1;  /* x=2, y=1, result=0 */
+}
+
+int main(void) {
+    int r1 = test_export_int();
+    if (r1 != 0) return r1;
+    int r2 = test_export_float();
+    if (r2 != 0) return r2;
+    int r3 = test_export_gfunc();
+    if (r3 != 0) return r3;
+    return 0;
+}

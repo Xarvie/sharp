@@ -234,7 +234,7 @@ wg_node_t *wg_create(const char *type_name, const char *id);
 
 ### 7.1 默认行为
 
-使用内置 HTML（当前 `webgui_html.sph` 的内容）。
+使用内置 HTML（当前 `webgui_html.he` 的内容）。
 
 ### 7.2 自定义前端
 

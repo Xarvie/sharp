@@ -8543,7 +8543,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
      * globals) AND forward declarations for struct methods (so spec
      * bodies in Phase 3.5 can call them).  Free-function declarations
      * are left to Phase 3b in source order, matching the original output
-     * shape (so existing .ref.c golden files don't drift).
+     * shape (so existing .ref.i golden files don't drift).
      *
      * Extension method forward declarations are emitted AFTER struct
      * definitions (unlike struct methods) so that the C compiler sees

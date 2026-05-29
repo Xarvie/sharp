@@ -1,5 +1,5 @@
 /*
- * p160b_pthread_cross.sp — Cross-compile probe with pthread.h
+ * p160b_pthread_cross.ce — Cross-compile probe with pthread.h
  */
 
 #include <pthread.h>

@@ -1,0 +1,57 @@
+// 来源: p113_unary_operator.ce, p249_unary_binary_mix.ce
+// 一元运算符重载 + 一元/二元运算符混合测试
+
+#include <stdbool.h>
+
+// === p113: 一元运算符 (-) — method 和 free function ===
+class Vec2 {
+    float x; float y;
+}
+Vec2 Vec2.operator-(this) {
+    Vec2 r; r.x = -this->x; r.y = -this->y; return r;
+}
+
+struct Scalar { int v; }
+struct Scalar operator-(struct Scalar a) {
+    struct Scalar r; r.v = -a.v; return r;
+}
+
+// === p249: 一元/二元混合 ===
+class Val {
+    int x;
+};
+Val  Val.operator+(this, Val other) const {
+    Val r; r.x = this->x + other.x; return r;
+}
+Val  Val.operator-(this) const {
+    Val r; r.x = -this->x; return r;
+}
+bool Val.operator==(this, Val other) const {
+    return this->x == other.x;
+}
+
+int main() {
+    // --- p113 测试 ---
+    Vec2 a; a.x = 3.0f; a.y = -4.0f;
+    Vec2 b = -a;
+    if (b.x != -3.0f) return 1;
+    if (b.y !=  4.0f) return 2;
+    struct Scalar s; s.v = 7;
+    struct Scalar ns = -s;
+    if (ns.v != -7) return 3;
+
+    // --- p249 测试 ---
+    Val u; u.x = 10;
+    Val v; v.x = 3;
+    // -a + b = -10 + 3 = -7
+    Val r1 = -u + v;
+    if (r1.x != -7) return 4;
+    // a + -b = 10 + -3 = 7
+    Val r2 = u + -v;
+    if (r2.x != 7) return 5;
+    // -a + -b = -10 + -3 = -13
+    Val r3 = -u + -v;
+    if (r3.x != -13) return 6;
+
+    return 0;
+}

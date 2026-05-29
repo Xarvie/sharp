@@ -1,0 +1,20 @@
+/*
+ * Test: macro scope across #include
+ * - A.ce defines X=1
+ * - A.ce includes B.h (B.h uses X)
+ * - A.ce undefs X
+ * - After undef, X should not be defined anymore
+ * 
+ * Expected (same as zig cc):
+ * - b_value = 1 (B.h sees X=1)
+ */
+
+#define X 1
+#include "macro_include_b.h"
+
+int Y = X;
+
+
+int main(void) {
+    return 0;
+}

@@ -1,0 +1,121 @@
+// Merged generic typedef tests
+// Sources: p114_generic_assoc.ce, p224_generic_typedef.ce, p149_generic_const_access.ce
+
+#include <stdbool.h>
+#include <stdlib.h>
+
+typedef long isize;
+typedef unsigned long usize;
+
+/* Generic stack with associated function (p114) */
+class Stack<T> {
+    T data;
+    int n;
+}
+
+Stack<T> Stack<T>.new() {
+    Stack<T> s;
+    s.n = 0;
+    return s;
+}
+
+void Stack<T>.push(this, T v) {
+    this->data = v;
+    this->n = this->n + 1;
+}
+
+T Stack<T>.top(this) const {
+    return this->data;
+}
+
+/* Generic Vec with typedef (p224) */
+class Vec<T> {
+    T* data;
+    isize len;
+    isize cap;
+}
+
+void Vec<T>.push(this, T val) {
+    if (this->len >= this->cap) {
+        isize new_cap = (this->cap == 0) ? 8 : this->cap * 2;
+        T* nd = (T*)realloc(this->data, sizeof(T) * new_cap);
+        if (!nd) __builtin_trap();
+        this->data = nd;
+        this->cap = new_cap;
+    }
+    this->data[this->len] = val;
+    this->len = this->len + 1;
+}
+
+isize Vec<T>.size(this) const {
+    return this->len;
+}
+
+T Vec<T>.get(this, isize i) const {
+    if (i < 0 || i >= this->len) __builtin_trap();
+    return this->data[i];
+}
+
+void Vec<T>.destroy(this) {
+    free(this->data);
+    this->data = (T*)0;
+    this->len = 0;
+    this->cap = 0;
+}
+
+/* Typedef for generic types (p224) */
+typedef Vec<int> IntVec;
+typedef Vec<float> FloatVec;
+typedef IntVec MyIntVec;
+
+/* Generic with const field access (p149) */
+class Arr<T> {
+    T* data;
+    int size;
+}
+
+int Arr<T>.len(this) const {
+    return this->size;
+}
+
+int main() {
+    /* Test generic associated function (p114) */
+    Stack<int> s = Stack<int>.new();
+    s.push(42);
+    if (s.top() != 42) return 1;
+    if (s.n != 1) return 2;
+
+    /* Test typedef for generic type (p224) */
+    IntVec v = {0};
+    v.push(42);
+    v.push(73);
+    if (v.size() != 2) return 3;
+    if (v.get(0) != 42) return 4;
+    if (v.get(1) != 73) return 5;
+    v.destroy();
+
+    /* Test chained typedef (p224) */
+    MyIntVec v2 = {0};
+    v2.push(99);
+    if (v2.size() != 1) return 6;
+    if (v2.get(0) != 99) return 7;
+    v2.destroy();
+
+    /* Test FloatVec typedef (p224) */
+    FloatVec fv = {0};
+    fv.push(1.5f);
+    if (fv.size() != 1) return 8;
+    if (fv.get(0) < 1.4f || fv.get(0) > 1.6f) return 9;
+    fv.destroy();
+
+    /* Test empty Vec (p224) */
+    IntVec z = {0};
+    if (z.size() != 0) return 10;
+
+    /* Test generic const field access (p149) */
+    Arr<int> arr = {0};
+    arr.size = 5;
+    if (arr.len() != 5) return 11;
+
+    return 0;
+}

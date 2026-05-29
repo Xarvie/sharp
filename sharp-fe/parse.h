@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 /**
- * Parse a complete .sp compilation unit from a lex token stream.
+ * Parse a complete .ce compilation unit from a lex token stream.
  *
  * tokens[0..ntokens] must contain a STOK_EOF sentinel at [ntokens].
  * The CppResult that backs SharpTok.text must outlive the returned AST.

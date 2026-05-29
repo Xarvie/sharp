@@ -1,0 +1,64 @@
+// 来源: p264_runtime_struct.ce, p265_runtime_extmethod.ce
+// 运行时扩展方法: 跨作用域/文件的方法定义
+
+#include <stdbool.h>
+
+// === p264: extension method defined AFTER usage in different scope ===
+class Value { int data; };
+
+// Forward declaration: extension not yet defined
+int call_get_value(class Value v);
+
+// Usage before definition
+int call_get_value(class Value v) {
+    return v.get_value();
+}
+
+// Extension defined after usage
+int Value.get_value(this) const { return this->data; }
+
+// === p265: multiple extensions, methods defined in any order ===
+class Buffer {
+    int size;
+    int buf[16];
+};
+
+// Used before some methods are defined
+int Buffer.peek_first(this) const {
+    if (this->size > 0) return this->buf[0];
+    return -1;
+}
+
+void Buffer.append(this, int v) {
+    if (this->size < 16) {
+        this->buf[this->size] = v;
+        this->size = this->size + 1;
+    }
+}
+
+// Check after all methods
+int test_buffer() {
+    Buffer b = {0};
+    b.append(42);
+    b.append(99);
+    int pk = b.peek_first();
+    if (pk != 42) return 21;
+    return 0;
+}
+
+int main() {
+    // --- p264: extension defined after use ---
+    Value v; v.data = 128;
+    int result = call_get_value(v);
+    if (result != 128) return 1;
+
+    // Direct call after definition
+    int direct = v.get_value();
+    if (direct != 128) return 2;
+
+    // --- p265: buffer test ---
+    int r = test_buffer();
+    if (r != 0) return r;
+
+    return 0;
+}

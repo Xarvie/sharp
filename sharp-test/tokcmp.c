@@ -8,9 +8,9 @@
  *     Path B:  source.c  ── sharpc ──▶ out.c ── gcc -E ──▶ tokens_B
  *     Result:  IDENTICAL | DIFFER | ERROR
  *
- *   .sp  file  (Sharp pipeline check):
- *     Path B:  source.sp ── sharpc ──▶ out.c ── gcc -E ──▶ tokens_B
- *     Path A:  --ref=ref.c ─────────── gcc -E ──▶ tokens_A   (optional)
+ *   .ce  file  (Sharp pipeline check):
+ *     Path B:  source.ce ── sharpc ──▶ out.c ── gcc -E ──▶ tokens_B
+ *     Path A:  --ref=ref.i ─────────── gcc -E ──▶ tokens_A   (optional)
  *              (if no --ref: just show token count, report success/fail)
  *     Result:  IDENTICAL | DIFFER | COMPILED | ERROR
  *
@@ -21,17 +21,17 @@
  * Options:
  *   -v, --verbose       show token diff on differ
  *   -q, --quiet         suppress per-file output (only summary)
- *   --ref=FILE          reference C file for .sp comparison
+ *   --ref=FILE          reference C file for .ce comparison
  *   --sharpc=PATH       path to sharpc binary (default: ./sharpc)
  *   --isystem=DIR       add -isystem DIR to gcc and sharpc invocations
  *                       (may be repeated; default: auto-detect gcc paths)
- *   --batch=DIR         compare all .c and .sp files in DIR
+ *   --batch=DIR         compare all .c and .ce files in DIR
  *   --stop-first        stop at first non-identical result
  *   --no-filter-sys     include system-header tokens in comparison
  *   --show-tokens       dump token list for PATH_B (debug)
  *
  * Exit codes:
- *   0  all files identical (or all compiled for .sp without ref)
+ *   0  all files identical (or all compiled for .ce without ref)
  *   1  at least one file differs or errors
  *   2  bad arguments / tool not found
  *
@@ -705,7 +705,7 @@ static void print_diff_excerpt(const TokStore *a, const TokStore *b,
 typedef enum {
     CMP_IDENTICAL,
     CMP_DIFFER,
-    CMP_COMPILED,   /* .sp only: compiled successfully, no reference to compare */
+    CMP_COMPILED,   /* .ce only: compiled successfully, no reference to compare */
     CMP_ERR_SHARPC,
     CMP_ERR_GCC_A,
     CMP_ERR_GCC_B,
@@ -739,7 +739,7 @@ static CmpResult compare_file(const char *src_path, const char *ref_path,
                  src_path[slen-1] == 'p');
 
     if (is_sp) {
-        /* .sp mode: Path B = sharpc → gcc -E */
+        /* .ce mode: Path B = sharpc → gcc -E */
         int sharpc_failed = 0;
         TokStore *b = sharpc_gcc_e_tokenise(src_path, tmp_c, cfg,
                                              r.errmsg, sizeof r.errmsg,
@@ -933,10 +933,10 @@ static void usage(const char *prog) {
 "Options:\n"
 "  -v, --verbose          show token diff on differ\n"
 "  -q, --quiet            suppress per-file output\n"
-"  --ref=FILE             reference C file for .sp comparison\n"
+"  --ref=FILE             reference C file for .ce comparison\n"
 "  --sharpc=PATH          path to sharpc (default: ./sharpc)\n"
 "  --isystem=DIR          add -isystem DIR (repeatable)\n"
-"  --batch=DIR            compare all .c and .sp files in DIR\n"
+"  --batch=DIR            compare all .c and .ce files in DIR\n"
 "  --stop-first           stop at first non-identical result\n"
 "  --no-filter-sys        include system-header tokens\n"
 "  --show-tokens          dump tokenised output (debug)\n"
@@ -997,19 +997,19 @@ int main(int argc, char *argv[]) {
         char *files[MAX_FILES];
         int nf = collect_files(batch_dir, files, MAX_FILES);
         if (nf == 0) {
-            fprintf(stderr, "tokcmp: no .c or .sp files found in %s\n", batch_dir);
+            fprintf(stderr, "tokcmp: no .c or .ce files found in %s\n", batch_dir);
             ret = 1;
         } else {
             int identical = 0, compiled = 0, differ = 0, errors = 0;
             printf("tokcmp: comparing %d files in %s\n\n", nf, batch_dir);
             for (int i = 0; i < nf; i++) {
-                /* Auto-detect per-file reference: foo.sp → foo.ref.c */
+                /* Auto-detect per-file reference: foo.ce → foo.ref.i */
                 const char *this_ref = ref_file;
                 char auto_ref[4096];
                 if (!this_ref) {
                     size_t flen = strlen(files[i]);
-                    if (flen > 3 && strcmp(files[i] + flen - 3, ".sp") == 0) {
-                        snprintf(auto_ref, sizeof auto_ref, "%.*s.ref.c",
+                    if (flen > 3 && strcmp(files[i] + flen - 3, ".ce") == 0) {
+                        snprintf(auto_ref, sizeof auto_ref, "%.*s.ref.i",
                                  (int)(flen - 3), files[i]);
                         struct stat _st;
                         if (stat(auto_ref, &_st) == 0) this_ref = auto_ref;

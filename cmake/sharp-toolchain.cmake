@@ -5,7 +5,7 @@
 #   cmake --build build
 #
 # This toolchain tricks CMake into treating sharpc as a GNU-like C compiler
-# and registers .sp / .sph as C source / header file extensions.
+# and registers .ce / .he as C source / header file extensions.
 
 # ── Compiler identity ────────────────────────────────────────────────
 set(CMAKE_SYSTEM_NAME "Linux")
@@ -16,9 +16,9 @@ set(CMAKE_C_COMPILER_ID "GNU")
 set(CMAKE_C_COMPILER_VERSION "1.0")
 
 # ── File extensions ──────────────────────────────────────────────────
-# Register .sp as a C source file extension so CMake treats *.sp like *.c
+# Register .ce as a C source file extension so CMake treats *.ce like *.c
 # Must be a regular variable (not CACHE) to take effect before project().
-set(CMAKE_C_SOURCE_FILE_EXTENSIONS "c;C;sp")
+set(CMAKE_C_SOURCE_FILE_EXTENSIONS "c;C;ce")
 
 # ── Compiler flags ───────────────────────────────────────────────────
 # Compile a single source to an object (no linking)

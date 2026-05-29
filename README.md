@@ -1,7 +1,7 @@
 ## Sharp 语言项目概览
 
 ### 1. Sharp 是什么
-Sharp(.sp) 是 C 的超集语言。语法兼容 C，但额外增加 `.sp` 扩展（模块、泛型等特性）。
+Sharp(.ce) 是 C 的超集语言。语法兼容 C，但额外增加 `.ce` 扩展（模块、泛型等特性）。
 所有合法 C 代码都是合法 Sharp 代码。
 
 ### 2. 项目目录结构
@@ -10,7 +10,7 @@ Sharp(.sp) 是 C 的超集语言。语法兼容 C，但额外增加 `.sp` 扩展
 sharp/
 ├── sharpc/              # 编译器核心（纯 C）
 ├── sharp-fe/            # 前端（词法/语法分析）
-├── sharp-test/          # 测试用例（.sp 文件）
+├── sharp-test/          # 测试用例（.ce 文件）
 ├── net/                 # 网络库（socket/poller/ring/tcp/udp/timer）
 ├── sharp-pkg/
 │   ├── libgit2/         # libgit2 + 内置 mbedTLS 2.28.9（自包含 Git 支持）
@@ -35,8 +35,8 @@ sharp/
 
 - 纯 C 实现，cmake 构建
 - **强依赖 zig**：内部调用 `zig cc` 编译和链接
-- 用法：`sharpc -c src/main.sp -o build/main.o` 然后 `zig cc build/main.o -o app`
-- 编译产物：`.sp → zig cc → .o → zig cc → exe`
+- 用法：`sharpc -c src/main.ce -o build/main.o` 然后 `zig cc build/main.o -o app`
+- 编译产物：`.ce → zig cc → .o → zig cc → exe`
 - 构建：`cmake -B build && cmake --build build`，输出 `build/sharpc`
 
 ### 4. spkg 包管理器
@@ -64,7 +64,7 @@ return {
   name = "my-project",
   version = "0.1.0",
   type = "exe",           -- exe | staticlib
-  src = { "src/**/*.sp" },-- 支持 ** 递归 glob
+  src = { "src/**/*.ce" },-- 支持 ** 递归 glob
   deps = { sharp_net = "*" },
   link = {}
 }
@@ -87,8 +87,8 @@ return {
 
 **构建流程**：
 1. `spkg_fetch.fetch_deps()` — git clone 依赖
-2. `spkg.glob("src/**/*.sp")` — 收集源文件（POSIX glob 不支持 **，降级到 find 命令）
-3. `sharpc -c src/main.sp -o build/c/src_main.o` — 编译
+2. `spkg.glob("src/**/*.ce")` — 收集源文件（POSIX glob 不支持 **，降级到 find 命令）
+3. `sharpc -c src/main.ce -o build/c/src_main.o` — 编译
 4. `zig cc build/c/*.o -o build/<name>` — 链接
 5. spkg 通过 `/proc/self/exe` 自动定位 sharpc，也可设 `SHARPC` 环境变量
 
@@ -119,7 +119,7 @@ rm -rf build && cmake -B build && cmake --build build
 
 未完成：
 - `spkg update` 命令未实现
-- 依赖的自动编译（fetch 后只拉取，不编译 dep 的 .c/.sp）
+- 依赖的自动编译（fetch 后只拉取，不编译 dep 的 .c/.ce）
 - libgit2 集成（已编译但未在 spkg 中使用，目前走系统 git）
 - 没有 `spkg publish` 或版本管理
 

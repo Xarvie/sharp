@@ -5,13 +5,13 @@
  * and emits a C11 source file.  Together, sharp-cpp + sharp-fe form the
  * complete sharpc compiler:
  *
- *   .sp source  -->  cpp_run()  -->  CppTok[]  -->  sharp_compile_tokens()
+ *   .ce source  -->  cpp_run()  -->  CppTok[]  -->  sharp_compile_tokens()
  *                -->  SharpResult.c_text  -->  cc  -->  binary
  *
  * Usage (minimal)
  * ---------------
  *   SharpCtx *ctx = sharp_ctx_new();
- *   SharpResult res = sharp_compile_file(ctx, "input.sp");
+ *   SharpResult res = sharp_compile_file(ctx, "input.ce");
  *   if (res.error) { fprintf(stderr, "%s\n", res.error); }
  *   else           { write res.c_text to a .c file and invoke cc }
  *   sharp_result_free(&res);

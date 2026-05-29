@@ -593,8 +593,8 @@ static void p11_3(void) {
 }
 static void p11_4(void) {
     dec("P11.4",
-        "Generated .c file contains #line directives mapping back to .sp source. "
-        "Satisfies invariant I4 (errors map to .sp line numbers).");
+        "Generated .c file contains #line directives mapping back to .ce source. "
+        "Satisfies invariant I4 (errors map to .ce line numbers).");
 }
 static void p11_5(void) {
     dec("P11.5",

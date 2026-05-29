@@ -94,7 +94,7 @@ typedef enum {
  * ---------------------------------------------------------------------- */
 typedef enum {
     /* ── Top-level ──────────────────────────────────────────────────────── */
-    AST_FILE,            /* root of a .sp compilation unit                  */
+    AST_FILE,            /* root of a .ce compilation unit                  */
     AST_EXTERN_INST,     /* extern struct Vec<int>; — explicit instantiation  */
     /* C7: Preserved GCC extension — text captured verbatim from source.
      * Emitted as-is in C mode; silently ignored in Sharp mode.
