@@ -305,11 +305,13 @@ bool ty_is_signed_int(const Type *t) {
 }
 bool ty_is_integer(const Type *t) {
     if (!t) return false;
-    /* const T counts as integer iff T does — same as how ty_is_pointer
-     * looks through const for `const T*`.  Without this, `const char x;
-     * x != 'a'` and `const char *s; s[0] != 'a'` (whose deref yields
-     * `const char`) both fail ty_is_scalar in comparison contexts. */
     if (t->kind == TY_CONST) return ty_is_integer(t->u.const_.base);
+    /* C standard: enum types are integer types in all expression
+     * contexts.  TY_ENUM preserves the tag identity for type matching
+     * (function pointer signatures, struct field types, etc.) but in
+     * arithmetic, comparison, and assignment scenarios enum behaves
+     * exactly like int. */
+    if (t->kind == TY_ENUM) return true;
     return ty_is_signed_int(t) || ty_is_unsigned(t) || t->kind == TY_BOOL;
 }
 bool ty_is_float(const Type *t) {

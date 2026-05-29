@@ -158,6 +158,39 @@ void test_const_enum_ptr_fnptr(void) {
     (void)fn;
 }
 
+/* === Case 11: Enum basic operations (init, assign, compare, return) === */
+typedef enum {
+    OP_VAL_A = 0,
+    OP_VAL_B = 1
+} OpEnum;
+
+OpEnum get_enum(void) {
+    return 0;
+}
+
+void test_enum_init(void) {
+    OpEnum e = 0;
+    (void)e;
+}
+
+void test_enum_assign(void) {
+    OpEnum e = OP_VAL_A;
+    e = 1;
+    (void)e;
+}
+
+void test_enum_compare(void) {
+    OpEnum e = OP_VAL_A;
+    if (e == 0) {}
+    if (e != 1) {}
+}
+
+void test_enum_return(void) {
+    OpEnum e = OP_VAL_A;
+    int i = e;
+    (void)i;
+}
+
 /* Stub implementations to satisfy the linker */
 void func(MyEnum* p) {}
 void set_color(Color* c) {}
