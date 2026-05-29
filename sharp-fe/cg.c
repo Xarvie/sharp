@@ -2022,6 +2022,24 @@ static void cg_emit_field_group(CgCtx *ctx, const AstVec *fields,
             }
         }
         cg_puts(ctx, cf->u.field_decl.name ? cf->u.field_decl.name : "?");
+        /* Emit array suffixes for the continuation field.
+         * The base type was already emitted above; continuation fields
+         * only need pointer wrappers (emitted above) + array suffixes. */
+        {
+            const AstNode *arrs[32];
+            size_t na = 0;
+            const AstNode *acur = cf->u.field_decl.type;
+            while (acur && acur->kind == AST_TYPE_ARRAY && na < 32) {
+                arrs[na++] = acur;
+                acur = acur->u.type_array.base;
+            }
+            for (size_t _ai = na; _ai > 0; _ai--) {
+                const AstNode *ar = arrs[_ai - 1];
+                cg_puts(ctx, "[");
+                if (ar->u.type_array.size) cg_const_expr(ctx, ar->u.type_array.size);
+                cg_puts(ctx, "]");
+            }
+        }
         if (cf->u.field_decl.bit_width) {
             cg_puts(ctx, " : ");
             cg_expr(ctx, cf->u.field_decl.bit_width);
@@ -7582,6 +7600,16 @@ static bool type_refs_name(const AstNode *ty, const char *name) {
             if (type_refs_name(ty->u.type_func.params.data[i], name)) return true;
         return false;
     }
+    case AST_STRUCT_DEF: {
+        for (size_t i = 0; i < ty->u.struct_def.fields.len; i++) {
+            const AstNode *f = ty->u.struct_def.fields.data[i];
+            if (f && f->kind == AST_FIELD_DECL)
+                if (type_refs_name(f->u.field_decl.type, name)) return true;
+        }
+        return false;
+    }
+    case AST_TYPEDEF_DECL:
+        return type_refs_name(ty->u.typedef_decl.target, name);
     default: return false;
     }
 }
@@ -8074,36 +8102,42 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
          * stack; post-order ensures deps are emitted before dependents. */
         #define _EMIT_TD_FWD(ti) do { \
             if (ti < ntds && !td_fwd[ti]) { \
-                /* First pass: collect all dependent typedefs via DFS */ \
-                size_t _stk[32], _top2 = 0, _emit[32], _ne = 0; \
-                _stk[_top2++] = ti; \
-                while (_top2 > 0 && _ne < 32) { \
-                    size_t _cur = _stk[_top2 - 1]; \
-                    if (_cur >= ntds || td_fwd[_cur]) { _top2--; continue; } \
-                    bool _already = false; \
-                    for (size_t _k = 0; _k < _ne; _k++) if (_emit[_k] == _cur) { _already = true; break; } \
-                    if (_already) { _top2--; continue; } \
-                    const AstNode *_td2 = tds[_cur].decl; \
-                    const AstNode *_tgt2 = _td2->u.typedef_decl.target; \
-                    if (_tgt2 && _tgt2->kind == AST_TYPE_NAME && _tgt2->u.type_name.name) { \
-                        bool _all_done = true; \
-                        for (size_t _ji = 0; _ji < ntds; _ji++) { \
-                            if (td_fwd[_ji]) continue; \
-                            if (strcmp(tds[_ji].alias, _tgt2->u.type_name.name) == 0) { \
-                                bool _in_emit = false; \
-                                for (size_t _k = 0; _k < _ne; _k++) if (_emit[_k] == _ji) { _in_emit = true; break; } \
-                                if (!_in_emit) { _all_done = false; _stk[_top2++] = _ji; } \
+                size_t _pending[256]; \
+                size_t _np = 0; \
+                _pending[_np++] = ti; \
+                td_fwd[ti] = true; \
+                for (size_t _pi = 0; _pi < _np && _pi < 256; _pi++) { \
+                    size_t _ci = _pending[_pi]; \
+                    const AstNode *_td = tds[_ci].decl; \
+                    const AstNode *_tgt = _td->u.typedef_decl.target; \
+                    for (size_t _di = 0; _di < ntds; _di++) { \
+                        if (td_fwd[_di]) continue; \
+                        if (type_refs_name(_tgt, tds[_di].alias)) { \
+                            td_fwd[_di] = true; \
+                            if (_np < 256) _pending[_np++] = _di; \
+                        } \
+                    } \
+                    if (_tgt && _tgt->kind == AST_TYPE_NAME && _tgt->u.type_name.name) { \
+                        Symbol *_sym = ctx->file_scope ? \
+                            scope_lookup_struct_tag(ctx->file_scope, _tgt->u.type_name.name) : NULL; \
+                        if (_sym && _sym->decl && _sym->decl->kind == AST_STRUCT_DEF) { \
+                            for (size_t _fi = 0; _fi < _sym->decl->u.struct_def.fields.len; _fi++) { \
+                                const AstNode *_f = _sym->decl->u.struct_def.fields.data[_fi]; \
+                                if (_f && _f->kind == AST_FIELD_DECL && _f->u.field_decl.type) { \
+                                    for (size_t _di = 0; _di < ntds; _di++) { \
+                                        if (td_fwd[_di]) continue; \
+                                        if (type_refs_name(_f->u.field_decl.type, tds[_di].alias)) { \
+                                            td_fwd[_di] = true; \
+                                            if (_np < 256) _pending[_np++] = _di; \
+                                        } \
+                                    } \
+                                } \
                             } \
                         } \
-                        if (_all_done) { _emit[_ne++] = _cur; _top2--; } \
-                    } else { \
-                        _emit[_ne++] = _cur; _top2--; \
                     } \
                 } \
-                /* Second pass: emit in dependency order */ \
-                for (size_t _ei = 0; _ei < _ne; _ei++) { \
-                    cg_emit_decl_sharp(ctx, (AstNode *)tds[_emit[_ei]].decl); \
-                    td_fwd[_emit[_ei]] = true; \
+                for (size_t _pi = _np; _pi > 0; _pi--) { \
+                    cg_emit_decl_sharp(ctx, (AstNode *)tds[_pending[_pi - 1]].decl); \
                 } \
             } \
         } while(0)
