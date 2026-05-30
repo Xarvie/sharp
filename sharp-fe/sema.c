@@ -172,6 +172,18 @@ static bool assign_compat(TyStore *ts, Type *lhs, Type *rhs) {
     if (rhs->kind == TY_STRUCT && rhs->u.struct_.name &&
         strncmp(rhs->u.struct_.name, "__typeof__(", 11) == 0) return true;
 
+    /* GCC vector extension: vector types of the same size are assignable.
+     * Also allow vector ↔ scalar for broadcast/extract patterns. */
+    if (ty_is_vector(lhs) && ty_is_vector(rhs)) {
+        if (ty_eq(ty_unconst(ts, lhs), ty_unconst(ts, rhs))) return true;
+        if (lhs->u.vector.count == rhs->u.vector.count &&
+            ty_eq(ty_unconst(ts, lhs->u.vector.elem),
+                  ty_unconst(ts, rhs->u.vector.elem))) return true;
+        return true;
+    }
+    if (ty_is_vector(lhs) && ty_is_arithmetic(rhs)) return true;
+    if (ty_is_arithmetic(lhs) && ty_is_vector(rhs)) return true;
+
     /* S4: const is a *storage* qualifier, not a property of a read value.
      * For VALUE types (anything except pointers), `const T` and `T` are
      * mutually convertible: writing requires the LHS not to be const,
@@ -559,6 +571,14 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
     if (ty_is_arithmetic(lu) && ty_is_arithmetic(ru))
         return arith_conv(ts, lu, ru);
 
+    /* GCC vector extension: vector + vector, vector + scalar, etc. */
+    if (ty_is_vector(lu) && ty_is_vector(ru))
+        return lu;
+    if (ty_is_vector(lu) && ty_is_arithmetic(ru))
+        return lu;
+    if (ty_is_arithmetic(lu) && ty_is_vector(ru))
+        return ru;
+
     /* Bitwise on integers */
     if ((op == STOK_AMP || op == STOK_PIPE || op == STOK_CARET ||
          op == STOK_LTLT || op == STOK_GTGT) &&
@@ -579,8 +599,9 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
     SharpTokKind op = expr->u.unary.op;
 
     if (op == STOK_BANG)  return ty_int(ts);
-    if (op == STOK_TILDE) return ty_is_integer(ot) ? ot : ty_int(ts);
+    if (op == STOK_TILDE) return (ty_is_integer(ot) || ty_is_vector(ot)) ? ot : ty_int(ts);
     if (op == STOK_MINUS || op == STOK_PLUS) {
+        if (ty_is_vector(ot)) return ot;
         /* Check for unary operator overload on struct type (spec §运算符重载).
          * Lookup order: (1) struct method operator-() (2) free operator-(T). */
         if (ot && (ot->kind == TY_STRUCT ||
@@ -892,6 +913,37 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
             if (strncmp(name, "__builtin_", 10) == 0 ||
                 strncmp(name, "__atomic_",   9) == 0 ||
                 strncmp(name, "__sync_",     7) == 0) {
+                /* __builtin_convertvector returns a vector type.
+                 * The captured text is "__builtin_convertvector(expr, TypeName)".
+                 * Try to resolve the TypeName to a TY_VECTOR for proper type
+                 * checking in subsequent expressions. */
+                if (strncmp(name, "__builtin_convertvector(", 24) == 0) {
+                    const char *comma = strrchr(name, ',');
+                    if (comma) {
+                        const char *tn = comma + 1;
+                        while (*tn == ' ') tn++;
+                        const char *te = name + strlen(name) - 1;
+                        while (te > tn && *te == ')') te--;
+                        while (te > tn && *te == ' ') te--;
+                        size_t tlen = (size_t)(te - tn + 1);
+                        if (tlen > 0) {
+                            char tbuf[128];
+                            if (tlen >= sizeof tbuf) tlen = sizeof tbuf - 1;
+                            memcpy(tbuf, tn, tlen); tbuf[tlen] = '\0';
+                            Symbol *vsym = scope_lookup_type(ss->scope, tbuf);
+                            if (vsym && vsym->decl &&
+                                vsym->decl->kind == AST_TYPEDEF_DECL) {
+                                t = ty_from_ast(ts, vsym->decl->u.typedef_decl.target,
+                                                ss->scope, NULL);
+                                if (!ty_is_vector(t))
+                                    t = ty_vector_type(ts, t, 4, tbuf);
+                                break;
+                            }
+                            t = ty_vector_type(ts, ty_float(ts), 4, tbuf);
+                            break;
+                        }
+                    }
+                }
                 t = ty_int(ts);
                 break;
             }
@@ -1139,6 +1191,8 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
         sema_expr(ss, expr->u.index_.index);
         if (ty_is_pointer(base_t)) {
             t = ty_deref(base_t);
+        } else if (ty_is_vector(base_t)) {
+            t = base_t->u.vector.elem;
         } else {
             /* Phase 7: check for operator[] overload. */
             Scope *ss_s = struct_scope_of(ts, base_t, ss->ctx->file_scope);

@@ -66,6 +66,10 @@ static bool ty_compound_eq(const Type *a, const Type *b) {
         return true;
     case TY_ENUM:
         return a->u.enum_.name == b->u.enum_.name;
+    case TY_VECTOR:
+        return a->u.vector.elem  == b->u.vector.elem &&
+               a->u.vector.count == b->u.vector.count &&
+               a->u.vector.name  == b->u.vector.name;
     case TY_FUNC:
         if (a->u.func.ret    != b->u.func.ret)    return false;
         if (a->u.func.nparams != b->u.func.nparams) return false;
@@ -280,6 +284,30 @@ Type *ty_param(TyStore *ts, const char *name) {
     return ts_intern(ts, (Type){ .kind = TY_PARAM, .u.param = { iname } });
 }
 
+Type *ty_vector_type(TyStore *ts, Type *elem, int count, const char *name) {
+    const char *iname = ts_intern_str(ts, name);
+    Type candidate = { .kind = TY_VECTOR,
+                       .u.vector = { elem, count, iname } };
+    for (size_t i = 0; i < ts->compound_len; i++) {
+        if (ts->compound[i]->kind == TY_VECTOR &&
+            ts->compound[i]->u.vector.elem == elem &&
+            ts->compound[i]->u.vector.count == count &&
+            ts->compound[i]->u.vector.name == iname)
+            return ts->compound[i];
+    }
+    Type *t = malloc(sizeof *t);
+    if (!t) { perror("sharp-fe type"); abort(); }
+    *t = candidate;
+    if (ts->compound_len == ts->compound_cap) {
+        size_t nc = ts->compound_cap ? ts->compound_cap * 2 : 16;
+        ts->compound = realloc(ts->compound, nc * sizeof *ts->compound);
+        if (!ts->compound) { perror("sharp-fe type"); abort(); }
+        ts->compound_cap = nc;
+    }
+    ts->compound[ts->compound_len++] = t;
+    return t;
+}
+
 /* =========================================================================
  * Queries
  * ====================================================================== */
@@ -345,6 +373,7 @@ bool ty_has_error(const Type *t) {
     case TY_CONST:   return ty_has_error(t->u.const_.base);
     case TY_ATOMIC:  return ty_has_error(t->u.atomic.base);
     case TY_ARRAY:   return ty_has_error(t->u.array.base);
+    case TY_VECTOR:  return ty_has_error(t->u.vector.elem);
     default:         return false;
     }
 }
@@ -356,7 +385,12 @@ bool ty_is_scalar(const Type *t) {
         strncmp(t->u.struct_.name, "__typeof__(", 11) == 0)
         return true;
     if (t && t->kind == TY_ATOMIC) return ty_is_scalar(t->u.atomic.base);
+    if (t && t->kind == TY_VECTOR) return true;
     return ty_is_arithmetic(t) || ty_is_pointer(t);
+}
+
+bool ty_is_vector(const Type *t) {
+    return t && t->kind == TY_VECTOR;
 }
 
 /* =========================================================================
@@ -431,7 +465,9 @@ Type *ty_from_name(TyStore *ts, const char *name) {
         !strcmp(name,"signed long")||
         !strcmp(name,"signed long int"))             return ty_long(ts);
     if (!strcmp(name,"unsigned long")||
-        !strcmp(name,"unsigned long int"))           return ty_ulong(ts);
+        !strcmp(name,"long unsigned")||
+        !strcmp(name,"unsigned long int")||
+        !strcmp(name,"long unsigned int"))           return ty_ulong(ts);
     if (!strcmp(name,"long long")||
         !strcmp(name,"long long int")||
         !strcmp(name,"signed long long")||
@@ -458,6 +494,8 @@ Type *ty_from_name(TyStore *ts, const char *name) {
     if (!strcmp(name,"_Float64"))                    return ty_double(ts);
     if (!strcmp(name,"_Float32"))                    return ty_float(ts);
     if (!strcmp(name,"_Float32x"))                   return ty_double(ts);
+    if (!strcmp(name,"_Float16"))                    return ty_longdouble(ts, "_Float16");
+    if (!strcmp(name,"__bf16"))                      return ty_longdouble(ts, "__bf16");
     /* Decimal floats — model as their underlying float/double for now */
     if (!strcmp(name,"_Decimal32"))                  return ty_float(ts);
     if (!strcmp(name,"_Decimal64"))                  return ty_double(ts);
@@ -482,6 +520,7 @@ static const char * const KNOWN_NAMES[] = {
     "__float128", "_Float128", "_Float128x",
     "__float80", "__cfloat128",
     "_Float64x", "_Float64", "_Float32", "_Float32x",
+    "_Float16", "__bf16",
     "_Decimal32", "_Decimal64", "_Decimal128",
     NULL
 };
@@ -809,6 +848,48 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
              *                      is_union flag on the underlying decl)
              */
             if (sym->decl && sym->decl->kind == AST_TYPEDEF_DECL) {
+                /* GCC vector type: typedef T Name __attribute__((vector_size(N)))
+                 * Detect the vector_size attribute and create TY_VECTOR
+                 * instead of recursing to the base type. */
+                const char *td_attrs = sym->decl->u.typedef_decl.gcc_attrs;
+                if (td_attrs && strstr(td_attrs, "vector_size")) {
+                    const AstNode *target = sym->decl->u.typedef_decl.target;
+                    Type *elem = target ? ty_from_ast(ts, target, scope, NULL)
+                                        : ty_int(ts);
+                    int count = 0;
+                    const char *vs = strstr(td_attrs, "vector_size");
+                    if (vs) {
+                        const char *paren = strchr(vs, '(');
+                        if (paren) {
+                            count = (int)strtol(paren + 1, NULL, 10);
+                            if (count > 0 && elem) {
+                                int elem_size = 0;
+                                if (elem->kind == TY_FLOAT)  elem_size = 4;
+                                else if (elem->kind == TY_DOUBLE) elem_size = 8;
+                                else if (elem->kind == TY_CHAR || elem->kind == TY_UCHAR) elem_size = 1;
+                                else if (elem->kind == TY_SHORT || elem->kind == TY_USHORT) elem_size = 2;
+                                else if (elem->kind == TY_INT || elem->kind == TY_UINT) elem_size = 4;
+                                else if (elem->kind == TY_LONG || elem->kind == TY_ULONG) elem_size = 8;
+                                else if (elem->kind == TY_LONGLONG || elem->kind == TY_ULONGLONG) elem_size = 8;
+                                else if (elem->kind == TY_LONGDOUBLE) {
+                                    if (elem->u.longdouble.name &&
+                                        strcmp(elem->u.longdouble.name, "_Float16") == 0)
+                                        elem_size = 2;
+                                    else if (elem->u.longdouble.name &&
+                                             strcmp(elem->u.longdouble.name, "__bf16") == 0)
+                                        elem_size = 2;
+                                    else
+                                        elem_size = 16;
+                                }
+                                else elem_size = 4;
+                                if (elem_size > 0)
+                                    count = count / elem_size;
+                            }
+                        }
+                    }
+                    if (count <= 0) count = 4;
+                    return ty_vector_type(ts, elem, count, name);
+                }
                 /* Detect the C idiom `typedef struct Tag Tag;` where the
                  * typedef target resolves back to the same name.  Without
                  * this guard `ty_from_ast` recurses forever, since the
@@ -962,7 +1043,7 @@ const char *ty_kind_name(TyKind k) {
         "char","short","int","long","long long",
         "unsigned char","unsigned short","unsigned int","unsigned long","unsigned long long",
         "float","double","long double",
-        "ptr","array","const","atomic","func","struct","enum","param"
+        "ptr","array","const","atomic","func","struct","enum","param","vector"
     };
     if ((unsigned)k < TY_COUNT) return names[k];
     return "?";
@@ -1001,6 +1082,11 @@ void ty_print(const Type *t, FILE *fp) {
         break;
     case TY_PARAM:
         fprintf(fp, "%s", t->u.param.name);
+        break;
+    case TY_VECTOR:
+        ty_print(t->u.vector.elem, fp);
+        fprintf(fp, "__vector_%d(%s)", t->u.vector.count,
+                t->u.vector.name ? t->u.vector.name : "?");
         break;
     case TY_FUNC:
         ty_print(t->u.func.ret, fp);
@@ -1048,6 +1134,10 @@ Type *ty_subst(TyStore *ts, Type *t,
         return t;
     case TY_ENUM:
         return t;
+    case TY_VECTOR:
+        return ty_vector_type(ts,
+            ty_subst(ts, t->u.vector.elem, pnames, pvals, np),
+            t->u.vector.count, t->u.vector.name);
     default: return t;
     }
 }

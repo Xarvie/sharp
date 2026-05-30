@@ -3205,6 +3205,8 @@ static AstNode *parse_init_declarator_list(PS *ps, const DeclSpecs *ds, bool stm
             AstNode *td = ast_node_new(AST_TYPEDEF_DECL, vloc);
             td->u.typedef_decl.alias  = vname;
             td->u.typedef_decl.target = vty;
+            td->u.typedef_decl.gcc_attrs = var_gcc_attrs;
+            var_gcc_attrs = NULL;
             if (vty && vty->kind == AST_ENUM_DEF) {
                 vty->u.enum_def.inline_typedef = true;
                 td->u.typedef_decl.target_unowned = true;
@@ -4673,6 +4675,58 @@ static AstNode *parse_postfix(PS *ps, AstNode *lhs) {
                 ast_node_free(lhs);
                 lhs = ast_node_new(AST_IDENT, t.loc);
                 lhs->u.ident.name = cpp_xstrndup(buf2, blen2);
+                continue;
+            }
+            /* __builtin_convertvector(expr, TYPE) and
+             * __builtin_shufflevector(vec, vec, indices...) take type-name
+             * or vector arguments that cannot be parsed as regular
+             * expressions.  Capture the entire call text verbatim so cg
+             * can emit it unchanged — the C compiler evaluates these. */
+            if (lhs->kind == AST_IDENT &&
+                (strcmp(lhs->u.ident.name, "__builtin_convertvector") == 0 ||
+                 strcmp(lhs->u.ident.name, "__builtin_shufflevector") == 0)) {
+                const char *bv_name = lhs->u.ident.name;
+                char buf3[1024];
+                int blen3 = 0;
+                blen3 += snprintf(buf3 + blen3, sizeof buf3 - blen3,
+                                  "%s(", bv_name);
+                ps_advance(ps);
+                int depth3 = 0;
+                while (!ps_at(ps, STOK_EOF)) {
+                    SharpTok tk = ps_peek(ps);
+                    if (tk.kind == STOK_LPAREN) {
+                        depth3++;
+                        if (blen3 + (int)tk.len + 1 < (int)sizeof buf3) {
+                            memcpy(buf3 + blen3, tk.text, tk.len);
+                            blen3 += tk.len;
+                        }
+                        ps_advance(ps);
+                    } else if (tk.kind == STOK_RPAREN) {
+                        if (depth3 == 0) {
+                            blen3 += snprintf(buf3 + blen3, sizeof buf3 - blen3, ")");
+                            ps_advance(ps); break;
+                        }
+                        depth3--;
+                        if (blen3 + (int)tk.len + 1 < (int)sizeof buf3) {
+                            memcpy(buf3 + blen3, tk.text, tk.len);
+                            blen3 += tk.len;
+                        }
+                        ps_advance(ps);
+                    } else {
+                        if (blen3 > 0 && blen3 + (int)tk.len + 2 < (int)sizeof buf3) {
+                            char last3 = buf3[blen3-1];
+                            if (last3 != '(' && last3 != ',')
+                                buf3[blen3++] = ' ';
+                            memcpy(buf3 + blen3, tk.text, tk.len);
+                            blen3 += tk.len;
+                        }
+                        ps_advance(ps);
+                    }
+                }
+                buf3[blen3 < (int)sizeof buf3 ? blen3 : (int)sizeof buf3 - 1] = '\0';
+                ast_node_free(lhs);
+                lhs = ast_node_new(AST_IDENT, t.loc);
+                lhs->u.ident.name = cpp_xstrndup(buf3, blen3);
                 continue;
             }
             AstNode *c = ast_node_new(AST_CALL, t.loc);

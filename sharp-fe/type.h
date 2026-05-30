@@ -47,6 +47,7 @@ typedef enum {
     TY_STRUCT,     /* named struct, may carry generic args                 */
     TY_ENUM,       /* named enum tag — preserves enum identity             */
     TY_PARAM,      /* unbound generic parameter T                         */
+    TY_VECTOR,     /* GCC vector type: T __attribute__((vector_size(N)))  */
     TY_COUNT
 } TyKind;
 
@@ -83,6 +84,12 @@ struct Type {
         } enum_;
         /* TY_PARAM */
         struct { const char *name; } param;
+        /* TY_VECTOR — GCC vector extension */
+        struct {
+            Type       *elem;          /* element type (e.g. TY_FLOAT)     */
+            int         count;         /* number of elements (e.g. 4)      */
+            const char *name;          /* typedef alias for CG emission    */
+        } vector;
         /* TY_LONGDOUBLE — extended-precision float with name for C emission */
         struct { const char *name; } longdouble;
     } u;
@@ -128,6 +135,7 @@ Type *ty_struct_type(TyStore *ts, const char *name,
                      Type **args, size_t nargs, AstNode *decl);
 Type *ty_enum_type(TyStore *ts, const char *name, AstNode *decl);
 Type *ty_param(TyStore *ts, const char *name);
+Type *ty_vector_type(TyStore *ts, Type *elem, int count, const char *name);
 
 /* -------------------------------------------------------------------------
  * Equality — pointer equality after interning
@@ -148,6 +156,7 @@ bool ty_is_void(const Type *t);       /* TY_VOID                          */
 bool ty_is_error(const Type *t);      /* TY_ERROR                         */
 bool ty_has_error(const Type *t);     /* TY_ERROR anywhere in chain (R10) */
 bool ty_is_scalar(const Type *t);     /* arithmetic or pointer            */
+bool ty_is_vector(const Type *t);     /* TY_VECTOR                        */
 
 /* -------------------------------------------------------------------------
  * Modifiers

@@ -1202,6 +1202,15 @@ static void cg_type(CgCtx *ctx, Type *t) {
         /* Fallback: emit the param name (best-effort for unresolved cases). */
         cg_puts(ctx, t->u.param.name);
         break;
+    case TY_VECTOR:
+        if (t->u.vector.name)
+            cg_puts(ctx, t->u.vector.name);
+        else {
+            cg_type(ctx, t->u.vector.elem);
+            cg_printf(ctx, " __attribute__((vector_size(%d)))",
+                      t->u.vector.count * 4);
+        }
+        break;
     case TY_FUNC:
         /* Bare function type in abstract context (e.g. as a parameter type).
          * ISO C §6.7.6.3: "a declaration of a parameter as 'function returning
@@ -3517,29 +3526,21 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
         break;
 
     case AST_TYPEDEF_DECL: {
-        /* local typedef inside a function body, e.g.
-         *   typedef struct { char c; LZ4_stream_t t; } t_a;
-         * The struct/union body was already emitted by the preceding
-         * AST_STRUCT_DEF statement (from the parse_block R5 ordering fix).
-         * cg_struct emits `typedef struct X X; struct X { ... };` so the
-         * struct tag name is usable as a plain identifier.  We just need to
-         * emit the alias: `typedef TargetName Alias;`.
-         *
-         * Note: ty_from_ast uses the file scope and CANNOT find local types.
-         * We therefore emit the target name directly from the AST node,
-         * which is safe because the preceding struct body emission put the
-         * tag into the local C scope. */
         const char *alias = stmt->u.typedef_decl.alias;
         const AstNode *target = stmt->u.typedef_decl.target;
+        const char *td_attrs = stmt->u.typedef_decl.gcc_attrs;
         if (!alias || !target) break;
         cg_indent(ctx);
         if (target->kind == AST_TYPE_NAME && target->u.type_name.name) {
-            cg_printf(ctx, "typedef %s %s;\n", target->u.type_name.name, alias);
+            if (td_attrs)
+                cg_printf(ctx, "typedef %s %s %s;\n", target->u.type_name.name, alias, td_attrs);
+            else
+                cg_printf(ctx, "typedef %s %s;\n", target->u.type_name.name, alias);
         } else {
-            /* Non-trivial target (pointer, array, etc.): try ty_from_ast. */
             Type *t = ty_from_ast(ctx->ts, target, cg_type_scope(ctx), NULL);
             cg_puts(ctx, "typedef ");
             cg_decl(ctx, t ? t : ty_int(ctx->ts), alias);
+            if (td_attrs) { cg_puts(ctx, " "); cg_puts(ctx, td_attrs); }
             cg_puts(ctx, ";\n");
         }
         break;
@@ -5133,6 +5134,11 @@ static void cgb_mangle_type(CgSB *sb, Type *t) {
         cgb_puts(sb, t->u.enum_.name);
         break;
     case TY_PARAM: cgb_puts(sb, t->u.param.name); break;
+    case TY_VECTOR:
+        cgb_puts(sb, "V");
+        cgb_mangle_type(sb, t->u.vector.elem);
+        cgb_printf(sb, "%d", t->u.vector.count);
+        break;
     default:       cgb_printf(sb, "T%d", t->kind); break;
     }
 }
@@ -5184,6 +5190,10 @@ static Type *subst_type(TyStore *ts, Type *t,
         return t;
     case TY_ENUM:
         return t;
+    case TY_VECTOR:
+        return ty_vector_type(ts,
+            subst_type(ts, t->u.vector.elem, pnames, pvals, np),
+            t->u.vector.count, t->u.vector.name);
     default: return t;
     }
 }
@@ -7624,8 +7634,12 @@ static bool type_refs_name(const AstNode *ty, const char *name) {
     case AST_TYPE_ARRAY:  return type_refs_name(ty->u.type_array.base, name);
     case AST_TYPE_FUNC: {
         if (type_refs_name(ty->u.type_func.ret, name)) return true;
-        for (size_t i = 0; i < ty->u.type_func.params.len; i++)
-            if (type_refs_name(ty->u.type_func.params.data[i], name)) return true;
+        for (size_t i = 0; i < ty->u.type_func.params.len; i++) {
+            const AstNode *pi = ty->u.type_func.params.data[i];
+            if (pi && pi->kind == AST_PARAM_DECL && pi->u.param_decl.type)
+                pi = pi->u.param_decl.type;
+            if (type_refs_name(pi, name)) return true;
+        }
         return false;
     }
     case AST_STRUCT_DEF: {
@@ -7638,6 +7652,49 @@ static bool type_refs_name(const AstNode *ty, const char *name) {
     }
     case AST_TYPEDEF_DECL:
         return type_refs_name(ty->u.typedef_decl.target, name);
+    default: return false;
+    }
+}
+
+/* Like type_refs_name but ignores struct/enum tag references.
+ * A `struct MySurface *` parameter does NOT depend on the
+ * `typedef struct MySurface MySurface;` typedef — only a bare
+ * `MySurface *` (is_struct_tag == false) does. */
+static bool type_refs_typedef(const AstNode *ty, const char *name) {
+    if (!ty) return false;
+    switch (ty->kind) {
+    case AST_TYPE_NAME:
+        return ty->u.type_name.name &&
+               !ty->u.type_name.is_struct_tag &&
+               !ty->u.type_name.is_enum_tag &&
+               strcmp(ty->u.type_name.name, name) == 0;
+    case AST_TYPEOF_TYPE:
+        return false;
+    case AST_TYPE_PTR:    return type_refs_typedef(ty->u.type_ptr.base, name);
+    case AST_TYPE_CONST:  return type_refs_typedef(ty->u.type_const.base, name);
+    case AST_TYPE_VOLATILE: return type_refs_typedef(ty->u.type_volatile.base, name);
+    case AST_TYPE_ATOMIC: return type_refs_typedef(ty->u.type_atomic.base, name);
+    case AST_TYPE_ARRAY:  return type_refs_typedef(ty->u.type_array.base, name);
+    case AST_TYPE_FUNC: {
+        if (type_refs_typedef(ty->u.type_func.ret, name)) return true;
+        for (size_t i = 0; i < ty->u.type_func.params.len; i++) {
+            const AstNode *pi = ty->u.type_func.params.data[i];
+            if (pi && pi->kind == AST_PARAM_DECL && pi->u.param_decl.type)
+                pi = pi->u.param_decl.type;
+            if (type_refs_typedef(pi, name)) return true;
+        }
+        return false;
+    }
+    case AST_STRUCT_DEF: {
+        for (size_t i = 0; i < ty->u.struct_def.fields.len; i++) {
+            const AstNode *f = ty->u.struct_def.fields.data[i];
+            if (f && f->kind == AST_FIELD_DECL)
+                if (type_refs_typedef(f->u.field_decl.type, name)) return true;
+        }
+        return false;
+    }
+    case AST_TYPEDEF_DECL:
+        return type_refs_typedef(ty->u.typedef_decl.target, name);
     default: return false;
     }
 }
@@ -8022,6 +8079,96 @@ static void cg_emit_decl_sharp(CgCtx *ctx, AstNode *d) {
     }
 }
 
+typedef struct { const char *alias; size_t pos; const AstNode *decl; } TdPos;
+
+static bool cg_td_refs(size_t tgt_idx, const TdPos *tds, size_t ntds,
+                        const char *name, CgCtx *ctx) {
+    const AstNode *_td = tds[tgt_idx].decl;
+    const AstNode *_tgt = _td->u.typedef_decl.target;
+    if (type_refs_typedef(_tgt, name)) return true;
+    if (_tgt && _tgt->kind == AST_TYPE_NAME && _tgt->u.type_name.name) {
+        Symbol *_sym = ctx->file_scope ?
+            scope_lookup_struct_tag(ctx->file_scope, _tgt->u.type_name.name) : NULL;
+        if (_sym && _sym->decl && _sym->decl->kind == AST_STRUCT_DEF
+            && _sym->decl->u.struct_def.from_inline_typedef) {
+            for (size_t _fi = 0; _fi < _sym->decl->u.struct_def.fields.len; _fi++) {
+                const AstNode *_f = _sym->decl->u.struct_def.fields.data[_fi];
+                if (_f && _f->kind == AST_FIELD_DECL && _f->u.field_decl.type)
+                    if (type_refs_typedef(_f->u.field_decl.type, name)) return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void cg_emit_td_fwd(CgCtx *ctx, size_t ti,
+                            TdPos *tds, size_t ntds, bool *td_fwd) {
+    if (ti >= ntds || td_fwd[ti]) return;
+    size_t nodes[256];
+    size_t nnodes = 0;
+    size_t bfs[256];
+    size_t nbfs = 0;
+    bfs[nbfs++] = ti;
+    td_fwd[ti] = true;
+    nodes[nnodes++] = ti;
+    for (size_t qi = 0; qi < nbfs && nbfs < 256; qi++) {
+        size_t ci = bfs[qi];
+        const AstNode *_td = tds[ci].decl;
+        const AstNode *_tgt = _td->u.typedef_decl.target;
+        for (size_t _di = 0; _di < ntds; _di++) {
+            if (td_fwd[_di]) continue;
+            if (type_refs_typedef(_tgt, tds[_di].alias)) {
+                td_fwd[_di] = true;
+                bfs[nbfs++] = _di;
+                nodes[nnodes++] = _di;
+            }
+        }
+        if (_tgt && _tgt->kind == AST_TYPE_NAME && _tgt->u.type_name.name) {
+            Symbol *_sym = ctx->file_scope ?
+                scope_lookup_struct_tag(ctx->file_scope, _tgt->u.type_name.name) : NULL;
+            if (_sym && _sym->decl && _sym->decl->kind == AST_STRUCT_DEF
+                && _sym->decl->u.struct_def.from_inline_typedef) {
+                for (size_t _fi = 0; _fi < _sym->decl->u.struct_def.fields.len; _fi++) {
+                    const AstNode *_f = _sym->decl->u.struct_def.fields.data[_fi];
+                    if (_f && _f->kind == AST_FIELD_DECL && _f->u.field_decl.type) {
+                        for (size_t _di = 0; _di < ntds; _di++) {
+                            if (td_fwd[_di]) continue;
+                            if (type_refs_typedef(_f->u.field_decl.type, tds[_di].alias)) {
+                                td_fwd[_di] = true;
+                                bfs[nbfs++] = _di;
+                                nodes[nnodes++] = _di;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    bool done[256];
+    memset(done, 0, nnodes * sizeof(bool));
+    size_t emit_count = 0;
+    while (emit_count < nnodes) {
+        bool progress = false;
+        for (size_t i = 0; i < nnodes; i++) {
+            if (done[i]) continue;
+            size_t idx = nodes[i];
+            bool ready = true;
+            for (size_t j = 0; j < nnodes && ready; j++) {
+                if (done[j] || i == j) continue;
+                if (cg_td_refs(idx, tds, ntds, tds[nodes[j]].alias, ctx))
+                    ready = false;
+            }
+            if (ready) {
+                cg_emit_decl_sharp(ctx, (AstNode *)tds[idx].decl);
+                done[i] = true;
+                emit_count++;
+                progress = true;
+            }
+        }
+        if (!progress) break;
+    }
+}
+
 static void cg_file(CgCtx *ctx, const AstNode *file) {
     if (!file) return;
     ctx->root_file = file->u.file.path;
@@ -8104,7 +8251,6 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
      * are called before they are defined (forward reference fix). */
     {
         /* Collect all typedef names and their positions in file.decls. */
-        typedef struct { const char *alias; size_t pos; const AstNode *decl; } TdPos;
         TdPos *tds = NULL;
         size_t ntds = 0, tds_cap = 0;
         for (size_t i = 0; i < file->u.file.decls.len; i++) {
@@ -8125,50 +8271,11 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
         /* Track which typedefs have been forward-declared */
         bool *td_fwd = calloc(ntds, sizeof(bool));
 
-        /* Collect and emit typedefs that a given typedef index depends on
-         * (chain support), then emit the typedef itself.  DFS with explicit
-         * stack; post-order ensures deps are emitted before dependents. */
-        #define _EMIT_TD_FWD(ti) do { \
-            if (ti < ntds && !td_fwd[ti]) { \
-                size_t _pending[256]; \
-                size_t _np = 0; \
-                _pending[_np++] = ti; \
-                td_fwd[ti] = true; \
-                for (size_t _pi = 0; _pi < _np && _pi < 256; _pi++) { \
-                    size_t _ci = _pending[_pi]; \
-                    const AstNode *_td = tds[_ci].decl; \
-                    const AstNode *_tgt = _td->u.typedef_decl.target; \
-                    for (size_t _di = 0; _di < ntds; _di++) { \
-                        if (td_fwd[_di]) continue; \
-                        if (type_refs_name(_tgt, tds[_di].alias)) { \
-                            td_fwd[_di] = true; \
-                            if (_np < 256) _pending[_np++] = _di; \
-                        } \
-                    } \
-                    if (_tgt && _tgt->kind == AST_TYPE_NAME && _tgt->u.type_name.name) { \
-                        Symbol *_sym = ctx->file_scope ? \
-                            scope_lookup_struct_tag(ctx->file_scope, _tgt->u.type_name.name) : NULL; \
-                        if (_sym && _sym->decl && _sym->decl->kind == AST_STRUCT_DEF) { \
-                            for (size_t _fi = 0; _fi < _sym->decl->u.struct_def.fields.len; _fi++) { \
-                                const AstNode *_f = _sym->decl->u.struct_def.fields.data[_fi]; \
-                                if (_f && _f->kind == AST_FIELD_DECL && _f->u.field_decl.type) { \
-                                    for (size_t _di = 0; _di < ntds; _di++) { \
-                                        if (td_fwd[_di]) continue; \
-                                        if (type_refs_name(_f->u.field_decl.type, tds[_di].alias)) { \
-                                            td_fwd[_di] = true; \
-                                            if (_np < 256) _pending[_np++] = _di; \
-                                        } \
-                                    } \
-                                } \
-                            } \
-                        } \
-                    } \
-                } \
-                for (size_t _pi = _np; _pi > 0; _pi--) { \
-                    cg_emit_decl_sharp(ctx, (AstNode *)tds[_pending[_pi - 1]].decl); \
-                } \
-            } \
-        } while(0)
+        /* Emit a typedef and all its transitive dependencies in correct
+         * topological order (deps before dependents) via post-order DFS.
+         * Replaced the old BFS + reverse-emit macro which produced wrong
+         * order when cross-level dependencies existed. */
+        #define _EMIT_TD_FWD(ti) cg_emit_td_fwd(ctx, ti, tds, ntds, td_fwd)
 
         /* Helper: for a type AST, find and emit forward decls for any
          * referenced typedefs.  No pos check: even typedefs defined BEFORE
@@ -8177,7 +8284,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
         #define _CHECK_TYPE_TD(ty, fpos) do { \
             for (size_t _ti = 0; _ti < ntds; _ti++) { \
                 if (td_fwd[_ti]) continue; \
-                if (type_refs_name((ty), tds[_ti].alias)) { \
+                if (type_refs_typedef((ty), tds[_ti].alias)) { \
                     _EMIT_TD_FWD(_ti); \
                 } \
             } \
