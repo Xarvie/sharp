@@ -113,108 +113,6 @@ void cpp_set_pragma_handler(CppCtx *ctx, CppPragmaHandler fn, void *ud) {
  * wide types are rejected.
  * ====================================================================== */
 
-typedef struct {
-    const char *prefix;  /* "" | "L" | "u" | "U" | "u8" */
-    StrBuf      content; /* the inner characters (without quotes)          */
-} StrFragment;
-
-static const char *merge_encoding_prefix(const char *a, const char *b,
-                                          CppDiagArr *diags, CppLoc loc) {
-    if (strcmp(a, b) == 0) return a;
-    if (strcmp(a, "") == 0) return b;
-    if (strcmp(b, "") == 0) return a;
-    CppDiag d = { CPP_DIAG_ERROR, loc,
-                  cpp_xstrdup("incompatible string literal prefixes in concatenation") };
-    da_push(diags, d);
-    return a;
-}
-
-static void parse_str_tok(const char *sp, StrFragment *frag) {
-    /* Extract prefix */
-    frag->prefix = "";
-    frag->content = (StrBuf){0};
-    if (sp[0] == 'L') { frag->prefix = "L"; sp++; }
-    else if (sp[0] == 'u' && sp[1] == '8') { frag->prefix = "u8"; sp += 2; }
-    else if (sp[0] == 'u') { frag->prefix = "u"; sp++; }
-    else if (sp[0] == 'U') { frag->prefix = "U"; sp++; }
-    /* Skip opening quote */
-    if (*sp == '"') sp++;
-    /* Copy until closing quote (handling escapes) */
-    while (*sp && *sp != '"') {
-        if (*sp == '\\' && *(sp+1)) {
-            sb_push_ch(&frag->content, *sp++);
-            sb_push_ch(&frag->content, *sp++);
-        } else {
-            sb_push_ch(&frag->content, *sp++);
-        }
-    }
-}
-
-static CppTok *phase6_concat(CppTok *tokens, size_t n,
-                              size_t *out_n, CppDiagArr *diags) {
-    DA(CppTok) result = {0};
-    for (size_t i = 0; i < n; ) {
-        if (tokens[i].kind != CPPT_STRING_LIT) {
-            da_push(&result, tokens[i]);
-            i++;
-            continue;
-        }
-        /* Collect a run of string literals (skip whitespace between them) */
-        size_t j = i + 1;
-        while (j < n && (tokens[j].kind == CPPT_STRING_LIT ||
-                          tokens[j].kind == CPPT_SPACE)) j++;
-        /* Did we find at least one more string? */
-        bool has_second = false;
-        for (size_t k = i+1; k < j; k++)
-            if (tokens[k].kind == CPPT_STRING_LIT) { has_second = true; break; }
-
-        if (!has_second) {
-            da_push(&result, tokens[i++]);
-            continue;
-        }
-
-        /* Merge all string fragments in [i, j) */
-        StrFragment merged;
-        merged.prefix  = "";
-        merged.content = (StrBuf){0};
-
-        for (size_t k = i; k < j; k++) {
-            if (tokens[k].kind != CPPT_STRING_LIT) continue;
-            StrFragment frag;
-            char *sp_copy = cpp_xstrndup(tokens[k].text, tokens[k].len);
-            parse_str_tok(sp_copy, &frag);
-            free(sp_copy);
-            merged.prefix = merge_encoding_prefix(merged.prefix, frag.prefix,
-                                                   diags, tokens[k].loc);
-            sb_push(&merged.content, frag.content.buf ? frag.content.buf : "",
-                    frag.content.len);
-            sb_free(&frag.content);
-        }
-
-        /* Build the merged token text */
-        StrBuf full = {0};
-        sb_push_cstr(&full, merged.prefix);
-        sb_push_ch(&full, '"');
-        if (merged.content.buf)
-            sb_push(&full, merged.content.buf, merged.content.len);
-        sb_push_ch(&full, '"');
-        sb_free(&merged.content);
-
-        CppTok merged_tok = tokens[i];
-        /* The text pointer now points into a new heap buffer; we store it
-         * by recording the string in the intern table (acceptable since
-         * this happens once at the end).                                  */
-        char *interned_text = sb_take(&full);
-        merged_tok.text          = interned_text; /* heap-allocated */
-        merged_tok.len           = strlen(interned_text);
-        merged_tok.concat_done   = true;
-        da_push(&result, merged_tok);
-        i = j;
-    }
-    *out_n = result.len;
-    return result.data;
-}
-
 /* =========================================================================
  * Build CppResult from CppState
  * ====================================================================== */
@@ -499,11 +397,6 @@ CppResult cpp_run_buf(CppCtx *ctx, const char *buf, size_t len,
 
 void cpp_result_free(CppResult *res) {
     if (!res) return;
-    /* Token texts with concat_done were separately heap-allocated by phase6_concat */
-    for (size_t i = 0; i < res->ntokens; i++) {
-        if (res->tokens[i].concat_done)
-            free((char *)res->tokens[i].text);
-    }
     free(res->tokens);
     free(res->text);
     free(res->_raw_text);   /* raw buffer that token.text pointers index into */

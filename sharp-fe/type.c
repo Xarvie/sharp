@@ -947,6 +947,7 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
                 sym->decl->u.struct_def.generic_params.len > 0) {
                 size_t ng = sym->decl->u.struct_def.generic_params.len;
                 Type **gargs = malloc(ng * sizeof *gargs);
+                if (!gargs) abort();
                 for (size_t i = 0; i < ng; i++)
                     gargs[i] = ty_param(ts,
                         sym->decl->u.struct_def.generic_params.data[i]
@@ -988,6 +989,7 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
         Type *ret = ty_from_ast(ts, node->u.type_func.ret, scope, diags);
         size_t np = node->u.type_func.params.len;
         Type **params = np ? malloc(np * sizeof *params) : NULL;
+        if (np && !params) abort();
         bool has_vararg = false;
         size_t real_np = 0;
         for (size_t i = 0; i < np; i++) {

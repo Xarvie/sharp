@@ -85,6 +85,7 @@ static void sema_err(SS *ss, CppLoc loc, const char *fmt, ...) {
     va_start(ap, fmt);
     int n = vsnprintf(NULL, 0, fmt, ap);
     va_end(ap);
+    if (n < 0) n = 0; /* encoding error — fall back to empty message */
     char *msg = malloc((size_t)(n + 1));
     if (!msg) abort();
     va_start(ap, fmt);
@@ -2298,9 +2299,11 @@ static EvalResult constexpr_eval(SS *ss, const AstNode *expr) {
         case STOK_CARET:
             return (EvalResult){ true, li ^ ri, (double)(li ^ ri), false };
         case STOK_LTLT:
-            return (EvalResult){ true, li << ri, (double)(li << ri), false };
+            return (EvalResult){ true, ri >= 0 && (uint64_t)ri < 64 ? li << ri : 0,
+                                 (double)(ri >= 0 && (uint64_t)ri < 64 ? (int64_t)((uint64_t)li << ri) : 0), false };
         case STOK_GTGT:
-            return (EvalResult){ true, li >> ri, (double)(li >> ri), false };
+            return (EvalResult){ true, ri >= 0 && (uint64_t)ri < 64 ? li >> ri : 0,
+                                 (double)(ri >= 0 && (uint64_t)ri < 64 ? li >> ri : 0), false };
         default:
             return fail;
         }

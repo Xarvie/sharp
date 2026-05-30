@@ -807,8 +807,9 @@ static void handle_include(CppState *st, TokList *line, CppLoc loc,
     /* Parallel: mark system vs user for -MMD filtering */
     {
         size_t n = st->included.len;
-        bool *tmp = realloc(st->included_is_sys, n * sizeof(bool));
-        if (tmp) { st->included_is_sys = tmp; st->included_is_sys[n - 1] = found_in_sys; }
+        bool *tmp = cpp_xrealloc(st->included_is_sys, n * sizeof(bool));
+        st->included_is_sys = tmp;
+        st->included_is_sys[n - 1] = found_in_sys;
     }
 
     /* Second guard check with the resolved absolute path.

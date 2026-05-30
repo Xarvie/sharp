@@ -187,7 +187,7 @@ static Value parse_int_literal_ex(const char *sp, bool *overflow) {
      * non-decimal literals a value with the high bit set on intmax_t is
      * already negative if interpreted signed, so promote to unsigned to
      * match the standard's intent (and what GCC/Clang actually do).    */
-    if (!is_unsigned && base != 10 && (val >> 63) != 0) {
+    if (!is_unsigned && base != 10 && (val >> (sizeof(intmax_t) * CHAR_BIT - 1)) != 0) {
         is_unsigned = true;
     }
 
@@ -936,7 +936,7 @@ static Value eval_shift(EvalCtx *ec) {
             if (v.is_unsigned)
                 v.v = (intmax_t)((uintmax_t)v.v << amt);
             else
-                v.v = v.v << amt;
+                v.v = (intmax_t)((uintmax_t)v.v << amt);
         }
         else if (strcmp(sp, ">>") == 0) {
             ec_get(ec);

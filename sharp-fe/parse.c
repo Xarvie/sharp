@@ -671,6 +671,7 @@ static void attrs_append_tokens(char **out, const PS *ps,
     } else {
         size_t ex = strlen(*out);
         *out = realloc(*out, ex + 1 + chunk_len + 1);
+        if (!*out) abort();
         (*out)[ex] = ' ';
         memcpy(*out + ex + 1, buf, chunk_len + 1);
         free(buf);
@@ -3129,6 +3130,7 @@ static AstNode *parse_init_declarator_list(PS *ps, const DeclSpecs *ds, bool stm
                 /* append space + trailing_attrs */
                 size_t a = strlen(var_gcc_attrs), b = strlen(trailing_attrs);
                 var_gcc_attrs = realloc(var_gcc_attrs, a + 1 + b + 1);
+                if (!var_gcc_attrs) abort();
                 var_gcc_attrs[a] = ' ';
                 memcpy(var_gcc_attrs + a + 1, trailing_attrs, b + 1);
             } else {
@@ -3731,7 +3733,11 @@ static AstNode *parse_top_decl(PS *ps) {
                         }
                     }
                     ps->pos = save2;
-                    if (ps->diags) ps->diags->len = save_diag2;
+                    if (ps->diags && ps->diags->len > save_diag2) {
+                        for (size_t i = save_diag2; i < ps->diags->len; i++)
+                            free(ps->diags->data[i].msg);
+                        ps->diags->len = save_diag2;
+                    }
                 }
                 /* Clean up the typedefs we just added for probing */
                 for (size_t gi = 0; gi < tmp_params.len; gi++) {
@@ -3777,7 +3783,11 @@ static AstNode *parse_top_decl(PS *ps) {
                 /* Rollback */
                 ps->pos = save_pos;
                 ps->pending_close = save_pending;
-                if (ps->diags) ps->diags->len = save_diag_len;
+                if (ps->diags && ps->diags->len > save_diag_len) {
+                    for (size_t i = save_diag_len; i < ps->diags->len; i++)
+                        free(ps->diags->data[i].msg);
+                    ps->diags->len = save_diag_len;
+                }
                 for (size_t gi = 0; gi < tmp_params.len; gi++) {
                     AstNode *gp = tmp_params.data[gi];
                     if (gp && gp->kind == AST_GENERIC_PARAM && gp->u.generic_param.name)
@@ -3787,7 +3797,11 @@ static AstNode *parse_top_decl(PS *ps) {
             } else {
                 ps->pos = save_pos;
                 ps->pending_close = save_pending;
-                if (ps->diags) ps->diags->len = save_diag_len;
+                if (ps->diags && ps->diags->len > save_diag_len) {
+                    for (size_t i = save_diag_len; i < ps->diags->len; i++)
+                        free(ps->diags->data[i].msg);
+                    ps->diags->len = save_diag_len;
+                }
                 astvec_free(&tmp_params);
             }
         }
@@ -4022,7 +4036,11 @@ static AstNode *parse_top_decl(PS *ps) {
             if (cname_tok > save_pos) {
                 /* Restore position and rebuild return type */
                 ps->pos = save_pos;
-                if (ps->diags) ps->diags->len = save_diag;
+                if (ps->diags && ps->diags->len > save_diag) {
+                    for (size_t i = save_diag; i < ps->diags->len; i++)
+                        free(ps->diags->data[i].msg);
+                    ps->diags->len = save_diag;
+                }
 
                 AstNode *ret_ty = NULL;
                 while (ps->pos < cname_tok && !ps_at(ps, STOK_EOF)) {
@@ -4047,7 +4065,11 @@ static AstNode *parse_top_decl(PS *ps) {
 
             /* Restore on failure */
             ps->pos = save_pos;
-            if (ps->diags) ps->diags->len = save_diag;
+            if (ps->diags && ps->diags->len > save_diag) {
+                for (size_t i = save_diag; i < ps->diags->len; i++)
+                    free(ps->diags->data[i].msg);
+                ps->diags->len = save_diag;
+            }
         }
     }
 
@@ -4112,7 +4134,11 @@ static AstNode *parse_top_decl(PS *ps) {
             free(ds.gcc_attrs);
             memset(&ds, 0, sizeof ds);
             ps->pos = ds_save_pos;
-            if (ps->diags) ps->diags->len = ds_save_diag;
+            if (ps->diags && ps->diags->len > ds_save_diag) {
+                for (size_t i = ds_save_diag; i < ps->diags->len; i++)
+                    free(ps->diags->data[i].msg);
+                ps->diags->len = ds_save_diag;
+            }
             goto try_ext_method;
         }
 
@@ -5474,7 +5500,11 @@ static AstNode *parse_primary(PS *ps) {
             }
             /* parse_generic_args failed — roll back */
             ps->pos = save2;
-            if (ps->diags) ps->diags->len = save_diag;
+            if (ps->diags && ps->diags->len > save_diag) {
+                for (size_t i = save_diag; i < ps->diags->len; i++)
+                    free(ps->diags->data[i].msg);
+                ps->diags->len = save_diag;
+            }
         }
 
         return parse_postfix(ps, id);
@@ -6020,6 +6050,7 @@ void file_add_include(AstNode *file, const char *inc_str) {
                   ? file->u.file.user_includes_cap * 2 : 8;
         file->u.file.user_includes =
             realloc(file->u.file.user_includes, nc * sizeof(char *));
+        if (!file->u.file.user_includes) abort();
         file->u.file.user_includes_cap = nc;
     }
     file->u.file.user_includes[file->u.file.nuser_includes++] =

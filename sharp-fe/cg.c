@@ -6415,11 +6415,13 @@ static const char *cg_gfunc_mangle_for_call(CgCtx *ctx, const char *fname,
     }
     char *mn = cgb_take(&sb);
     /* Store in ctx to avoid leaking -- we push it to gfn_names for lifetime */
-    if (ctx->ngfn < ctx->gfn_cap || (ctx->gfn_cap = ctx->gfn_cap?ctx->gfn_cap*2:8,
-        (ctx->gfn_names = realloc(ctx->gfn_names,
-            ctx->gfn_cap * sizeof *ctx->gfn_names)) != NULL)) {
-        ctx->gfn_names[ctx->ngfn++] = mn;
+    if (ctx->ngfn == ctx->gfn_cap) {
+        ctx->gfn_cap = ctx->gfn_cap ? ctx->gfn_cap * 2 : 8;
+        ctx->gfn_names = realloc(ctx->gfn_names,
+            ctx->gfn_cap * sizeof *ctx->gfn_names);
+        if (!ctx->gfn_names) abort();
     }
+    ctx->gfn_names[ctx->ngfn++] = mn;
     free(pnames); free(pvals);
     return mn;
 }
@@ -7728,7 +7730,7 @@ static void collect_struct_names(const AstNode *file,
         for (size_t j = 0; j < n; j++)
             if (names[j] == nm || strcmp(names[j], nm) == 0) { dup = true; break; }
         if (dup) continue;
-        if (n == cap) { cap *= 2; names = realloc(names, cap * sizeof *names); }
+        if (n == cap) { cap *= 2; names = realloc(names, cap * sizeof *names); if (!names) abort(); }
         names[n++] = nm;
     }
     *names_out = names;
@@ -8260,6 +8262,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                 if (ntds == tds_cap) {
                     tds_cap = tds_cap ? tds_cap * 2 : 16;
                     tds = realloc(tds, tds_cap * sizeof *tds);
+                    if (!tds) abort();
                 }
                 tds[ntds].alias = d->u.typedef_decl.alias;
                 tds[ntds].pos = i;
@@ -8305,6 +8308,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                 if (nfns == fns_cap) {
                     fns_cap = fns_cap ? fns_cap * 2 : 16;
                     fns = realloc(fns, fns_cap * sizeof *fns);
+                    if (!fns) abort();
                 }
                 fns[nfns].name = d->u.func_def.name;
                 fns[nfns].pos = i;
@@ -8325,6 +8329,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                         if (nfns == fns_cap) {
                             fns_cap = fns_cap ? fns_cap * 2 : 16;
                             fns = realloc(fns, fns_cap * sizeof *fns);
+                            if (!fns) abort();
                         }
                         fns[nfns].name = fn->u.func_def.name;
                         fns[nfns].pos = i;
@@ -8774,6 +8779,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                     deferred_td_cap = deferred_td_cap ? deferred_td_cap * 2 : 4;
                     deferred_tds = realloc(deferred_tds,
                         deferred_td_cap * sizeof *deferred_tds);
+                    if (!deferred_tds) abort();
                 }
                 deferred_tds[deferred_td_count++] = d;
                 continue;
