@@ -25,7 +25,7 @@ static unsigned sym_hash(const char *name) {
 static void scope_rehash(Scope *s) {
     size_t new_cap = s->nbuckets ? s->nbuckets * 2 : SCOPE_INIT_BUCKETS;
     Symbol **nb = calloc(new_cap, sizeof *nb);
-    if (!nb) { perror("sharp-fe scope rehash"); return; }
+    if (!nb) { perror("sharp-fe scope rehash"); abort(); }
     size_t mask = new_cap - 1;
     for (size_t i = 0; i < s->nbuckets; i++) {
         Symbol *sym = s->buckets[i];

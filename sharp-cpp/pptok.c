@@ -236,7 +236,7 @@ CppReader *reader_new_from_file(const char *filename,
 
     /* Read entire file, handling pipes and special files (st_size == 0). */
     struct stat st;
-    fstat(fileno(f), &st);
+    if (fstat(fileno(f), &st) < 0) memset(&st, 0, sizeof(st));
     size_t nr = 0;
     char  *buf;
 

@@ -180,6 +180,7 @@ typedef struct {
     char       *tmp_c;         /* generated .c text (NULL if not yet generated);
                                   for .S files this is preprocessed assembly */
     bool        tmp_is_asm;    /* true if tmp_c is assembly (.S), not C */
+    bool        tmp_is_zig_direct; /* true if .cpp/.m/.mm — pass directly to zig cc */
     char      **included_files; /* files opened via #include (owned, freed on cleanup) */
     size_t      nincluded;
     bool       *included_is_sys; /* parallel to included_files, true = system header */
@@ -200,6 +201,7 @@ static InputFile *iv_push(InputVec *v) {
     v->data[v->len].path = NULL;
     v->data[v->len].tmp_c = NULL;
     v->data[v->len].tmp_is_asm = false;
+    v->data[v->len].tmp_is_zig_direct = false;
     v->data[v->len].included_files = NULL;
     v->data[v->len].nincluded = 0;
     v->data[v->len].included_is_sys = NULL;
@@ -273,10 +275,12 @@ static int fill_random_x(char *tmpl, int suffix_len) {
 }
 
 static char *make_tmp_name(const char *prefix, const char *suffix) {
-    char *buf = malloc(strlen(prefix) + strlen(suffix) + 16);
+    size_t bufsz = strlen(prefix) + strlen(suffix) + 32;
+    char *buf = malloc(bufsz);
     if (!buf) return NULL;
-    snprintf(buf, strlen(prefix) + strlen(suffix) + 16,
-             "/tmp/sharp-XXXXXX%s", suffix);
+    const char *base = strrchr(prefix, '/');
+    base = base ? base + 1 : prefix;
+    snprintf(buf, bufsz, "/tmp/sharp_%s-XXXXXX%s", base, suffix);
     int fd = fill_random_x(buf, (int)strlen(suffix));
     if (fd < 0) { free(buf); return NULL; }
     close(fd);
@@ -312,21 +316,75 @@ static char *make_tmp_name(const char *prefix, const char *suffix) {
  * zig cc spawns sub-processes (compiler_rt) that inherit pipe handles;
  * with system(), all output goes through a temp file — no pipes.      */
 static int run_cmd(const char **argv) {
+    /* Estimate total command line length */
+    size_t total = 0;
+    for (int i = 0; argv[i]; i++)
+        total += strlen(argv[i]) * 2 + 4; /* room for quoting + space */
 
-    /* Build command line string from argv */
-    char cmd[4096];
+    char *cmd = malloc(total);
+    if (!cmd) return -1;
     size_t pos = 0;
+
     for (int i = 0; argv[i]; i++) {
-        if (i > 0 && pos + 1 < sizeof(cmd)) cmd[pos++] = ' ';
+        if (i > 0) cmd[pos++] = ' ';
         const char *a = argv[i];
-        int need_q = (strchr(a, ' ') != NULL || a[0] == '\0');
-        if (need_q && pos + 2 < sizeof(cmd)) cmd[pos++] = '"';
-        size_t alen = strlen(a);
-        if (pos + alen + (need_q ? 2 : 1) < sizeof(cmd)) {
+
+        /* Check if argument needs shell quoting */
+        int needs_q = (a[0] == '\0' || strpbrk(a, " \t\n\"'$`\\*?[]{}|&;()<>#!~") != NULL);
+
+        if (!needs_q) {
+            size_t alen = strlen(a);
+            if (pos + alen >= total) {
+                total = (pos + alen) * 2 + 32;
+                char *nc = realloc(cmd, total);
+                if (!nc) { free(cmd); return -1; }
+                cmd = nc;
+            }
             memcpy(cmd + pos, a, alen);
             pos += alen;
+        } else {
+            /* Single-quote the argument. The only character that can't
+             * appear inside single quotes is a single quote itself.
+             * Handle it by ending the quote, inserting \', and restarting. */
+            if (pos + 1 >= total) {
+                total = total * 2 + 32;
+                char *nc = realloc(cmd, total);
+                if (!nc) { free(cmd); return -1; }
+                cmd = nc;
+            }
+            cmd[pos++] = '\'';
+            for (const char *p = a; *p; p++) {
+                if (*p == '\'') {
+                    /* end current quote, emit escaped quote, start new quote */
+                    size_t need = 4; /* '\'' */
+                    if (pos + need >= total) {
+                        total = (pos + need) * 2 + 32;
+                        char *nc = realloc(cmd, total);
+                        if (!nc) { free(cmd); return -1; }
+                        cmd = nc;
+                    }
+                    cmd[pos++] = '\'';
+                    cmd[pos++] = '\\';
+                    cmd[pos++] = '\'';
+                    cmd[pos++] = '\'';
+                } else {
+                    if (pos + 1 >= total) {
+                        total = total * 2 + 32;
+                        char *nc = realloc(cmd, total);
+                        if (!nc) { free(cmd); return -1; }
+                        cmd = nc;
+                    }
+                    cmd[pos++] = *p;
+                }
+            }
+            if (pos + 1 >= total) {
+                total = total * 2 + 32;
+                char *nc = realloc(cmd, total);
+                if (!nc) { free(cmd); return -1; }
+                cmd = nc;
+            }
+            cmd[pos++] = '\'';
         }
-        if (need_q && pos + 1 < sizeof(cmd)) cmd[pos++] = '"';
     }
     cmd[pos] = '\0';
 
@@ -345,11 +403,12 @@ static int run_cmd(const char **argv) {
              tmp, (int)getpid(), (unsigned long)pthread_self());
 #endif
 
-    char full[8192];
+    char *full = malloc(pos + 512);
+    if (!full) { free(cmd); return -1; }
     if (g_sess.verbose)
-        snprintf(full, sizeof(full), "%s 2> \"%s\"", cmd, err_path);
+        snprintf(full, pos + 512, "%s 2> \"%s\"", cmd, err_path);
     else
-        snprintf(full, sizeof(full), "%s > NUL 2> \"%s\"", cmd, err_path);
+        snprintf(full, pos + 512, "%s > NUL 2> \"%s\"", cmd, err_path);
 
     int rc = system(full);
 
@@ -363,6 +422,43 @@ static int run_cmd(const char **argv) {
         }
     }
     remove(err_path);
+    free(full);
+    free(cmd);
+    return rc;
+}
+
+/* ── Zig cc invocation helpers ──────────────────────────────────────
+ *
+ * Most compilation actions involve constructing a zig cc command line
+ * with common prefix (zig_exe, "cc", -target, --sysroot, link_other),
+ * then appending mode-specific arguments and calling run_cmd.          */
+
+/* Build the common zig cc prefix: zig_exe, "cc", -target, --sysroot,
+ * and link_other flags.  Returns an StrVec that the caller extends. */
+static StrVec zig_cc_prefix(const char *zig_exe, const char *target,
+                             const char *sysroot, StrVec *link_other) {
+    StrVec a = {0};
+    sv_push(&a, zig_exe);
+    sv_push(&a, "cc");
+    if (target && target[0]) { sv_push(&a, "-target"); sv_push(&a, (char *)target); }
+    if (sysroot && sysroot[0]) { sv_push(&a, "--sysroot"); sv_push(&a, (char *)sysroot); }
+    for (size_t i = 0; i < link_other->len; i++)
+        sv_push(&a, link_other->data[i]);
+    return a;
+}
+
+/* NULL-terminate, optionally print verbose output, run the command,
+ * and free the args array.  Returns 0 on success, non-zero on failure. */
+static int zig_cc_run(StrVec *args) {
+    sv_push(args, NULL);
+    if (g_sess.verbose) {
+        fprintf(stderr, "[sharpc] ");
+        for (int i = 0; args->data[i]; i++) fprintf(stderr, "%s ", args->data[i]);
+        fprintf(stderr, "\n");
+    }
+    int rc = run_cmd(args->data);
+    free(args->data);
+    args->data = NULL;
     return rc;
 }
 
@@ -421,13 +517,23 @@ static bool is_dot_S(const char *path) {
     return strcmp(file_ext(path), ".S") == 0;
 }
 
+static bool is_zig_forward_source(const char *path) {
+    const char *ext = file_ext(path);
+    return strcmp(ext, ".cpp") == 0 ||
+           strcmp(ext, ".cxx") == 0 ||
+           strcmp(ext, ".cc")  == 0 ||
+           strcmp(ext, ".m")   == 0 ||
+           strcmp(ext, ".mm")  == 0;
+}
+
 static char *replace_ext(const char *path, const char *new_ext) {
     /* e.g. /a/b/foo.ce → /a/b/foo.o */
     const char *dot = strrchr(path, '.');
     if (!dot) {
-        char *r = malloc(strlen(path) + strlen(new_ext) + 1);
+        size_t rsz = strlen(path) + strlen(new_ext) + 1;
+        char *r = malloc(rsz);
         if (!r) return NULL;
-        sprintf(r, "%s%s", path, new_ext);
+        snprintf(r, rsz, "%s%s", path, new_ext);
         return r;
     }
     size_t base_len = (size_t)(dot - path);
@@ -499,6 +605,8 @@ static void usage(FILE *out) {
 "\n"
 "Input files:\n"
 "  <file>.ce/.c/.i     source files (compiled via Sharp frontend)\n"
+"  <file>.cpp/.cxx/.cc  C++ source files (passed directly to zig cc)\n"
+"  <file>.m/.mm         Objective-C / Objective-C++ (passed to zig cc)\n"
 "  <file>.S             assembly with preprocessor (cpp + zig cc)\n"
 "  <file>.o/.obj        pre-built objects (passed to linker)\n"
 "  <file>.a/.so         static / shared libraries (passed to linker)\n"
@@ -731,13 +839,14 @@ static char *prepend_force_includes(const char *input, char *src,
     return buf;
 }
 
-/* Run sharp's C preprocessor on src with all flags applied.
- * Does NOT free src — the caller owns it.
- * Returns preprocessed text (caller frees), or NULL on error. */
-static char *cpp_preprocess_src(const char *src, const char *filename,
-                                 StrVec *user_inc, StrVec *sys_inc,
-                                 MacroVec *macros, long lang_std,
-                                 const char *target, bool linemarkers) {
+/* ── Shared preprocessor helpers ───────────────────────────────────── */
+
+/* Set up a CppCtx with all common flags: target macros, standard,
+ * include paths, and -D/-U macros.  Returns a fully configured ctx,
+ * or NULL on OOM (from -D apply_define). */
+static CppCtx *setup_cpp_context(const char *target, long lang_std,
+                                  StrVec *user_inc, StrVec *sys_inc,
+                                  MacroVec *macros, bool linemarkers) {
     CppCtx *cctx = cpp_ctx_new();
     cpp_probe_zig_macros(cctx, target);
     cpp_emit_linemarkers(cctx, linemarkers);
@@ -755,12 +864,15 @@ static char *cpp_preprocess_src(const char *src, const char *filename,
             cpp_ctx_free(cctx); return NULL;
         }
     }
+    return cctx;
+}
 
-    CppResult r = cpp_run_buf(cctx, src, strlen(src), filename);
-
+/* Print all diagnostics from a CppResult, returning true if any
+ * error or fatal diagnostic was present. */
+static bool print_cpp_diags(CppResult *r, const char *filename) {
     bool had_error = false;
-    for (size_t i = 0; i < r.ndiags; i++) {
-        CppDiag *d = &r.diags[i];
+    for (size_t i = 0; i < r->ndiags; i++) {
+        CppDiag *d = &r->diags[i];
         if (d->level == CPP_DIAG_NOTE) continue;
         const char *fname = d->loc.file ? d->loc.file : filename;
         fprintf(stderr, "%s:%u:%u: %s: %s\n",
@@ -772,6 +884,35 @@ static char *cpp_preprocess_src(const char *src, const char *filename,
         if (d->level == CPP_DIAG_ERROR || d->level == CPP_DIAG_FATAL)
             had_error = true;
     }
+    return had_error;
+}
+
+/* Transfer ownership of included_files from CppResult to InputFile.
+ * The result's pointers are set to NULL so cpp_result_free won't free them. */
+static void transfer_included_files(CppResult *r, InputFile *inf) {
+    if (!inf) return;
+    inf->included_files = r->included_files;
+    inf->nincluded = r->nincluded;
+    inf->included_is_sys = r->included_is_sys;
+    r->included_files = NULL;
+    r->nincluded = 0;
+    r->included_is_sys = NULL;
+}
+
+/* Run sharp's C preprocessor on src with all flags applied.
+ * Does NOT free src — the caller owns it.
+ * Returns preprocessed text (caller frees), or NULL on error. */
+static char *cpp_preprocess_src(const char *src, const char *filename,
+                                 StrVec *user_inc, StrVec *sys_inc,
+                                 MacroVec *macros, long lang_std,
+                                 const char *target, bool linemarkers) {
+    CppCtx *cctx = setup_cpp_context(target, lang_std, user_inc, sys_inc,
+                                      macros, linemarkers);
+    if (!cctx) return NULL;
+
+    CppResult r = cpp_run_buf(cctx, src, strlen(src), filename);
+
+    bool had_error = print_cpp_diags(&r, filename);
     if (had_error) { cpp_result_free(&r); cpp_ctx_free(cctx); return NULL; }
 
     char *out = malloc(r.text_len + 1);
@@ -804,43 +945,16 @@ static char *preprocess_one_file(const char *input,
         if (!src) return NULL;
     }
 
-    CppCtx *cctx = cpp_ctx_new();
-    cpp_probe_zig_macros(cctx, target);
-    cpp_emit_linemarkers(cctx, true);
-    if (lang_std >= 0) cpp_set_lang_std(cctx, lang_std);
-
-    for (size_t i = 0; i < user_inc->len; i++)
-        cpp_add_user_include(cctx, user_inc->data[i]);
-    for (size_t i = 0; i < sys_inc->len; i++)
-        cpp_add_sys_include(cctx, sys_inc->data[i]);
-
-    for (size_t i = 0; i < macros->len; i++) {
-        if (macros->data[i].is_undef) {
-            cpp_undefine(cctx, macros->data[i].spec);
-        } else if (apply_define(cctx, macros->data[i].spec) < 0) {
-            cpp_ctx_free(cctx); free(src); return NULL;
-        }
-    }
+    CppCtx *cctx = setup_cpp_context(target, lang_std, user_inc, sys_inc,
+                                      macros, true);
+    if (!cctx) { free(src); return NULL; }
 
     CppResult r = cpp_run_buf(cctx, src, strlen(src), input);
     free(src);
 
-    bool cpp_had_error = false;
-    for (size_t i = 0; i < r.ndiags; i++) {
-        CppDiag *d = &r.diags[i];
-        if (d->level == CPP_DIAG_NOTE) continue;
-        const char *fname = d->loc.file ? d->loc.file : input;
-        fprintf(stderr, "%s:%u:%u: %s: %s\n",
-                fname, d->loc.line, d->loc.col,
-                d->level == CPP_DIAG_FATAL   ? "fatal" :
-                d->level == CPP_DIAG_ERROR   ? "error" :
-                d->level == CPP_DIAG_WARNING ? "warning" : "note",
-                d->msg ? d->msg : "");
-        if (d->level == CPP_DIAG_ERROR || d->level == CPP_DIAG_FATAL)
-            cpp_had_error = true;
-    }
+    bool cpp_had_error = print_cpp_diags(&r, input);
     if (cpp_had_error) {
-        if (inf) { inf->included_files = r.included_files; inf->nincluded = r.nincluded; inf->included_is_sys = r.included_is_sys; r.included_files = NULL; r.nincluded = 0; r.included_is_sys = NULL; }
+        transfer_included_files(&r, inf);
         cpp_result_free(&r);
         cpp_ctx_free(cctx);
         return NULL;
@@ -848,12 +962,12 @@ static char *preprocess_one_file(const char *input,
 
     char *out = malloc(r.text_len + 1);
     if (!out) {
-        if (inf) { inf->included_files = r.included_files; inf->nincluded = r.nincluded; inf->included_is_sys = r.included_is_sys; r.included_files = NULL; r.nincluded = 0; r.included_is_sys = NULL; }
+        transfer_included_files(&r, inf);
         cpp_result_free(&r); cpp_ctx_free(cctx); return NULL;
     }
     if (r.text_len) memcpy(out, r.text, r.text_len);
     out[r.text_len] = '\0';
-    if (inf) { inf->included_files = r.included_files; inf->nincluded = r.nincluded; inf->included_is_sys = r.included_is_sys; r.included_files = NULL; r.nincluded = 0; r.included_is_sys = NULL; }
+    transfer_included_files(&r, inf);
     cpp_result_free(&r);
     cpp_ctx_free(cctx);
     return out;
@@ -890,46 +1004,17 @@ static char *compile_one_file(const char *input,
         src = src2;
     }
 
-    CppCtx *cctx = cpp_ctx_new();
-    cpp_probe_zig_macros(cctx, target);
-    cpp_emit_linemarkers(cctx, true);
-    if (lang_std >= 0) cpp_set_lang_std(cctx, lang_std);
-
-    /* ── Auto-detect system paths are already in sys_inc from main() ── */
-
-    for (size_t i = 0; i < user_inc->len; i++)
-        cpp_add_user_include(cctx, user_inc->data[i]);
-    for (size_t i = 0; i < sys_inc->len; i++)
-        cpp_add_sys_include(cctx, sys_inc->data[i]);
-
-    for (size_t i = 0; i < macros->len; i++) {
-        if (macros->data[i].is_undef) {
-            cpp_undefine(cctx, macros->data[i].spec);
-        } else if (apply_define(cctx, macros->data[i].spec) < 0) {
-            cpp_ctx_free(cctx); free(src); return NULL;
-        }
-    }
+    CppCtx *cctx = setup_cpp_context(target, lang_std, user_inc, sys_inc,
+                                      macros, true);
+    if (!cctx) { free(src); return NULL; }
 
     CppResult r = cpp_run_buf(cctx, src, strlen(src), input);
     free(src);
 
     /* Check cpp diagnostics */
-    bool cpp_had_error = false;
-    for (size_t i = 0; i < r.ndiags; i++) {
-        CppDiag *d = &r.diags[i];
-        if (d->level == CPP_DIAG_NOTE) continue;
-        const char *fname = d->loc.file ? d->loc.file : input;
-        fprintf(stderr, "%s:%u:%u: %s: %s\n",
-                fname, d->loc.line, d->loc.col,
-                d->level == CPP_DIAG_FATAL   ? "fatal" :
-                d->level == CPP_DIAG_ERROR   ? "error" :
-                d->level == CPP_DIAG_WARNING ? "warning" : "note",
-                d->msg ? d->msg : "");
-        if (d->level == CPP_DIAG_ERROR || d->level == CPP_DIAG_FATAL)
-            cpp_had_error = true;
-    }
+    bool cpp_had_error = print_cpp_diags(&r, input);
     if (cpp_had_error) {
-        if (inf) { inf->included_files = r.included_files; inf->nincluded = r.nincluded; inf->included_is_sys = r.included_is_sys; r.included_files = NULL; r.nincluded = 0; r.included_is_sys = NULL; }
+        transfer_included_files(&r, inf);
         cpp_result_free(&r);
         cpp_ctx_free(cctx);
         return NULL;
@@ -956,6 +1041,7 @@ static char *compile_one_file(const char *input,
     for (int a = 0; a < 4; a++) {
         for (size_t ii = 0; ii < all_diag[a]->len; ii++) {
             CppDiag *d = &all_diag[a]->data[ii];
+            if (d->level == CPP_DIAG_NOTE) continue;
             const char *fname = d->loc.file ? d->loc.file : input;
             fprintf(stderr, "%s:%u:%u: %s: %s\n",
                     fname, d->loc.line, d->loc.col,
@@ -975,7 +1061,7 @@ static char *compile_one_file(const char *input,
     /* Cleanup */
     sema_ctx_free(sema); ty_store_free(ts);
     scope_free_chain(scope); ast_node_free(ast); lex_free(toks);
-    if (inf) { inf->included_files = r.included_files; inf->nincluded = r.nincluded; inf->included_is_sys = r.included_is_sys; r.included_files = NULL; r.nincluded = 0; r.included_is_sys = NULL; }
+    transfer_included_files(&r, inf);
     cpp_result_free(&r);
     for (int a = 0; a < 4; a++) {
         for (size_t ii = 0; ii < all_diag[a]->len; ii++) free(all_diag[a]->data[ii].msg);
@@ -1003,6 +1089,7 @@ int main(int argc, char *argv[]) {
 #else
     const char *target      = "x86_64-linux-gnu";
 #endif
+    const char *sysroot        = NULL;
     StrVec      user_inc    = {0};
     StrVec      sys_inc     = {0};
     MacroVec    macros      = {0};
@@ -1040,6 +1127,12 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(a, "--target") == 0 && i + 1 < argc) {
             target = argv[++i];
 
+        /* ── --sysroot=<path> ───────────────────────────────────── */
+        } else if (strcmp(a, "--sysroot") == 0 && i + 1 < argc) {
+            sysroot = argv[++i];
+        } else if (strncmp(a, "--sysroot=", 10) == 0) {
+            sysroot = a + 10;
+
         /* ── --optimize=<mode> ──────────────────────────────────── */
         } else if (strcmp(a, "--optimize") == 0 && i + 1 < argc) {
             optimize = argv[++i];
@@ -1048,19 +1141,24 @@ int main(int argc, char *argv[]) {
 
         /* ── -I ──────────────────────────────────────────────────── */
         } else if (strcmp(a, "-I") == 0 && i + 1 < argc) {
-            if (sv_push(&user_inc, argv[++i]) < 0) goto oom;
+            char *d = xstrdup(argv[++i]); if (!d) goto oom;
+            if (sv_push(&user_inc, d) < 0) { free(d); goto oom; }
         } else if (strncmp(a, "-I", 2) == 0 && a[2]) {
-            if (sv_push(&user_inc, a + 2) < 0) goto oom;
+            char *d = xstrdup(a + 2); if (!d) goto oom;
+            if (sv_push(&user_inc, d) < 0) { free(d); goto oom; }
 
         /* ── -isystem ────────────────────────────────────────────── */
         } else if (strcmp(a, "-isystem") == 0 && i + 1 < argc) {
-            if (sv_push(&sys_inc, argv[++i]) < 0) goto oom;
+            char *d = xstrdup(argv[++i]); if (!d) goto oom;
+            if (sv_push(&sys_inc, d) < 0) { free(d); goto oom; }
         } else if (strncmp(a, "-isystem", 8) == 0 && a[8]) {
-            if (sv_push(&sys_inc, a + 8) < 0) goto oom;
+            char *d = xstrdup(a + 8); if (!d) goto oom;
+            if (sv_push(&sys_inc, d) < 0) { free(d); goto oom; }
 
         /* ── -include ────────────────────────────────────────────── */
         } else if (strcmp(a, "-include") == 0 && i + 1 < argc) {
-            if (sv_push(&force_includes, argv[++i]) < 0) goto oom;
+            char *d = xstrdup(argv[++i]); if (!d) goto oom;
+            if (sv_push(&force_includes, d) < 0) { free(d); goto oom; }
 
         /* ── -D / -U ─────────────────────────────────────────────── */
         } else if (strcmp(a, "-D") == 0 && i + 1 < argc) {
@@ -1266,6 +1364,12 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
+        if (is_zig_forward_source(inf->path)) {
+            inf->tmp_c = strdup(inf->path);
+            inf->tmp_is_zig_direct = true;
+            continue;
+        }
+
         if (action == ACTION_PREPROCESS) {
             /* -E: preprocess and output to stdout or -o file */
             char *pp_out = preprocess_one_file(inf->path, &user_inc, &sys_inc,
@@ -1354,6 +1458,27 @@ int main(int argc, char *argv[]) {
             InputFile *inf = &inputs.data[fi];
             if (!inf->tmp_c) continue;
 
+            if (inf->tmp_is_zig_direct) {
+                const char *out_file = (inputs.len == 1 && output) ? output :
+                                       replace_ext(inf->path, ".s");
+
+                StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
+                sv_push(&zig_args, "-S");
+                sv_push(&zig_args, inf->tmp_c);
+                sv_push(&zig_args, "-o");
+                sv_push(&zig_args, out_file);
+
+                if (zig_cc_run(&zig_args) != 0) {
+                    fprintf(stderr, "sharpc: assembly failed for %s\n", inf->path);
+                    ret = 3; goto cleanup;
+                }
+                if (g_sess.verbose)
+                    fprintf(stderr, "sharpc: wrote %s\n", out_file);
+                if (inputs.len != 1 || !output)
+                    free((void *)out_file);
+                continue;
+            }
+
             const char *out_file = (inputs.len == 1 && output) ? output :
                                    replace_ext(inf->path, ".s");
 
@@ -1428,6 +1553,28 @@ int main(int argc, char *argv[]) {
             InputFile *inf = &inputs.data[fi];
             if (!inf->tmp_c) continue;
 
+            if (inf->tmp_is_zig_direct) {
+                const char *obj_out = (inputs.len == 1 && output)
+                                      ? output :
+                                      replace_ext(inf->path, ".o");
+
+                StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
+                sv_push(&zig_args, "-c");
+                sv_push(&zig_args, inf->tmp_c);
+                sv_push(&zig_args, "-o");
+                sv_push(&zig_args, obj_out);
+
+                if (zig_cc_run(&zig_args) != 0) {
+                    fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
+                    ret = 3; goto cleanup;
+                }
+                if (g_sess.verbose)
+                    fprintf(stderr, "sharpc: wrote %s\n", obj_out);
+                if (inputs.len != 1 || !output)
+                    free((void *)obj_out);
+                continue;
+            }
+
             const char *obj_out = (inputs.len == 1 && output)
                                   ? output :
                                   replace_ext(inf->path, ".o");
@@ -1441,29 +1588,16 @@ int main(int argc, char *argv[]) {
                 fputs(inf->tmp_c, fs);
                 fclose(fs);
 
-                StrVec zig_args = {0};
-                sv_push(&zig_args, zig_exe);
-                sv_push(&zig_args, "cc");
-                if (target && target[0]) { sv_push(&zig_args, "-target"); sv_push(&zig_args, (char *)target); }
+                StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
                 sv_push(&zig_args, "-c");
                 sv_push(&zig_args, tmp_s);
                 sv_push(&zig_args, "-o");
                 sv_push(&zig_args, obj_out);
-                for (size_t li = 0; li < link_other.len; li++)
-                    sv_push(&zig_args, link_other.data[li]);
-                sv_push(&zig_args, NULL);
 
-                if (g_sess.verbose) {
-                    fprintf(stderr, "[sharpc] ");
-                    for (int ai = 0; zig_args.data[ai]; ai++) fprintf(stderr, "%s ", zig_args.data[ai]);
-                    fprintf(stderr, "\n");
-                }
-                if (run_cmd(zig_args.data) != 0) {
+                if (zig_cc_run(&zig_args) != 0) {
                     fprintf(stderr, "sharpc: assembly failed for %s\n", inf->path);
-                    free(zig_args.data);
                     ret = 3; goto cleanup;
                 }
-                free(zig_args.data);
                 if (g_sess.verbose)
                     fprintf(stderr, "sharpc: wrote %s\n", obj_out);
                 if (inputs.len != 1 || !output)
@@ -1479,28 +1613,16 @@ int main(int argc, char *argv[]) {
             fclose(f);
 
             /* Build zig cc argv */
-            StrVec zig_args = {0};
-            sv_push(&zig_args, zig_exe);
-            sv_push(&zig_args, "cc");
-            if (target && target[0]) { sv_push(&zig_args, "-target"); sv_push(&zig_args, (char *)target); }
+            StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
             sv_push(&zig_args, "-x");
             sv_push(&zig_args, "c");
             sv_push(&zig_args, "-c");
             sv_push(&zig_args, tmp_i);
             sv_push(&zig_args, "-o");
             sv_push(&zig_args, obj_out);
-            for (size_t li = 0; li < link_other.len; li++)
-                sv_push(&zig_args, link_other.data[li]);
-            sv_push(&zig_args, NULL);
 
-            if (g_sess.verbose) {
-                fprintf(stderr, "%s", zig_args.data[0]);
-                for (int ai = 1; zig_args.data[ai]; ai++) fprintf(stderr, " %s", zig_args.data[ai]);
-                fprintf(stderr, "\n");
-            }
-            if (run_cmd(zig_args.data) != 0) {
+            if (zig_cc_run(&zig_args) != 0) {
                 fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
-                free(zig_args.data);
                 ret = 3;
                 goto cleanup;
             }
@@ -1508,7 +1630,6 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "sharpc: wrote %s\n", obj_out);
             if (inputs.len != 1 || !output)
                 free((void *)obj_out);
-            free(zig_args.data);
         }
         goto cleanup;
     }
@@ -1531,6 +1652,25 @@ int main(int argc, char *argv[]) {
 
         if (!inf->tmp_c) continue;
 
+        if (inf->tmp_is_zig_direct) {
+            const char *obj_tmp = make_tmp_name(inf->path, ".o");
+            if (!obj_tmp) { ret = 2; goto cleanup; }
+
+            StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
+            sv_push(&zig_args, "-c");
+            sv_push(&zig_args, inf->tmp_c);
+            sv_push(&zig_args, "-o");
+            sv_push(&zig_args, obj_tmp);
+
+            if (zig_cc_run(&zig_args) != 0) {
+                fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
+                ret = 3; goto cleanup;
+            }
+
+            sv_push(&obj_files, obj_tmp);
+            continue;
+        }
+
         if (inf->tmp_is_asm) {
             /* .S: write preprocessed assembly to .s temp file, assemble via zig cc */
             char *tmp_s = make_tmp_name(inf->path, ".s");
@@ -1543,29 +1683,16 @@ int main(int argc, char *argv[]) {
             const char *obj_tmp = make_tmp_name(inf->path, ".o");
             if (!obj_tmp) { ret = 2; goto cleanup; }
 
-            StrVec zig_args = {0};
-            sv_push(&zig_args, zig_exe);
-            sv_push(&zig_args, "cc");
-            if (target && target[0]) { sv_push(&zig_args, "-target"); sv_push(&zig_args, (char *)target); }
+            StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
             sv_push(&zig_args, "-c");
             sv_push(&zig_args, tmp_s);
             sv_push(&zig_args, "-o");
             sv_push(&zig_args, obj_tmp);
-            for (size_t li = 0; li < link_other.len; li++)
-                sv_push(&zig_args, link_other.data[li]);
-            sv_push(&zig_args, NULL);
 
-            if (g_sess.verbose) {
-                fprintf(stderr, "[sharpc] ");
-                for (int ai = 0; zig_args.data[ai]; ai++) fprintf(stderr, "%s ", zig_args.data[ai]);
-                fprintf(stderr, "\n");
-            }
-            if (run_cmd(zig_args.data) != 0) {
+            if (zig_cc_run(&zig_args) != 0) {
                 fprintf(stderr, "sharpc: assembly failed for %s\n", inf->path);
-                free(zig_args.data);
                 ret = 3; goto cleanup;
             }
-            free(zig_args.data);
 
             sv_push(&obj_files, obj_tmp);
             continue;
@@ -1581,32 +1708,19 @@ int main(int argc, char *argv[]) {
         const char *obj_tmp = make_tmp_name(inf->path, ".o");
         if (!obj_tmp) { ret = 2; goto cleanup; }
 
-        StrVec zig_args = {0};
-        sv_push(&zig_args, zig_exe);
-        sv_push(&zig_args, "cc");
-        if (target && target[0]) { sv_push(&zig_args, "-target"); sv_push(&zig_args, (char *)target); }
+        StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
         sv_push(&zig_args, "-x");
         sv_push(&zig_args, "c");
         sv_push(&zig_args, "-c");
         sv_push(&zig_args, tmp_i);
         sv_push(&zig_args, "-o");
         sv_push(&zig_args, obj_tmp);
-        for (size_t li = 0; li < link_other.len; li++)
-            sv_push(&zig_args, link_other.data[li]);
-        sv_push(&zig_args, NULL);
 
-        if (g_sess.verbose) {
-            fprintf(stderr, "[sharpc] ");
-            for (int ai = 0; zig_args.data[ai]; ai++) fprintf(stderr, "%s ", zig_args.data[ai]);
-            fprintf(stderr, "\n");
-        }
-        if (run_cmd(zig_args.data) != 0) {
+        if (zig_cc_run(&zig_args) != 0) {
             fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
-            free(zig_args.data);
             ret = 3;
             goto cleanup;
         }
-        free(zig_args.data);
 
         /* Add obj to link list */
         sv_push(&obj_files, obj_tmp);
@@ -1619,10 +1733,7 @@ int main(int argc, char *argv[]) {
         output = "a.out";
     }
 
-    StrVec ld_args = {0};
-    sv_push(&ld_args, zig_exe);
-    sv_push(&ld_args, "cc");
-    if (target && target[0]) { sv_push(&ld_args, "-target"); sv_push(&ld_args, (char *)target); }
+    StrVec ld_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
     sv_push(&ld_args, "-o");
     sv_push(&ld_args, output);
     for (size_t oi = 0; oi < obj_files.len; oi++)
@@ -1631,37 +1742,30 @@ int main(int argc, char *argv[]) {
         sv_push(&ld_args, link_paths.data[li]);
     for (size_t li = 0; li < link_libs.len; li++)
         sv_push(&ld_args, link_libs.data[li]);
-    for (size_t li = 0; li < link_other.len; li++)
-        sv_push(&ld_args, link_other.data[li]);
-    sv_push(&ld_args, NULL);
 
-    if (g_sess.verbose) {
-        fprintf(stderr, "[sharpc] ");
-        for (int ai = 0; ld_args.data[ai]; ai++) fprintf(stderr, "%s ", ld_args.data[ai]);
-        fprintf(stderr, "\n");
-    }
-    if (run_cmd(ld_args.data) != 0) {
+    if (zig_cc_run(&ld_args) != 0) {
         fprintf(stderr, "sharpc: link failed\n");
-        free(ld_args.data);
         ret = 3;
         goto cleanup;
     }
-    free(ld_args.data);
     free(obj_files.data);
 
     if (g_sess.verbose)
         fprintf(stderr, "sharpc: wrote %s\n", output);
 
 cleanup:
+    for (size_t i = 0; i < user_inc.len; i++) free((void *)user_inc.data[i]);
     free(user_inc.data);
+    for (size_t i = 0; i < sys_inc.len; i++) free((void *)sys_inc.data[i]);
     free(sys_inc.data);
     free(macros.data);
     free(link_libs.data);
     free(link_paths.data);
     free(link_other.data);
+    for (size_t i = 0; i < force_includes.len; i++) free((void *)force_includes.data[i]);
+    free(force_includes.data);
     for (size_t i = 0; i < inputs.len; i++) {
         free(inputs.data[i].tmp_c);
-        /* included_files may be NULL if depfile block transferred ownership */
         if (inputs.data[i].included_files) {
             for (size_t j = 0; j < inputs.data[i].nincluded; j++)
                 free(inputs.data[i].included_files[j]);
@@ -1675,12 +1779,16 @@ cleanup:
 
 oom:
     fprintf(stderr, "sharpc: out of memory\n");
+    for (size_t i = 0; i < user_inc.len; i++) free((void *)user_inc.data[i]);
     free(user_inc.data);
+    for (size_t i = 0; i < sys_inc.len; i++) free((void *)sys_inc.data[i]);
     free(sys_inc.data);
     free(macros.data);
     free(link_libs.data);
     free(link_paths.data);
     free(link_other.data);
+    for (size_t i = 0; i < force_includes.len; i++) free((void *)force_includes.data[i]);
+    free(force_includes.data);
     for (size_t i = 0; i < inputs.len; i++) {
         free(inputs.data[i].tmp_c);
         if (inputs.data[i].included_files) {
