@@ -938,11 +938,24 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                 if (!t) t = decl ? ty_from_ast(ts, decl->u.var_decl.type,
                                                 ss->scope, ss->ctx->diags)
                                  : ty_error(ts);
+                /* C 6.3.2.1: a function designator is converted to a
+                 * pointer to the function in expression contexts.  When
+                 * a variable's type resolves to TY_FUNC (e.g. via a
+                 * typedef like `typedef int F(int); F fn;`), it decays
+                 * to TY_PTR(TY_FUNC(...)) when used in an expression. */
+                if (t && t->kind == TY_FUNC)
+                    t = ty_ptr(ts, t);
                 break;
             case SYM_PARAM:
                 if (decl && decl->kind == AST_PARAM_DECL) {
                     t = ty_from_ast(ts, decl->u.param_decl.type,
                                     ss->scope, ss->ctx->diags);
+                    /* C 6.7.6.3p8: a parameter declared with function type
+                     * is adjusted to pointer-to-function.  E.g.
+                     * `typedef int F(int); void g(F ntf)` makes ntf's
+                     * type `int (*)(int)`, not `int(int)`. */
+                    if (t && t->kind == TY_FUNC)
+                        t = ty_ptr(ts, t);
                 } else if (strcmp(expr->u.ident.name, "this") == 0) {
                     /* 'this' in a struct method: ptr to enclosing struct.
                      * Phase 4 stores the FUNC_DEF as decl for 'this', so

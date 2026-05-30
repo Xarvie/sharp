@@ -3435,14 +3435,62 @@ static AstNode *parse_top_decl(PS *ps) {
             ps->pos = save;
             if (ahead == STOK_LBRACE || ahead == STOK_SEMI) {
                 AstNode *sd = parse_struct_def(ps);
-                eat_attribute_specifiers(ps, NULL);  /* trailing attrs */
+                eat_attribute_specifiers(ps, NULL);
+                /* C: union body may be followed by variable declarators:
+                 *   union Tag { ... } var = init;
+                 *   union Tag t, *p;
+                 * After the union body, check for declarators.
+                 * Same BUG-004 guard as struct — skip if next IDENT
+                 * is a typedef name followed by another IDENT. */
+                bool _next_is_new_decl = false;
+                if (ps_at(ps, STOK_IDENT)) {
+                    if (td_has_n(&ps->typedefs, ps_peek(ps).text, ps_peek(ps).len)) {
+                        if (ps_peek2(ps).kind == STOK_IDENT ||
+                            ps_peek2(ps).kind == STOK_OPERATOR) {
+                            _next_is_new_decl = true;
+                        }
+                    }
+                }
+                if (!_next_is_new_decl &&
+                    (ps_at(ps, STOK_IDENT) || ps_at(ps, STOK_STAR) ||
+                    ps_at(ps, STOK_LPAREN))) {
+                    astvec_push(&ps->pending_decls, sd);
+                    AstNode *ty = ast_node_new(AST_TYPE_NAME, sd->loc);
+                    ty->u.type_name.name = cpp_xstrdup(sd->u.struct_def.name);
+                    DeclSpecs vds = {0};
+                    vds.base_ty = ty;
+                    vds.loc = sd->loc;
+                    AstNode *vd = parse_init_declarator_list(ps, &vds, /*stmt_wrap=*/false);
+                    return vd ? vd : sd;
+                }
                 ps_match(ps, STOK_SEMI);
                 return sd;
             }
         } else {
             ps->pos = save;
             AstNode *sd = parse_struct_def(ps);
-            eat_attribute_specifiers(ps, NULL);  /* trailing attrs */
+            eat_attribute_specifiers(ps, NULL);
+            /* C: anonymous union body may be followed by variable declarators:
+             *   union { Uint64 u64; double d; } inf = { 0x7ff...ULL };
+             * After the union body, check for declarators.
+             * Same BUG-004 guard as anonymous struct. */
+            bool _anon_next_new_decl =
+                ps_at(ps, STOK_IDENT) &&
+                td_has_n(&ps->typedefs, ps_peek(ps).text, ps_peek(ps).len) &&
+                (ps_peek2(ps).kind == STOK_IDENT ||
+                 ps_peek2(ps).kind == STOK_OPERATOR);
+            if (!_anon_next_new_decl &&
+                (ps_at(ps, STOK_IDENT) || ps_at(ps, STOK_STAR) ||
+                ps_at(ps, STOK_LPAREN))) {
+                astvec_push(&ps->pending_decls, sd);
+                AstNode *ty = ast_node_new(AST_TYPE_NAME, sd->loc);
+                ty->u.type_name.name = cpp_xstrdup(sd->u.struct_def.name);
+                DeclSpecs vds = {0};
+                vds.base_ty = ty;
+                vds.loc = sd->loc;
+                AstNode *vd = parse_init_declarator_list(ps, &vds, /*stmt_wrap=*/false);
+                return vd ? vd : sd;
+            }
             ps_match(ps, STOK_SEMI);
             return sd;
         }
