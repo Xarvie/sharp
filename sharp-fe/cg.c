@@ -4128,12 +4128,11 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
                               ? ty_from_ast(ctx->ts, vd->u.var_decl.type,
                                             cg_type_scope(ctx), NULL)
                               : ty_int(ctx->ts);
-                        /* First declarator: full `type name`.  Subsequent:
-                         * just `name` (C comma-decls don't repeat type). */
                         if (i == 0)
                             cg_decl(ctx, t, vd->u.var_decl.name);
                         else
-                            cg_puts(ctx, vd->u.var_decl.name);
+                            cg_emit_comma_cont_declarator(ctx,
+                                vd->u.var_decl.type, vd->u.var_decl.name);
                         if (vd->u.var_decl.init) {
                             cg_puts(ctx, " = ");
                             cg_expr(ctx, vd->u.var_decl.init);
