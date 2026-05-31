@@ -403,6 +403,15 @@ bool ty_is_ptr_to_array(const Type *t) {
     return false;
 }
 
+TyPtrPeel ty_peel_ptr(Type *t) {
+    TyPtrPeel r = {0, t};
+    while (r.base && r.base->kind == TY_PTR) {
+        r.nstars++;
+        r.base = r.base->u.ptr.base;
+    }
+    return r;
+}
+
 /* =========================================================================
  * Modifiers
  * ====================================================================== */

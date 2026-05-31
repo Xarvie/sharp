@@ -345,6 +345,16 @@ static void cg_emit_stars(CgCtx *ctx, int n) {
     for (int i = 0; i < n; i++) cg_puts(ctx, "*");
 }
 
+typedef struct { int nstars; const AstNode *base; } AstPtrPeel;
+static AstPtrPeel ast_peel_ptr(const AstNode *n) {
+    AstPtrPeel r = {0, n};
+    while (r.base && r.base->kind == AST_TYPE_PTR) {
+        r.nstars++;
+        r.base = r.base->u.type_ptr.base;
+    }
+    return r;
+}
+
 static void cg_emit_array_suffixes(CgCtx *ctx, const AstNode *cur) {
     while (cur && cur->kind == AST_TYPE_ARRAY) {
         cg_puts(ctx, "[");
@@ -773,7 +783,9 @@ static void cg_type_from_ast(CgCtx *ctx, const AstNode *n) {
          * Now count all leading PTR stars then emit  ret (**...)(params). */
         int nstars = 1;
         const AstNode *inner = base;
-        while (inner && inner->kind == AST_TYPE_PTR) { nstars++; inner = inner->u.type_ptr.base; }
+        AstPtrPeel aip = ast_peel_ptr(inner);
+        nstars += aip.nstars;
+        inner = aip.base;
         /* C8: if chain ends at FUNC, emit as fn-ptr: ret (**...)(params) */
         if (inner && inner->kind == AST_TYPE_FUNC) {
             const AstNode *fn_ast = inner;
@@ -988,17 +1000,15 @@ static void cg_type(CgCtx *ctx, Type *t) {
          * which must be emitted as the abstract declarator:
          *   R (*(*)(P))(Q)   [pointer to func(P) returning pointer to func(Q)->R]
          * The naive emission `R(*)(Q) (*)(P)` is not valid C syntax. */
-        int nstars = 0;
-        const Type *c = t;
-        while (c && c->kind == TY_PTR) { nstars++; c = c->u.ptr.base; }
+        TyPtrPeel pp = ty_peel_ptr((Type *)t);
+        int nstars = pp.nstars;
+        const Type *c = pp.base;
         if (c && c->kind == TY_FUNC) {
             /* Peel the return type to check for a nested function pointer. */
             const Type *ret = c->u.func.ret;
-            int inner_nstars = 0;
-            const Type *inner_c = ret;
-            while (inner_c && inner_c->kind == TY_PTR) {
-                inner_nstars++; inner_c = inner_c->u.ptr.base;
-            }
+            TyPtrPeel ipp = ty_peel_ptr((Type *)ret);
+            int inner_nstars = ipp.nstars;
+            const Type *inner_c = ipp.base;
             if (inner_c && inner_c->kind == TY_FUNC) {
                 /* Doubly-nested: R (*(*)(P))(Q)
                  * inner_c->ret = R, inner_c->params = Q (inner func params)
@@ -1246,9 +1256,9 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
             elem_const = true;
             elem = elem->u.const_.base;
         }
-        int elem_nstars = 0;
-        const Type *peel = elem;
-        while (peel && peel->kind == TY_PTR) { elem_nstars++; peel = peel->u.ptr.base; }
+        TyPtrPeel epp = ty_peel_ptr((Type *)elem);
+        int elem_nstars = epp.nstars;
+        const Type *peel = epp.base;
         if (peel && peel->kind == TY_FUNC) {
             cg_type(ctx, peel->u.func.ret);
             cg_puts(ctx, " (");
@@ -1302,9 +1312,9 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
     if (t && t->kind == TY_CONST) {
         const Type *inner = t->u.const_.base;
         if (inner) {
-            int nstars = 0;
-            const Type *c = inner;
-            while (c && c->kind == TY_PTR) { nstars++; c = c->u.ptr.base; }
+            TyPtrPeel pp = ty_peel_ptr((Type *)inner);
+            int nstars = pp.nstars;
+            const Type *c = pp.base;
             if (nstars > 0 && c && c->kind == TY_FUNC) {
                 /* const function-pointer: ret (* const name)(params) */
                 cg_type(ctx, c->u.func.ret);
@@ -1320,9 +1330,9 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
         }
     }
     if (t && t->kind == TY_PTR) {
-        int nstars = 0;
-        const Type *c = t;
-        while (c && c->kind == TY_PTR) { nstars++; c = c->u.ptr.base; }
+        TyPtrPeel pp = ty_peel_ptr((Type *)t);
+        int nstars = pp.nstars;
+        const Type *c = pp.base;
         if (c && c->kind == TY_FUNC) {
             /* detect doubly-nested func-ptr return type.
              * TY_PTR(TY_FUNC(ret=TY_PTR(TY_FUNC(ret=R,params=Q)), params=P))
@@ -1330,9 +1340,9 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
              * The naive `cg_type(ret)` path gives `R(*)(Q) (*name)(P)` which
              * is invalid C. */
             const Type *ret = c->u.func.ret;
-            int inner_ns = 0;
-            const Type *inner_c = ret;
-            while (inner_c && inner_c->kind == TY_PTR) { inner_ns++; inner_c = inner_c->u.ptr.base; }
+            TyPtrPeel ipp = ty_peel_ptr((Type *)ret);
+            int inner_ns = ipp.nstars;
+            const Type *inner_c = ipp.base;
             if (inner_c && inner_c->kind == TY_FUNC) {
                 /* R (*(*name)(P))(Q) */
                 cg_type(ctx, inner_c->u.func.ret);          /* R */
@@ -2842,7 +2852,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                  * so cg_type gets the correct nested structure. */
             if (ty_is_func_ptr(pb)) {
                 const Type *ret = pb->u.ptr.base->u.func.ret;
-                while (ret && ret->kind == TY_PTR) ret = ret->u.ptr.base;
+                ret = ty_peel_ptr((Type *)ret).base;
                 if (ret && ret->kind == TY_FUNC) {
                     /* Use ty_from_ast for accuracy; fall to else branch below */
                     Type *ast_t2 = ty_from_ast(ctx->ts, expr->u.cast.type,
@@ -4316,9 +4326,9 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
     int  ret_nstars  = 0;
     Type *ret_inner  = NULL;
     {
-        Type *peel = ret_t;
-        while (peel && peel->kind == TY_PTR) { ret_nstars++; peel = peel->u.ptr.base; }
-        if (peel && peel->kind == TY_FUNC) ret_inner = peel;
+        TyPtrPeel rpp = ty_peel_ptr(ret_t);
+        ret_nstars = rpp.nstars;
+        if (rpp.base && rpp.base->kind == TY_FUNC) ret_inner = rpp.base;
     }
     /* when ret_inner is set (return type is a function-pointer),
      * the Type* path may lose array size info for PTR(ARRAY) chains.
@@ -4328,8 +4338,8 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
     bool ret_has_deep_array = false;
     const AstNode *ret_deep_array_ast = NULL;
     if (ret_inner && ret_node) {
-        const AstNode *ra = ret_node;
-        while (ra && ra->kind == AST_TYPE_PTR) ra = ra->u.type_ptr.base;
+        AstPtrPeel rap = ast_peel_ptr(ret_node);
+        const AstNode *ra = rap.base;
         if (ra && ra->kind == AST_TYPE_FUNC) {
             const AstNode *ir = ra->u.type_func.ret;
             if (ir && ir->kind == AST_TYPE_PTR &&
@@ -4648,7 +4658,7 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
         bool inner_void_explicit = false;
         if (ret_node) {
             const AstNode *ra = ret_node;
-            while (ra && ra->kind == AST_TYPE_PTR) ra = ra->u.type_ptr.base;
+            ra = ast_peel_ptr(ra).base;
             while (ra && (ra->kind == AST_TYPE_CONST ||
                           ra->kind == AST_TYPE_VOLATILE))
                 ra = ra->u.type_const.base;
@@ -6578,7 +6588,9 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                             /* Count multi-star: PTR(PTR(FUNC)) etc. */
                             int ap_nstars = 1;
                             const AstNode *ainner = afn;
-                            while (ainner && ainner->kind == AST_TYPE_PTR) { ap_nstars++; ainner = ainner->u.type_ptr.base; }
+                            AstPtrPeel aipp = ast_peel_ptr(ainner);
+                            ap_nstars += aipp.nstars;
+                            ainner = aipp.base;
                             if (ainner && ainner->kind == AST_TYPE_FUNC) {
                                 /* Multi-star fnptr array -- handle below */
                                 afn = ainner;

@@ -160,6 +160,9 @@ bool ty_is_vector(const Type *t);     /* TY_VECTOR                        */
 bool ty_is_func_ptr(const Type *t);  /* TY_PTR(TY_FUNC) w/ const/atomic  */
 bool ty_is_ptr_to_array(const Type *t); /* TY_PTR(TY_ARRAY) w/ const/atomic */
 
+typedef struct { int nstars; Type *base; } TyPtrPeel;
+TyPtrPeel ty_peel_ptr(Type *t);
+
 /* -------------------------------------------------------------------------
  * Modifiers
  * ---------------------------------------------------------------------- */
