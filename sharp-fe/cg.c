@@ -345,6 +345,34 @@ static void cg_emit_stars(CgCtx *ctx, int n) {
     for (int i = 0; i < n; i++) cg_puts(ctx, "*");
 }
 
+static void cg_emit_storage_class(CgCtx *ctx, StorageClass sc) {
+    switch (sc) {
+    case SC_STATIC:   cg_puts(ctx, "static ");   break;
+    case SC_EXTERN:   cg_puts(ctx, "extern ");   break;
+    case SC_REGISTER: cg_puts(ctx, "register "); break;
+    default: break;
+    }
+}
+
+typedef struct { bool is_const; bool is_volatile; int nptr; const AstNode *base; } AstCvpaPeel;
+static AstCvpaPeel ast_type_peel_cvpa(const AstNode *n) {
+    AstCvpaPeel r = {false, false, 0, n};
+    while (r.base && (r.base->kind == AST_TYPE_ARRAY ||
+                      r.base->kind == AST_TYPE_CONST ||
+                      r.base->kind == AST_TYPE_VOLATILE ||
+                      r.base->kind == AST_TYPE_PTR)) {
+        if (r.base->kind == AST_TYPE_ARRAY)
+            r.base = r.base->u.type_array.base;
+        else if (r.base->kind == AST_TYPE_CONST)
+            { r.is_const = true; r.base = r.base->u.type_const.base; }
+        else if (r.base->kind == AST_TYPE_VOLATILE)
+            { r.is_volatile = true; r.base = r.base->u.type_volatile.base; }
+        else
+            { r.nptr++; r.base = r.base->u.type_ptr.base; }
+    }
+    return r;
+}
+
 typedef struct { int nstars; const AstNode *base; } AstPtrPeel;
 static AstPtrPeel ast_peel_ptr(const AstNode *n) {
     AstPtrPeel r = {0, n};
@@ -1827,23 +1855,10 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
      *   struct sColMap { int iFrom; char *zCol; } aCol[1];
      *   struct InLoop { ... } *aInLoop;  */
     if (fname && ctx->file_ast) {
-        const AstNode *fty_inner = fd->u.field_decl.type;
-        int ptr_depth = 0;
-        while (fty_inner && (fty_inner->kind == AST_TYPE_ARRAY ||
-                             fty_inner->kind == AST_TYPE_CONST ||
-                             fty_inner->kind == AST_TYPE_VOLATILE ||
-                             fty_inner->kind == AST_TYPE_PTR)) {
-            if (fty_inner->kind == AST_TYPE_ARRAY)
-                fty_inner = fty_inner->u.type_array.base;
-            else if (fty_inner->kind == AST_TYPE_CONST)
-                fty_inner = fty_inner->u.type_const.base;
-            else if (fty_inner->kind == AST_TYPE_VOLATILE)
-                fty_inner = fty_inner->u.type_volatile.base;
-            else { /* PTR */ ptr_depth++; fty_inner = fty_inner->u.type_ptr.base; }
-        }
-        if (fty_inner && fty_inner->kind == AST_TYPE_NAME &&
-            fty_inner->u.type_name.name) {
-            const char *inner_name = fty_inner->u.type_name.name;
+        AstCvpaPeel fp = ast_type_peel_cvpa(fd->u.field_decl.type);
+        if (fp.base && fp.base->kind == AST_TYPE_NAME &&
+            fp.base->u.type_name.name) {
+            const char *inner_name = fp.base->u.type_name.name;
             /* Find matching nested struct def */
             const AstNode *inner_sd = NULL;
             for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
@@ -1870,7 +1885,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                     else
                         cg_puts(ctx, "}");
                     /* Emit pointer stars between struct body and name */
-                    for (int _pi = 0; _pi < ptr_depth; _pi++) cg_puts(ctx, " *");
+                    cg_emit_stars(ctx, fp.nptr);
                     cg_printf(ctx, " %s", fname);
                     /* Emit array suffix(es) */
                     const AstNode *arr = fd->u.field_decl.type;
@@ -3400,12 +3415,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
          * emitted as part of the first decl's line -- skip here. */
         if (vd->u.var_decl.is_comma_cont) break;
         cg_indent(ctx);
-        switch (vd->u.var_decl.storage) {
-        case SC_STATIC:   cg_puts(ctx, "static ");   break;
-        case SC_EXTERN:   cg_puts(ctx, "extern ");   break;
-        case SC_REGISTER: cg_puts(ctx, "register "); break;
-        default: break;
-        }
+        cg_emit_storage_class(ctx, vd->u.var_decl.storage);
         /* emit C11 _Thread_local after storage-class. */
         if (vd->u.var_decl.is_thread_local) cg_puts(ctx, "_Thread_local ");
         /* emit C11 _Alignas after storage-class.
@@ -3416,33 +3426,20 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
         /* C-mode: inline named-struct-in-var (from_inline_var) or
          * anonymous struct body for local variable declarations. */
         if (ctx->local_block_stmts && vd->u.var_decl.type) {
-            const AstNode *vty = vd->u.var_decl.type;
-            bool vis_const = false, vis_vol = false;
-            /* Strip PTR layers too so `struct X { } *p`
-             * (pointer-to-inline-struct) is handled alongside arrays.
-             * Count pointer stars for the declarator suffix. */
-            int vis_ptr = 0;
-            while (vty && (vty->kind == AST_TYPE_ARRAY || vty->kind == AST_TYPE_CONST ||
-                           vty->kind == AST_TYPE_VOLATILE || vty->kind == AST_TYPE_PTR)) {
-                if (vty->kind == AST_TYPE_ARRAY)    vty = vty->u.type_array.base;
-                else if (vty->kind == AST_TYPE_CONST)    { vis_const = true; vty = vty->u.type_const.base; }
-                else if (vty->kind == AST_TYPE_VOLATILE) { vis_vol   = true; vty = vty->u.type_volatile.base; }
-                else /* AST_TYPE_PTR */              { vis_ptr++; vty = vty->u.type_ptr.base; }
-            }
-            if (vty && vty->kind == AST_TYPE_NAME && vty->u.type_name.name) {
-                const char *vnm = vty->u.type_name.name;
+            AstCvpaPeel vp = ast_type_peel_cvpa(vd->u.var_decl.type);
+            if (vp.base && vp.base->kind == AST_TYPE_NAME && vp.base->u.type_name.name) {
+                const char *vnm = vp.base->u.type_name.name;
                 const AstNode *vsd = cg_find_inline_struct_def(ctx, vnm);
                 if (vsd && vsd->u.struct_def.fields.len > 0) {
                     const char *vkw = struct_kw(vsd);
                     bool is_named = strncmp(vnm, "__anon_", 7) != 0;
-                    if (vis_const) cg_puts(ctx, "const ");
-                    if (vis_vol) cg_puts(ctx, "volatile ");
+                    if (vp.is_const) cg_puts(ctx, "const ");
+                    if (vp.is_volatile) cg_puts(ctx, "volatile ");
                     if (is_named) cg_printf(ctx, "%s %s {\n", vkw, vnm);
                     else          cg_printf(ctx, "%s {\n", vkw);
                     cg_emit_struct_fields(ctx, vsd, "  ", false);
                     cg_puts(ctx, "}");
-                    /* Pointer stars (for `struct X { } *p = 0`) */
-                    for (int _pi = 0; _pi < vis_ptr; _pi++) cg_puts(ctx, " *");
+                    cg_emit_stars(ctx, vp.nptr);
                     cg_printf(ctx, " %s", vd->u.var_decl.name ? vd->u.var_decl.name : "");
                     /* Array suffixes */
                     const AstNode *arr = vd->u.var_decl.type;
@@ -4065,29 +4062,20 @@ static void cg_block(CgCtx *ctx, const AstNode *block) {
                 cg_indent(ctx);
                 /* Inline anonymous struct body if needed */
                 if (vd0->u.var_decl.type) {
-                    const AstNode *_vty = vd0->u.var_decl.type;
-                    bool _vis_const = false, _vis_vol = false;
-                    int _vis_ptr = 0;
-                    while (_vty && (_vty->kind == AST_TYPE_ARRAY || _vty->kind == AST_TYPE_CONST ||
-                                    _vty->kind == AST_TYPE_VOLATILE || _vty->kind == AST_TYPE_PTR)) {
-                        if (_vty->kind == AST_TYPE_ARRAY) _vty = _vty->u.type_array.base;
-                        else if (_vty->kind == AST_TYPE_CONST) { _vis_const = true; _vty = _vty->u.type_const.base; }
-                        else if (_vty->kind == AST_TYPE_VOLATILE) { _vis_vol = true; _vty = _vty->u.type_volatile.base; }
-                        else { _vis_ptr++; _vty = _vty->u.type_ptr.base; }
-                    }
-                    if (_vty && _vty->kind == AST_TYPE_NAME && _vty->u.type_name.name) {
-                        const char *_vnm = _vty->u.type_name.name;
+                    AstCvpaPeel _vp = ast_type_peel_cvpa(vd0->u.var_decl.type);
+                    if (_vp.base && _vp.base->kind == AST_TYPE_NAME && _vp.base->u.type_name.name) {
+                        const char *_vnm = _vp.base->u.type_name.name;
                         const AstNode *_vsd = cg_find_inline_struct_def(ctx, _vnm);
                         if (_vsd && _vsd->u.struct_def.fields.len > 0) {
                             const char *_vkw = struct_kw(_vsd);
                             bool _is_named = strncmp(_vnm, "__anon_", 7) != 0;
-                            if (_vis_const) cg_puts(ctx, "const ");
-                            if (_vis_vol) cg_puts(ctx, "volatile ");
+                            if (_vp.is_const) cg_puts(ctx, "const ");
+                            if (_vp.is_volatile) cg_puts(ctx, "volatile ");
                             if (_is_named) cg_printf(ctx, "%s %s {\n", _vkw, _vnm);
                             else          cg_printf(ctx, "%s {\n", _vkw);
                             cg_emit_struct_fields(ctx, _vsd, "  ", false);
                             cg_puts(ctx, "}");
-                            for (int _pi = 0; _pi < _vis_ptr; _pi++) cg_puts(ctx, " *");
+                            cg_emit_stars(ctx, _vp.nptr);
                             cg_printf(ctx, " %s", vd0->u.var_decl.name ? vd0->u.var_decl.name : "");
                             const AstNode *_arr = vd0->u.var_decl.type;
                             cg_emit_array_suffixes(ctx, _arr);
@@ -4109,12 +4097,7 @@ static void cg_block(CgCtx *ctx, const AstNode *block) {
                     }
                 }
                 if (!_inline_done) {
-                switch (vd0->u.var_decl.storage) {
-                case SC_STATIC:   cg_puts(ctx, "static ");   break;
-                case SC_EXTERN:   cg_puts(ctx, "extern ");   break;
-                case SC_REGISTER: cg_puts(ctx, "register "); break;
-                default: break;
-                }
+                cg_emit_storage_class(ctx, vd0->u.var_decl.storage);
                 /* Emit type + first declarator */
                 {
                     Type *t = vd0->sem_type;
@@ -4276,13 +4259,8 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
         const char *ck = ret_const_node->u.type_const.kw;
         cg_puts(ctx, ck ? ck : "const"); cg_puts(ctx, " ");
     }
-    switch (sc) {
-    case SC_STATIC:   cg_puts(ctx, "static ");   break;
-    case SC_EXTERN:   cg_puts(ctx, "extern ");   break;
-    case SC_REGISTER: cg_puts(ctx, "register "); break;
-    case SC_TYPEDEF:  break;
-    case SC_NONE:     break;
-    }
+    cg_emit_storage_class(ctx, sc);
+    if (sc == SC_TYPEDEF) { /* no return type */ }
     /* C11 _Noreturn -- emitted after storage class, before return type */
     if (fn->u.func_def.is_noreturn) cg_puts(ctx, "_Noreturn ");
     /* C23: constexpr -- compile-time evaluable function */
@@ -4653,11 +4631,8 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
          * params_unspecified=false with zero params, emit `void`. */
         bool inner_void_explicit = false;
         if (ret_node) {
-            const AstNode *ra = ret_node;
-            ra = ast_peel_ptr(ra).base;
-            while (ra && (ra->kind == AST_TYPE_CONST ||
-                          ra->kind == AST_TYPE_VOLATILE))
-                ra = ra->u.type_const.base;
+            AstCvpaPeel rp = ast_type_peel_cvpa(ret_node);
+            const AstNode *ra = rp.base;
             if (ra && ra->kind == AST_TYPE_FUNC &&
                 !ra->u.type_func.params_unspecified &&
                 ra->u.type_func.params.len == 0)
@@ -6733,13 +6708,8 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
         cg_puts(ctx, d->u.var_decl.gcc_attrs);
         cg_puts(ctx, " ");
     }
-    switch (sc) {
-    case SC_STATIC:   cg_puts(ctx, "static ");   break;
-    case SC_EXTERN:   cg_puts(ctx, "extern ");   break;
-    case SC_REGISTER: cg_puts(ctx, "register "); break;
-    case SC_TYPEDEF:  break;
-    default: break;
-    }
+    cg_emit_storage_class(ctx, sc);
+    if (sc == SC_TYPEDEF) return;
     if (d->u.var_decl.is_constexpr) cg_puts(ctx, "constexpr ");
     if (d->u.var_decl.is_thread_local) cg_puts(ctx, "_Thread_local ");
     /* emit C11 _Alignas after storage-class.
@@ -6761,25 +6731,16 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
     /* C8: when the type (or its array element) is an anonymous struct,
      * emit the struct body inline in the variable declaration. */
     {
-        /* Peel array wrappers tracking const/volatile qualifiers */
-        const AstNode *vty_inner = ty_ast;
-        bool vty_is_const = false, vty_is_volatile = false;
-        while (vty_inner && vty_inner->kind == AST_TYPE_ARRAY)
-            vty_inner = vty_inner->u.type_array.base;
-        while (vty_inner && (vty_inner->kind == AST_TYPE_CONST ||
-                              vty_inner->kind == AST_TYPE_VOLATILE)) {
-            if (vty_inner->kind == AST_TYPE_CONST) { vty_is_const = true; vty_inner = vty_inner->u.type_const.base; }
-            else { vty_is_volatile = true; vty_inner = vty_inner->u.type_volatile.base; }
-        }
-        if (ctx->file_ast && vty_inner &&
-            vty_inner->kind == AST_TYPE_NAME && vty_inner->u.type_name.name &&
-            strncmp(vty_inner->u.type_name.name, "__anon_", 7) == 0) {
-            const char *anon_nm = vty_inner->u.type_name.name;
+        AstCvpaPeel vp = ast_type_peel_cvpa(ty_ast);
+        if (ctx->file_ast && vp.base &&
+            vp.base->kind == AST_TYPE_NAME && vp.base->u.type_name.name &&
+            strncmp(vp.base->u.type_name.name, "__anon_", 7) == 0) {
+            const char *anon_nm = vp.base->u.type_name.name;
             const AstNode *inner_sd = cg_find_struct_def(ctx, anon_nm);
             if (inner_sd && inner_sd->u.struct_def.fields.len > 0) {
                 const char *kw = struct_kw(inner_sd);
-                if (vty_is_const) cg_puts(ctx, "const ");
-                if (vty_is_volatile) cg_puts(ctx, "volatile ");
+                if (vp.is_const) cg_puts(ctx, "const ");
+                if (vp.is_volatile) cg_puts(ctx, "volatile ");
                 cg_printf(ctx, "%s {\n", kw);
                 cg_emit_struct_fields(ctx, inner_sd, "  ", false);
                 cg_printf(ctx, "} %s", d->u.var_decl.name ? d->u.var_decl.name : "");
@@ -6795,23 +6756,10 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
      * Only inline if the struct appears immediately before this var in file_ast
      * (prevents re-emitting the body for subsequent vars of the same type). */
     if (ctx->file_ast && ty_ast) {
-        const AstNode *vty_inner2 = ty_ast;
-        bool vty2_is_const = false, vty2_is_volatile = false;
-        int  vty2_nptr = 0;
-        while (vty_inner2 && (vty_inner2->kind == AST_TYPE_ARRAY ||
-                               vty_inner2->kind == AST_TYPE_CONST ||
-                               vty_inner2->kind == AST_TYPE_VOLATILE ||
-                               vty_inner2->kind == AST_TYPE_PTR))
-            vty_inner2 = (vty_inner2->kind == AST_TYPE_ARRAY)
-                         ? vty_inner2->u.type_array.base
-                         : (vty_inner2->kind == AST_TYPE_CONST)
-                           ? (vty2_is_const = true, vty_inner2->u.type_const.base)
-                           : (vty_inner2->kind == AST_TYPE_VOLATILE)
-                           ? (vty2_is_volatile = true, vty_inner2->u.type_volatile.base)
-                           : (vty2_nptr++, vty_inner2->u.type_ptr.base);
-        if (vty_inner2 && vty_inner2->kind == AST_TYPE_NAME &&
-            vty_inner2->u.type_name.name) {
-            const char *nm2 = vty_inner2->u.type_name.name;
+        AstCvpaPeel vp2 = ast_type_peel_cvpa(ty_ast);
+        if (vp2.base && vp2.base->kind == AST_TYPE_NAME &&
+            vp2.base->u.type_name.name) {
+            const char *nm2 = vp2.base->u.type_name.name;
             const AstNode *iv_sd = NULL;
             size_t iv_sd_idx = SIZE_MAX, var_idx = SIZE_MAX;
             /* Search file-level decls */
@@ -6846,13 +6794,13 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
                 /* Emit const/volatile qualifiers that were
                  * stripped during type unwrapping.  Without this, `static const
                  * struct NanInfName { } aNanInfName[]` loses `const`. */
-                if (vty2_is_const)    cg_puts(ctx, "const ");
-                if (vty2_is_volatile) cg_puts(ctx, "volatile ");
+                if (vp2.is_const)    cg_puts(ctx, "const ");
+                if (vp2.is_volatile) cg_puts(ctx, "volatile ");
                 cg_printf(ctx, "%s %s {\n", kw, iv_sd->u.struct_def.name);
                 cg_emit_struct_fields(ctx, iv_sd, "  ", false);
                 cg_puts(ctx, "}");
                 /* Pointer stars (for `static struct X { } *p = 0`) */
-                for (int _pi = 0; _pi < vty2_nptr; _pi++) cg_puts(ctx, " *");
+                cg_emit_stars(ctx, vp2.nptr);
                 cg_printf(ctx, " %s", d->u.var_decl.name ? d->u.var_decl.name : "");
                 /* Emit array suffixes */
                 const AstNode *arr2 = ty_ast;
