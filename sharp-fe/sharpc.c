@@ -58,13 +58,11 @@
  * sharpc executable and walking up to its project root.
  *
  * Resolution order (first found wins):
- *   1. <exe_dir>/../std/
- *   2. <exe_dir>/std/               (exe is at repo root)
+ *   1. <exe_dir>/std/               (exe is at repo root)
+ *   2. <exe_dir>/../std/            (exe is in build/)
  *   3. SHARP_ROOT environment variable
  *
  * Returns a malloc'd string (caller frees), or NULL if not found.
- * Returns an allocated path even if the directory doesn't exist —
- * callers can create it or warn.
  */
 static char *sharp_find_std_dir(void) {
 #ifdef _WIN32
@@ -676,102 +674,86 @@ static char *convert_raw_strings(const char *src, const char *input) {
     if (!out) return NULL;
     size_t out_len = 0;
 
+#define NEED(n) do { \
+    if (out_len + (n) >= out_cap) { \
+        out_cap = (out_len + (n)) * 2; \
+        out = realloc(out, out_cap); \
+        if (!out) return NULL; \
+    } \
+} while (0)
+
+#define EMIT1(c) do { NEED(1); out[out_len++] = (c); } while (0)
+
+#define EMIT_ESCAPED(start, len) do { \
+    NEED((len) * 2 + 4); \
+    out[out_len++] = '"'; \
+    for (size_t _i = 0; _i < (len); _i++) { \
+        unsigned char _c = (unsigned char)(start)[_i]; \
+        if (_c == '\\')      { out[out_len++] = '\\'; out[out_len++] = '\\'; } \
+        else if (_c == '"')  { out[out_len++] = '\\'; out[out_len++] = '"';  } \
+        else if (_c == '\n') { out[out_len++] = '\\'; out[out_len++] = 'n';  } \
+        else if (_c == '\t') { out[out_len++] = '\\'; out[out_len++] = 't';  } \
+        else if (_c == '\r') { out[out_len++] = '\\'; out[out_len++] = 'r';  } \
+        else out[out_len++] = _c; \
+    } \
+    out[out_len++] = '"'; \
+} while (0)
+
     const char *p = src;
     while (*p) {
-        /* Skip string literals — raw strings inside are not syntax */
         if (*p == '"') {
-            if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-            out[out_len++] = *p++;
+            EMIT1(*p++);
             while (*p && *p != '"') {
-                if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-                if (*p == '\\' && p[1]) { out[out_len++] = *p++; }
-                out[out_len++] = *p++;
+                if (*p == '\\' && p[1]) { EMIT1(*p++); }
+                EMIT1(*p++);
             }
-            if (*p == '"') { out[out_len++] = *p++; }
+            if (*p == '"') EMIT1(*p++);
             continue;
         }
-        /* Skip char literals */
         if (*p == '\'') {
-            if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-            out[out_len++] = *p++;
+            EMIT1(*p++);
             while (*p && *p != '\'') {
-                if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-                if (*p == '\\' && p[1]) { out[out_len++] = *p++; }
-                out[out_len++] = *p++;
+                if (*p == '\\' && p[1]) { EMIT1(*p++); }
+                EMIT1(*p++);
             }
-            if (*p == '\'') { out[out_len++] = *p++; }
+            if (*p == '\'') EMIT1(*p++);
             continue;
         }
-        /* Skip line comments */
         if (p[0] == '/' && p[1] == '/') {
-            if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-            out[out_len++] = *p++;
-            if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-            out[out_len++] = *p++;
-            while (*p && *p != '\n') {
-                if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-                out[out_len++] = *p++;
-            }
+            EMIT1(*p++); EMIT1(*p++);
+            while (*p && *p != '\n') EMIT1(*p++);
             continue;
         }
-        /* Skip block comments */
         if (p[0] == '/' && p[1] == '*') {
-            if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-            out[out_len++] = *p++;
-            if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-            out[out_len++] = *p++;
+            EMIT1(*p++); EMIT1(*p++);
             while (*p) {
-                if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-                if (p[0] == '*' && p[1] == '/') { out[out_len++] = *p++; out[out_len++] = *p++; break; }
-                out[out_len++] = *p++;
+                if (p[0] == '*' && p[1] == '/') { EMIT1(*p++); EMIT1(*p++); break; }
+                EMIT1(*p++);
             }
             continue;
         }
 
-        /* Look for r followed by #s and " — must be at token boundary */
         int at_boundary = (p == src) || !(((p[-1] >= 'a' && p[-1] <= 'z') || (p[-1] >= 'A' && p[-1] <= 'Z') ||
                                            (p[-1] >= '0' && p[-1] <= '9') || p[-1] == '_'));
         if (at_boundary && p[0] == 'r' && p[1] == '"') {
-            /* Plain raw string: r"..." — zero hashes */
             const char *after_q = p + 2;
             const char *close = strchr(after_q, '"');
             if (close) {
-                size_t content_len = (size_t)(close - after_q);
-                if (out_len + content_len * 2 + 8 >= out_cap) {
-                    out_cap = (out_len + content_len * 2 + 8) * 2;
-                    out = realloc(out, out_cap);
-                    if (!out) return NULL;
-                }
-                out[out_len++] = '"';
-                for (size_t i = 0; i < content_len; i++) {
-                    unsigned char c = (unsigned char)after_q[i];
-                    if (c == '\\')      { out[out_len++] = '\\'; out[out_len++] = '\\'; }
-                    else if (c == '"')  { out[out_len++] = '\\'; out[out_len++] = '"';  }
-                    else if (c == '\n') { out[out_len++] = '\\'; out[out_len++] = 'n';  }
-                    else if (c == '\t') { out[out_len++] = '\\'; out[out_len++] = 't';  }
-                    else if (c == '\r') { out[out_len++] = '\\'; out[out_len++] = 'r';  }
-                    else out[out_len++] = c;
-                }
-                out[out_len++] = '"';
+                EMIT_ESCAPED(after_q, (size_t)(close - after_q));
                 p = close + 1;
                 continue;
             }
-            /* No closing quote, treat as literal. */
         }
-        /* Look for r#..."#... pattern */
         if (at_boundary && p[0] == 'r' && p[1] == '#') {
-            /* Count hashes */
             const char *h = p + 1;
             while (*h == '#') h++;
             size_t nhash = (size_t)(h - p - 1);
             if (*h == '"') {
-                /* Valid raw string start. Find closing "#..."# */
                 const char *content_start = h + 1;
                 const char *cs = content_start;
                 const char *close = NULL;
                 while (*cs) {
                     if (*cs == '"') {
-                        /* Check for matching hashes */
                         size_t nh = 0;
                         while (cs[1 + nh] == '#') nh++;
                         if (nh == nhash && cs[1 + nh] != '#') {
@@ -782,33 +764,17 @@ static char *convert_raw_strings(const char *src, const char *input) {
                     cs++;
                 }
                 if (close) {
-                    size_t content_len = (size_t)(close - content_start);
-                    if (out_len + content_len * 2 + 8 >= out_cap) {
-                        out_cap = (out_len + content_len * 2 + 8) * 2;
-                        out = realloc(out, out_cap);
-                        if (!out) return NULL;
-                    }
-                    out[out_len++] = '"';
-                    for (size_t i = 0; i < content_len; i++) {
-                        unsigned char c = (unsigned char)content_start[i];
-                        if (c == '\\')      { out[out_len++] = '\\'; out[out_len++] = '\\'; }
-                        else if (c == '"')  { out[out_len++] = '\\'; out[out_len++] = '"';  }
-                        else if (c == '\n') { out[out_len++] = '\\'; out[out_len++] = 'n';  }
-                        else if (c == '\t') { out[out_len++] = '\\'; out[out_len++] = 't';  }
-                        else if (c == '\r') { out[out_len++] = '\\'; out[out_len++] = 'r';  }
-                        else out[out_len++] = c;
-                    }
-                    out[out_len++] = '"';
-                    p = close + 1 + nhash;  /* skip closing "#...# */
+                    EMIT_ESCAPED(content_start, (size_t)(close - content_start));
+                    p = close + 1 + nhash;
                     continue;
                 }
             }
-            /* Not valid, copy 'r' as literal. */
         }
-        /* Regular character. */
-        if (out_len + 1 >= out_cap) { out_cap *= 2; out = realloc(out, out_cap); if (!out) return NULL; }
-        out[out_len++] = *p++;
+        EMIT1(*p++);
     }
+#undef NEED
+#undef EMIT1
+#undef EMIT_ESCAPED
     if (out_len >= out_cap) { out = realloc(out, out_len + 1); if (!out) return NULL; }
     out[out_len] = '\0';
     return out;
@@ -902,51 +868,31 @@ static void transfer_included_files(CppResult *r, InputFile *inf) {
 /* Run sharp's C preprocessor on src with all flags applied.
  * Does NOT free src — the caller owns it.
  * Returns preprocessed text (caller frees), or NULL on error. */
-static char *cpp_preprocess_src(const char *src, const char *filename,
-                                 StrVec *user_inc, StrVec *sys_inc,
-                                 MacroVec *macros, long lang_std,
-                                 const char *target, bool linemarkers) {
-    CppCtx *cctx = setup_cpp_context(target, lang_std, user_inc, sys_inc,
-                                      macros, linemarkers);
-    if (!cctx) return NULL;
-
-    CppResult r = cpp_run_buf(cctx, src, strlen(src), filename);
-
-    bool had_error = print_cpp_diags(&r, filename);
-    if (had_error) { cpp_result_free(&r); cpp_ctx_free(cctx); return NULL; }
-
-    char *out = malloc(r.text_len + 1);
-    if (!out) { cpp_result_free(&r); cpp_ctx_free(cctx); return NULL; }
-    if (r.text_len) memcpy(out, r.text, r.text_len);
-    out[r.text_len] = '\0';
-    cpp_result_free(&r);
-    cpp_ctx_free(cctx);
-    return out;
-}
-
 static char *preprocess_one_file(const char *input,
                                  StrVec *user_inc, StrVec *sys_inc,
                                  MacroVec *macros, long lang_std,
                                  const char *target,
                                  InputFile *inf,
-                                 StrVec *force_includes) {
+                                 StrVec *force_includes,
+                                 bool convert_raw,
+                                 bool linemarkers) {
     char *src = read_file(input);
     if (!src) return NULL;
 
-    /* Convert R"(...)" raw strings to standard C string literals. */
-    char *src2 = convert_raw_strings(src, input);
-    free(src);
-    if (!src2) return NULL;
-    src = src2;
+    if (convert_raw) {
+        char *src2 = convert_raw_strings(src, input);
+        free(src);
+        if (!src2) return NULL;
+        src = src2;
+    }
 
-    /* Prepend -include files as #include directives. */
     if (force_includes && force_includes->len > 0) {
         src = prepend_force_includes(input, src, force_includes);
         if (!src) return NULL;
     }
 
     CppCtx *cctx = setup_cpp_context(target, lang_std, user_inc, sys_inc,
-                                      macros, true);
+                                      macros, linemarkers);
     if (!cctx) { free(src); return NULL; }
 
     CppResult r = cpp_run_buf(cctx, src, strlen(src), input);
@@ -1070,6 +1016,115 @@ static char *compile_one_file(const char *input,
     cpp_ctx_free(cctx);
 
     return c_out;
+}
+
+/* ── Temp file writing helper ─────────────────────────────────────── */
+
+static char *write_tmp_file(const char *prefix, const char *suffix,
+                             const char *content) {
+    char *path = make_tmp_name(prefix, suffix);
+    if (!path) return NULL;
+    FILE *f = fopen(path, "w");
+    if (!f) { perror(path); free(path); return NULL; }
+    fputs(content, f);
+    fclose(f);
+    return path;
+}
+
+/* ── Compile one InputFile to a .o via zig cc ──────────────────────
+ *
+ * Handles all input types: Sharp-compiled C text (.i), preprocessed
+ * assembly (.S → .s), and zig-forward sources (.cpp, .m, etc.).
+ *
+ * Returns: malloc'd path to the .o file (caller frees), or NULL on error.
+ * On error, an appropriate message is printed to stderr.              */
+static char *compile_input_to_obj(const char *zig_exe, const char *target,
+                                   const char *sysroot, StrVec *link_other,
+                                   InputFile *inf) {
+    const char *obj_path = make_tmp_name(inf->path, ".o");
+    if (!obj_path) return NULL;
+
+    if (inf->tmp_is_zig_direct) {
+        StrVec args = zig_cc_prefix(zig_exe, target, sysroot, link_other);
+        sv_push(&args, "-c");
+        sv_push(&args, inf->tmp_c);
+        sv_push(&args, "-o");
+        sv_push(&args, obj_path);
+        if (zig_cc_run(&args) != 0) {
+            fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
+            free((void *)obj_path);
+            return NULL;
+        }
+        return (char *)obj_path;
+    }
+
+    if (inf->tmp_is_asm) {
+        char *tmp_s = write_tmp_file(inf->path, ".s", inf->tmp_c);
+        if (!tmp_s) { free((void *)obj_path); return NULL; }
+
+        StrVec args = zig_cc_prefix(zig_exe, target, sysroot, link_other);
+        sv_push(&args, "-c");
+        sv_push(&args, tmp_s);
+        sv_push(&args, "-o");
+        sv_push(&args, obj_path);
+        if (zig_cc_run(&args) != 0) {
+            fprintf(stderr, "sharpc: assembly failed for %s\n", inf->path);
+            free((void *)obj_path);
+            free(tmp_s);
+            return NULL;
+        }
+        free(tmp_s);
+        return (char *)obj_path;
+    }
+
+    /* Normal Sharp-compiled C text */
+    char *tmp_i = write_tmp_file(inf->path, ".i", inf->tmp_c);
+    if (!tmp_i) { free((void *)obj_path); return NULL; }
+
+    StrVec args = zig_cc_prefix(zig_exe, target, sysroot, link_other);
+    sv_push(&args, "-x");
+    sv_push(&args, "c");
+    sv_push(&args, "-c");
+    sv_push(&args, tmp_i);
+    sv_push(&args, "-o");
+    sv_push(&args, obj_path);
+    if (zig_cc_run(&args) != 0) {
+        fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
+        free((void *)obj_path);
+        free(tmp_i);
+        return NULL;
+    }
+    free(tmp_i);
+    return (char *)obj_path;
+}
+
+/* ── Session cleanup (shared by cleanup: and oom: paths) ─────────── */
+
+static void cleanup_session(StrVec *user_inc, StrVec *sys_inc,
+                             MacroVec *macros, StrVec *link_libs,
+                             StrVec *link_paths, StrVec *link_other,
+                             StrVec *force_includes, InputVec *inputs) {
+    for (size_t i = 0; i < user_inc->len; i++) free((void *)user_inc->data[i]);
+    free(user_inc->data);
+    for (size_t i = 0; i < sys_inc->len; i++) free((void *)sys_inc->data[i]);
+    free(sys_inc->data);
+    free(macros->data);
+    free(link_libs->data);
+    free(link_paths->data);
+    free(link_other->data);
+    for (size_t i = 0; i < force_includes->len; i++) free((void *)force_includes->data[i]);
+    free(force_includes->data);
+    for (size_t i = 0; i < inputs->len; i++) {
+        free(inputs->data[i].tmp_c);
+        if (inputs->data[i].included_files) {
+            for (size_t j = 0; j < inputs->data[i].nincluded; j++)
+                free(inputs->data[i].included_files[j]);
+            free(inputs->data[i].included_files);
+        }
+        free(inputs->data[i].included_is_sys);
+    }
+    free(inputs->data);
+    cleanup_tmp_files();
 }
 
 /* ── Main driver ──────────────────────────────────────────────────── */
@@ -1342,15 +1397,9 @@ int main(int argc, char *argv[]) {
 
         /* .S — preprocess with sharp's cpp (flags apply), skip frontend */
         if (is_dot_S(inf->path)) {
-            char *s_src = read_file(inf->path);
-            if (!s_src) { had_error = 1; continue; }
-            if (force_includes.len > 0) {
-                s_src = prepend_force_includes(inf->path, s_src, &force_includes);
-                if (!s_src) { had_error = 1; continue; }
-            }
-            char *pp = cpp_preprocess_src(s_src, inf->path, &user_inc, &sys_inc,
-                                           &macros, lang_std, target, false);
-            free(s_src);
+            char *pp = preprocess_one_file(inf->path, &user_inc, &sys_inc,
+                                           &macros, lang_std, target, inf,
+                                           &force_includes, false, false);
             if (!pp) { had_error = 1; continue; }
             inf->tmp_c = pp;
             inf->tmp_is_asm = true;
@@ -1371,10 +1420,9 @@ int main(int argc, char *argv[]) {
         }
 
         if (action == ACTION_PREPROCESS) {
-            /* -E: preprocess and output to stdout or -o file */
             char *pp_out = preprocess_one_file(inf->path, &user_inc, &sys_inc,
                                                &macros, lang_std, target, inf,
-                                               &force_includes);
+                                               &force_includes, true, true);
             if (!pp_out) { had_error = 1; continue; }
             FILE *out = output ? fopen(output, "w") : stdout;
             if (!out) { perror(output ? output : "stdout"); free(pp_out); ret = 2; goto cleanup; }
@@ -1458,10 +1506,10 @@ int main(int argc, char *argv[]) {
             InputFile *inf = &inputs.data[fi];
             if (!inf->tmp_c) continue;
 
-            if (inf->tmp_is_zig_direct) {
-                const char *out_file = (inputs.len == 1 && output) ? output :
-                                       replace_ext(inf->path, ".s");
+            const char *out_file = (inputs.len == 1 && output) ? output :
+                                   replace_ext(inf->path, ".s");
 
+            if (inf->tmp_is_zig_direct) {
                 StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
                 sv_push(&zig_args, "-S");
                 sv_push(&zig_args, inf->tmp_c);
@@ -1472,47 +1520,29 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "sharpc: assembly failed for %s\n", inf->path);
                     ret = 3; goto cleanup;
                 }
-                if (g_sess.verbose)
-                    fprintf(stderr, "sharpc: wrote %s\n", out_file);
-                if (inputs.len != 1 || !output)
-                    free((void *)out_file);
-                continue;
-            }
-
-            const char *out_file = (inputs.len == 1 && output) ? output :
-                                   replace_ext(inf->path, ".s");
-
-            if (inf->tmp_is_asm) {
-                /* .S: preprocessed by sharp's cpp already — emit directly */
+            } else if (inf->tmp_is_asm) {
                 FILE *f = fopen(out_file, "w");
                 if (!f) { perror(out_file); ret = 2; goto cleanup; }
                 fputs(inf->tmp_c, f);
                 fclose(f);
-                if (g_sess.verbose)
-                    fprintf(stderr, "sharpc: wrote %s\n", out_file);
-                if (inputs.len != 1 || !output)
-                    free((void *)out_file);
-                continue;
-            }
+            } else {
+                char *tmp_i = write_tmp_file(inf->path, ".i", inf->tmp_c);
+                if (!tmp_i) { ret = 2; goto cleanup; }
 
-            /* Write .i temp file */
-            char *tmp_i = make_tmp_name(inf->path, ".i");
-            if (!tmp_i) { ret = 2; goto cleanup; }
-            FILE *f = fopen(tmp_i, "w");
-            if (!f) { perror(tmp_i); ret = 2; goto cleanup; }
-            fputs(inf->tmp_c, f);
-            fclose(f);
+                StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
+                sv_push(&zig_args, "-x");
+                sv_push(&zig_args, "c");
+                sv_push(&zig_args, "-S");
+                sv_push(&zig_args, tmp_i);
+                sv_push(&zig_args, "-o");
+                sv_push(&zig_args, out_file);
 
-            const char *zig_argv[] = {zig_exe, "cc", "-x", "c", "-S", tmp_i, "-o", out_file, NULL};
-            if (g_sess.verbose) {
-                fprintf(stderr, "%s", zig_argv[0]);
-                for (int ai = 1; zig_argv[ai]; ai++) fprintf(stderr, " %s", zig_argv[ai]);
-                fprintf(stderr, "\n");
-            }
-            if (run_cmd(zig_argv) != 0) {
-                fprintf(stderr, "sharpc: assembly generation failed for %s\n", inf->path);
-                ret = 3;
-                goto cleanup;
+                if (zig_cc_run(&zig_args) != 0) {
+                    fprintf(stderr, "sharpc: assembly generation failed for %s\n", inf->path);
+                    free(tmp_i);
+                    ret = 3; goto cleanup;
+                }
+                free(tmp_i);
             }
             if (g_sess.verbose)
                 fprintf(stderr, "sharpc: wrote %s\n", out_file);
@@ -1530,7 +1560,6 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "sharpc: zig not found\n");
             ret = 3; goto cleanup;
         }
-        /* Check if -o target has .i or .c extension (emit C text only) */
         bool emit_text_only = false;
         if (output) {
             const char *ext = file_ext(output);
@@ -1539,7 +1568,6 @@ int main(int argc, char *argv[]) {
         }
 
         if (emit_text_only && inputs.len == 1) {
-            /* Single file, -o *.i or -o *.c → emit C text directly */
             FILE *f = fopen(output, "w");
             if (!f) { perror(output); ret = 2; goto cleanup; }
             fputs(inputs.data[0].tmp_c, f);
@@ -1553,78 +1581,21 @@ int main(int argc, char *argv[]) {
             InputFile *inf = &inputs.data[fi];
             if (!inf->tmp_c) continue;
 
-            if (inf->tmp_is_zig_direct) {
-                const char *obj_out = (inputs.len == 1 && output)
-                                      ? output :
-                                      replace_ext(inf->path, ".o");
-
-                StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
-                sv_push(&zig_args, "-c");
-                sv_push(&zig_args, inf->tmp_c);
-                sv_push(&zig_args, "-o");
-                sv_push(&zig_args, obj_out);
-
-                if (zig_cc_run(&zig_args) != 0) {
-                    fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
-                    ret = 3; goto cleanup;
-                }
-                if (g_sess.verbose)
-                    fprintf(stderr, "sharpc: wrote %s\n", obj_out);
-                if (inputs.len != 1 || !output)
-                    free((void *)obj_out);
-                continue;
-            }
-
             const char *obj_out = (inputs.len == 1 && output)
                                   ? output :
                                   replace_ext(inf->path, ".o");
 
-            if (inf->tmp_is_asm) {
-                /* .S: write preprocessed assembly to .s temp file, assemble via zig cc */
-                char *tmp_s = make_tmp_name(inf->path, ".s");
-                if (!tmp_s) { ret = 2; goto cleanup; }
-                FILE *fs = fopen(tmp_s, "w");
-                if (!fs) { perror(tmp_s); ret = 2; goto cleanup; }
-                fputs(inf->tmp_c, fs);
-                fclose(fs);
+            char *obj_tmp = compile_input_to_obj(zig_exe, target, sysroot,
+                                                  &link_other, inf);
+            if (!obj_tmp) { ret = 3; goto cleanup; }
 
-                StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
-                sv_push(&zig_args, "-c");
-                sv_push(&zig_args, tmp_s);
-                sv_push(&zig_args, "-o");
-                sv_push(&zig_args, obj_out);
-
-                if (zig_cc_run(&zig_args) != 0) {
-                    fprintf(stderr, "sharpc: assembly failed for %s\n", inf->path);
-                    ret = 3; goto cleanup;
-                }
+            if (strcmp(obj_tmp, obj_out) != 0) {
                 if (g_sess.verbose)
-                    fprintf(stderr, "sharpc: wrote %s\n", obj_out);
-                if (inputs.len != 1 || !output)
-                    free((void *)obj_out);
-                continue;
-            }
-
-            char *tmp_i = make_tmp_name(inf->path, ".i");
-            if (!tmp_i) { ret = 2; goto cleanup; }
-            FILE *f = fopen(tmp_i, "w");
-            if (!f) { perror(tmp_i); ret = 2; goto cleanup; }
-            fputs(inf->tmp_c, f);
-            fclose(f);
-
-            /* Build zig cc argv */
-            StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
-            sv_push(&zig_args, "-x");
-            sv_push(&zig_args, "c");
-            sv_push(&zig_args, "-c");
-            sv_push(&zig_args, tmp_i);
-            sv_push(&zig_args, "-o");
-            sv_push(&zig_args, obj_out);
-
-            if (zig_cc_run(&zig_args) != 0) {
-                fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
-                ret = 3;
-                goto cleanup;
+                    fprintf(stderr, "sharpc: rename %s -> %s\n", obj_tmp, obj_out);
+                rename(obj_tmp, obj_out);
+                free(obj_tmp);
+            } else {
+                free(obj_tmp);
             }
             if (g_sess.verbose)
                 fprintf(stderr, "sharpc: wrote %s\n", obj_out);
@@ -1644,7 +1615,6 @@ int main(int argc, char *argv[]) {
     for (size_t fi = 0; fi < inputs.len; fi++) {
         InputFile *inf = &inputs.data[fi];
 
-        /* Pre-built object / library / assembly files — add directly to link list */
         if (is_linkable_input(inf->path)) {
             sv_push(&obj_files, inf->path);
             continue;
@@ -1652,77 +1622,10 @@ int main(int argc, char *argv[]) {
 
         if (!inf->tmp_c) continue;
 
-        if (inf->tmp_is_zig_direct) {
-            const char *obj_tmp = make_tmp_name(inf->path, ".o");
-            if (!obj_tmp) { ret = 2; goto cleanup; }
+        char *obj_tmp = compile_input_to_obj(zig_exe, target, sysroot,
+                                              &link_other, inf);
+        if (!obj_tmp) { ret = 3; goto cleanup; }
 
-            StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
-            sv_push(&zig_args, "-c");
-            sv_push(&zig_args, inf->tmp_c);
-            sv_push(&zig_args, "-o");
-            sv_push(&zig_args, obj_tmp);
-
-            if (zig_cc_run(&zig_args) != 0) {
-                fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
-                ret = 3; goto cleanup;
-            }
-
-            sv_push(&obj_files, obj_tmp);
-            continue;
-        }
-
-        if (inf->tmp_is_asm) {
-            /* .S: write preprocessed assembly to .s temp file, assemble via zig cc */
-            char *tmp_s = make_tmp_name(inf->path, ".s");
-            if (!tmp_s) { ret = 2; goto cleanup; }
-            FILE *fs = fopen(tmp_s, "w");
-            if (!fs) { perror(tmp_s); ret = 2; goto cleanup; }
-            fputs(inf->tmp_c, fs);
-            fclose(fs);
-
-            const char *obj_tmp = make_tmp_name(inf->path, ".o");
-            if (!obj_tmp) { ret = 2; goto cleanup; }
-
-            StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
-            sv_push(&zig_args, "-c");
-            sv_push(&zig_args, tmp_s);
-            sv_push(&zig_args, "-o");
-            sv_push(&zig_args, obj_tmp);
-
-            if (zig_cc_run(&zig_args) != 0) {
-                fprintf(stderr, "sharpc: assembly failed for %s\n", inf->path);
-                ret = 3; goto cleanup;
-            }
-
-            sv_push(&obj_files, obj_tmp);
-            continue;
-        }
-
-        char *tmp_i = make_tmp_name(inf->path, ".i");
-        if (!tmp_i) { ret = 2; goto cleanup; }
-        FILE *f = fopen(tmp_i, "w");
-        if (!f) { perror(tmp_i); ret = 2; goto cleanup; }
-        fputs(inf->tmp_c, f);
-        fclose(f);
-
-        const char *obj_tmp = make_tmp_name(inf->path, ".o");
-        if (!obj_tmp) { ret = 2; goto cleanup; }
-
-        StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
-        sv_push(&zig_args, "-x");
-        sv_push(&zig_args, "c");
-        sv_push(&zig_args, "-c");
-        sv_push(&zig_args, tmp_i);
-        sv_push(&zig_args, "-o");
-        sv_push(&zig_args, obj_tmp);
-
-        if (zig_cc_run(&zig_args) != 0) {
-            fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
-            ret = 3;
-            goto cleanup;
-        }
-
-        /* Add obj to link list */
         sv_push(&obj_files, obj_tmp);
     }
 
@@ -1754,51 +1657,13 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "sharpc: wrote %s\n", output);
 
 cleanup:
-    for (size_t i = 0; i < user_inc.len; i++) free((void *)user_inc.data[i]);
-    free(user_inc.data);
-    for (size_t i = 0; i < sys_inc.len; i++) free((void *)sys_inc.data[i]);
-    free(sys_inc.data);
-    free(macros.data);
-    free(link_libs.data);
-    free(link_paths.data);
-    free(link_other.data);
-    for (size_t i = 0; i < force_includes.len; i++) free((void *)force_includes.data[i]);
-    free(force_includes.data);
-    for (size_t i = 0; i < inputs.len; i++) {
-        free(inputs.data[i].tmp_c);
-        if (inputs.data[i].included_files) {
-            for (size_t j = 0; j < inputs.data[i].nincluded; j++)
-                free(inputs.data[i].included_files[j]);
-            free(inputs.data[i].included_files);
-        }
-        free(inputs.data[i].included_is_sys);
-    }
-    free(inputs.data);
-    cleanup_tmp_files();
+    cleanup_session(&user_inc, &sys_inc, &macros, &link_libs, &link_paths,
+                     &link_other, &force_includes, &inputs);
     return ret;
 
 oom:
     fprintf(stderr, "sharpc: out of memory\n");
-    for (size_t i = 0; i < user_inc.len; i++) free((void *)user_inc.data[i]);
-    free(user_inc.data);
-    for (size_t i = 0; i < sys_inc.len; i++) free((void *)sys_inc.data[i]);
-    free(sys_inc.data);
-    free(macros.data);
-    free(link_libs.data);
-    free(link_paths.data);
-    free(link_other.data);
-    for (size_t i = 0; i < force_includes.len; i++) free((void *)force_includes.data[i]);
-    free(force_includes.data);
-    for (size_t i = 0; i < inputs.len; i++) {
-        free(inputs.data[i].tmp_c);
-        if (inputs.data[i].included_files) {
-            for (size_t j = 0; j < inputs.data[i].nincluded; j++)
-                free(inputs.data[i].included_files[j]);
-            free(inputs.data[i].included_files);
-        }
-        free(inputs.data[i].included_is_sys);
-    }
-    free(inputs.data);
-    cleanup_tmp_files();
+    cleanup_session(&user_inc, &sys_inc, &macros, &link_libs, &link_paths,
+                     &link_other, &force_includes, &inputs);
     return 2;
 }

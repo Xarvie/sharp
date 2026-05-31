@@ -132,7 +132,7 @@
 
 ### 9c: 测试目录
 - `sharp-test/run_regression.py` — 确认是否依赖所有 probe 二进制
-- `sharp-test/c_superset_probes/` — 扫描 `.ref.c` 文件和 `.sp` 文件是否一一对应（无孤立引用文件）
+- `sharp-test/c_superset_probes/` — 扫描 `.ref.i` 文件和 `.ce` 文件是否一一对应（无孤立引用文件）
 - `sharp-test/cpp_probes/` — 确认测试覆盖完整性
 
 ### 9d: `clibs/` 目录

@@ -4,10 +4,10 @@
 
 ### 当前问题
 
-用户在 `.sph` 头文件中写的预处理指令（如 `#define`、`#undef`、`#pragma`）在 CG 输出时丢失了：
+用户在 `.he` 头文件中写的预处理指令（如 `#define`、`#undef`、`#pragma`）在 CG 输出时丢失了：
 
 ```c
-// test.sph
+// test.he
 #define __USE_POSIX
 #include <stdio.h>
 #undef __USE_POSIX
@@ -217,7 +217,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
 ## 测试用例
 
 ```c
-// test_directive.sph
+// test_directive.he
 #define __USE_POSIX
 #include <stdio.h>
 #undef __USE_POSIX
@@ -235,7 +235,7 @@ void foo(void) { printf("hello\n"); }
 期望输出：
 
 ```c
-// test_directive.sph.gen.c
+// test_directive.he.gen.c
 #define __USE_POSIX
 #include <stdio.h>
 #undef __USE_POSIX
