@@ -244,6 +244,16 @@ int  cpp_probe_zig_macros(CppCtx *ctx, const char *target);
 const char *cpp_find_zig_exe(void);
 
 /**
+ * cpp_find_zig_install_dir — Find the zig installation directory.
+ *
+ * Derives the install directory from the zig executable path found
+ * by cpp_find_zig_exe(), then verifies that lib/libc exists under it.
+ * Returns a pointer to a static buffer, or NULL if not found.
+ * The result is cached; subsequent calls return the same pointer.
+ */
+const char *cpp_find_zig_install_dir(void);
+
+/**
  * Probe predefined macros for the host target using zig cc -E.
  * Equivalent to cpp_probe_zig_macros(ctx, NULL).
  */

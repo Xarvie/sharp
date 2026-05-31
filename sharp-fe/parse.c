@@ -3370,6 +3370,38 @@ static char *build_verbatim(PS *ps, size_t start, size_t end) {
     return buf;
 }
 
+static bool next_ident_starts_new_decl(PS *ps) {
+    if (!ps_at(ps, STOK_IDENT)) return false;
+    if (td_has_n(&ps->typedefs, ps_peek(ps).text, ps_peek(ps).len)) {
+        if (ps_peek2(ps).kind == STOK_IDENT ||
+            ps_peek2(ps).kind == STOK_OPERATOR)
+            return true;
+        if (ps_peek2(ps).kind == STOK_LT) {
+            size_t peek = ps->pos + 2;
+            int gdep = 1;
+            while (peek < ps->ntoks && gdep > 0) {
+                SharpTokKind pk = ps->toks[peek].kind;
+                if (pk == STOK_LT) gdep++;
+                else if (pk == STOK_GT) { gdep--; if (gdep == 0) { peek++; break; } }
+                else if (pk == STOK_GTGT) { gdep -= 2; if (gdep <= 0) { peek++; break; } }
+                else if (pk == STOK_EOF) break;
+                peek++;
+            }
+            if (peek < ps->ntoks) {
+                SharpTokKind nextk = ps->toks[peek].kind;
+                if (nextk == STOK_DOT || nextk == STOK_IDENT)
+                    return true;
+            }
+        }
+    } else {
+        if (ps_peek2(ps).kind == STOK_IDENT ||
+            ps_peek2(ps).kind == STOK_DOT ||
+            ps_peek2(ps).kind == STOK_STAR)
+            return true;
+    }
+    return false;
+}
+
 static AstNode *parse_top_decl(PS *ps) {
     /* reset last_decl_attr from any previous call. */
     if (ps->last_decl_attr) { free(ps->last_decl_attr); ps->last_decl_attr = NULL; }
@@ -3457,16 +3489,7 @@ static AstNode *parse_top_decl(PS *ps) {
                  * After the union body, check for declarators.
                  * Same BUG-004 guard as struct — skip if next IDENT
                  * is a typedef name followed by another IDENT. */
-                bool _next_is_new_decl = false;
-                if (ps_at(ps, STOK_IDENT)) {
-                    if (td_has_n(&ps->typedefs, ps_peek(ps).text, ps_peek(ps).len)) {
-                        if (ps_peek2(ps).kind == STOK_IDENT ||
-                            ps_peek2(ps).kind == STOK_OPERATOR) {
-                            _next_is_new_decl = true;
-                        }
-                    }
-                }
-                if (!_next_is_new_decl &&
+                if (!next_ident_starts_new_decl(ps) &&
                     (ps_at(ps, STOK_IDENT) || ps_at(ps, STOK_STAR) ||
                     ps_at(ps, STOK_LPAREN))) {
                     astvec_push(&ps->pending_decls, sd);
@@ -3489,12 +3512,7 @@ static AstNode *parse_top_decl(PS *ps) {
              *   union { Uint64 u64; double d; } inf = { 0x7ff...ULL };
              * After the union body, check for declarators.
              * Same BUG-004 guard as anonymous struct. */
-            bool _anon_next_new_decl =
-                ps_at(ps, STOK_IDENT) &&
-                td_has_n(&ps->typedefs, ps_peek(ps).text, ps_peek(ps).len) &&
-                (ps_peek2(ps).kind == STOK_IDENT ||
-                 ps_peek2(ps).kind == STOK_OPERATOR);
-            if (!_anon_next_new_decl &&
+            if (!next_ident_starts_new_decl(ps) &&
                 (ps_at(ps, STOK_IDENT) || ps_at(ps, STOK_STAR) ||
                 ps_at(ps, STOK_LPAREN))) {
                 astvec_push(&ps->pending_decls, sd);
@@ -3549,43 +3567,7 @@ static AstNode *parse_top_decl(PS *ps) {
                  * a class/struct body must NOT treat `VecC` as a declarator;
                  * `TypedefName operator` is the start of a free-function
                  * operator definition returning a class type. */
-                bool _next_is_new_decl = false;
-                if (ps_at(ps, STOK_IDENT)) {
-                    if (td_has_n(&ps->typedefs, ps_peek(ps).text, ps_peek(ps).len)) {
-                        /* Typedef name followed by another IDENT, operator, or '.' */
-                        if (ps_peek2(ps).kind == STOK_IDENT ||
-                            ps_peek2(ps).kind == STOK_OPERATOR) {
-                            _next_is_new_decl = true;
-                        } else if (ps_peek2(ps).kind == STOK_LT) {
-                            /* Type<T>... peek past generics to see what follows. */
-                            size_t peek = ps->pos + 2;
-                            int gdep = 1;
-                            while (peek < ps->ntoks && gdep > 0) {
-                                SharpTokKind pk = ps->toks[peek].kind;
-                                if (pk == STOK_LT) gdep++;
-                                else if (pk == STOK_GT) { gdep--; if (gdep == 0) { peek++; break; } }
-                                else if (pk == STOK_GTGT) { gdep -= 2; if (gdep <= 0) { peek++; break; } }
-                                else if (pk == STOK_EOF) break;
-                                peek++;
-                            }
-                            if (peek < ps->ntoks) {
-                                SharpTokKind nextk = ps->toks[peek].kind;
-                                if (nextk == STOK_DOT || nextk == STOK_IDENT)
-                                    _next_is_new_decl = true;
-                            }
-                        }
-                    } else {
-                        /* Non-typedef IDENT followed by another IDENT, '*', or '.'
-                         * is start of new declaration, not variable declarator.
-                         * E.g. `T Id<T>.get(this)` after `class Id<T> { }`,
-                         * or `K* HashMap<K,V>.key(this)`. */
-                        if (ps_peek2(ps).kind == STOK_IDENT ||
-                            ps_peek2(ps).kind == STOK_DOT ||
-                            ps_peek2(ps).kind == STOK_STAR)
-                            _next_is_new_decl = true;
-                    }
-                }
-                if (!_next_is_new_decl &&
+                if (!next_ident_starts_new_decl(ps) &&
                     (ps_at(ps, STOK_IDENT) || ps_at(ps, STOK_STAR) ||
                     ps_at(ps, STOK_LPAREN))) {
                     /* Push the struct def to pending_decls so it gets
@@ -3615,12 +3597,7 @@ static AstNode *parse_top_decl(PS *ps) {
              * After the struct body, check for declarators.
              * BUG-004 fix: same guard as tagged struct — skip if next IDENT
              * is a typedef name followed by another IDENT (new declaration). */
-            bool _anon_next_new_decl =
-                ps_at(ps, STOK_IDENT) &&
-                td_has_n(&ps->typedefs, ps_peek(ps).text, ps_peek(ps).len) &&
-                (ps_peek2(ps).kind == STOK_IDENT ||
-                 ps_peek2(ps).kind == STOK_OPERATOR);
-            if (!_anon_next_new_decl &&
+            if (!next_ident_starts_new_decl(ps) &&
                 (ps_at(ps, STOK_IDENT) || ps_at(ps, STOK_STAR) ||
                 ps_at(ps, STOK_LPAREN))) {
                 /* Push the struct def to pending_decls so it gets
@@ -4839,30 +4816,8 @@ static AstNode *typeof_parse_expr_prec(SharpTok *tokens, int ntoks, int *pos, in
 
     while (*pos < ntoks) {
         SharpTok op = tokens[*pos];
-        int prec = -1;
-
-        switch (op.kind) {
-        case STOK_STAR: prec = 13; break;
-        case STOK_SLASH: prec = 13; break;
-        case STOK_PERCENT: prec = 13; break;
-        case STOK_PLUS: prec = 12; break;
-        case STOK_MINUS: prec = 12; break;
-        case STOK_LTLT: prec = 11; break;
-        case STOK_GTGT: prec = 11; break;
-        case STOK_LT: prec = 10; break;
-        case STOK_GT: prec = 10; break;
-        case STOK_LTEQ: prec = 10; break;
-        case STOK_GTEQ: prec = 10; break;
-        case STOK_EQEQ: prec = 9; break;
-        case STOK_BANGEQ: prec = 9; break;
-        case STOK_AMP: prec = 8; break;
-        case STOK_CARET: prec = 7; break;
-        case STOK_PIPE: prec = 6; break;
-        case STOK_AMPAMP: prec = 5; break;
-        case STOK_PIPEPIPE: prec = 4; break;
-        case STOK_COMMA: prec = 1; break;
-        default: break;
-        }
+        int prec = binop_prec(op.kind);
+        if (prec == 0) prec = -1;
         if (prec < min_prec) break;
         (*pos)++;
         AstNode *rhs = typeof_parse_expr_prec(tokens, ntoks, pos, prec + 1);

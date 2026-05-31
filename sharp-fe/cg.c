@@ -2081,11 +2081,14 @@ static const char *binop_str(SharpTokKind op) {
 
 /* Get the struct name from a type (TY_STRUCT), stripping const/ptr. */
 static const char *struct_name_of(Type *t) {
-    if (!t) return NULL;
-    if (t->kind == TY_CONST) t = t->u.const_.base;
-    if (t->kind == TY_PTR)   t = t->u.ptr.base;
-    if (t && t->kind == TY_CONST) t = t->u.const_.base;
-    if (t && t->kind == TY_STRUCT) return t->u.struct_.name;
+    while (t) {
+        if (t->kind == TY_STRUCT) return t->u.struct_.name;
+        if (t->kind == TY_CONST)  { t = t->u.const_.base; continue; }
+        if (t->kind == TY_PTR)    { t = t->u.ptr.base; continue; }
+        if (t->kind == TY_ARRAY)  { t = t->u.array.base; continue; }
+        if (t->kind == TY_ATOMIC) { t = t->u.atomic.base; continue; }
+        break;
+    }
     return NULL;
 }
 
@@ -2144,8 +2147,7 @@ static void cg_expr_toplevel(CgCtx *ctx, const AstNode *expr) {
         /* Check for operator overload (Sharp) -- fall through to cg_expr. */
         if (expr->u.binop.lhs) {
             Type *lt = sema_type_of(expr->u.binop.lhs);
-            Type *ltu = lt;
-            if (ltu && ltu->kind == TY_CONST) ltu = ltu->u.const_.base;
+            Type *ltu = ty_unconst(ctx->ts, lt);
             if (ltu && ltu->kind == TY_STRUCT) {
                 /* Might be overloaded -- let cg_expr handle. */
                 cg_expr(ctx, expr);
@@ -2276,9 +2278,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
         Type *lt = sema_type_of(expr->u.binop.lhs);
         /* During specialization, resolve TY_PARAM types to concrete types. */
         lt = cg_resolve_type(ctx, lt);
-        Type *lt_unconst = lt;
-        if (lt_unconst && lt_unconst->kind == TY_CONST)
-            lt_unconst = lt_unconst->u.const_.base;
+        Type *lt_unconst = ty_unconst(ctx->ts, lt);
         bool lhs_is_struct_value =
             lt_unconst && lt_unconst->kind == TY_STRUCT;
         /* Get the struct name -- mangle if generic instantiation. */
@@ -2325,9 +2325,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
             /* Get RHS type for overload disambiguation. */
             Type *rt = sema_type_of(expr->u.binop.rhs);
             rt = cg_resolve_type(ctx, rt);
-            Type *rt_unc = rt;
-            if (rt_unc && rt_unc->kind == TY_CONST)
-                rt_unc = rt_unc->u.const_.base;
+            Type *rt_unc = ty_unconst(ctx->ts, rt);
 
             for (Symbol *fsym = scope_lookup_local(ctx->file_scope, opname2);
                  fsym;
@@ -2343,9 +2341,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                 if (!p0 || !p0->u.param_decl.type) continue;
                 Type *p0t = ty_from_ast(ctx->ts, p0->u.param_decl.type,
                                         cg_type_scope(ctx), NULL);
-                Type *p0t_unc = p0t;
-                if (p0t_unc && p0t_unc->kind == TY_CONST)
-                    p0t_unc = p0t_unc->u.const_.base;
+                Type *p0t_unc = ty_unconst(ctx->ts, p0t);
                 if (!p0t_unc || p0t_unc->kind != TY_STRUCT) continue;
                 if (!lt_unconst || lt_unconst->kind != TY_STRUCT) continue;
                 if (strcmp(p0t_unc->u.struct_.name,
@@ -2358,9 +2354,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                     if (p1 && p1->u.param_decl.type) {
                         Type *p1t = ty_from_ast(ctx->ts,
                             p1->u.param_decl.type, cg_type_scope(ctx), NULL);
-                        Type *p1t_unc = p1t;
-                        if (p1t_unc && p1t_unc->kind == TY_CONST)
-                            p1t_unc = p1t_unc->u.const_.base;
+                        Type *p1t_unc = ty_unconst(ctx->ts, p1t);
                         if (p1t_unc && p1t_unc->kind == TY_STRUCT &&
                             strcmp(p1t_unc->u.struct_.name,
                                    rt_unc->u.struct_.name) != 0)
@@ -2464,8 +2458,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
         if (!expr->u.unary.postfix &&
             (op == STOK_MINUS || op == STOK_BANG || op == STOK_TILDE)) {
             Type *ut = sema_type_of(expr->u.unary.operand);
-            Type *ut_unc = ut;
-            if (ut_unc && ut_unc->kind == TY_CONST) ut_unc = ut_unc->u.const_.base;
+            Type *ut_unc = ty_unconst(ctx->ts, ut);
             if (ut_unc && ut_unc->kind == TY_STRUCT) {
                 const char *sn = ut_unc->u.struct_.name;
                 const char *op_sym = (op == STOK_MINUS) ? "operator-"
@@ -2755,9 +2748,9 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
             const char *effective_sn = sn;
             /* For generic struct instances, mangle the struct name. */
             Type *base_recv = recv_t;
-            if (base_recv && base_recv->kind == TY_CONST) base_recv = base_recv->u.const_.base;
+            base_recv = ty_unconst(ctx->ts, base_recv);
             if (base_recv && base_recv->kind == TY_PTR)   base_recv = base_recv->u.ptr.base;
-            if (base_recv && base_recv->kind == TY_CONST) base_recv = base_recv->u.const_.base;
+            base_recv = ty_unconst(ctx->ts, base_recv);
             char *mangled_sn = (base_recv && base_recv->kind == TY_STRUCT &&
                                 base_recv->u.struct_.nargs > 0)
                 ? cg_mangle_inst(effective_sn, base_recv->u.struct_.args, base_recv->u.struct_.nargs)
@@ -2811,9 +2804,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
         Type *idx_base_t = sema_type_of(expr->u.index_.base);
         /* Resolve TY_PARAM through specialization context. */
         idx_base_t = cg_resolve_type(ctx, idx_base_t);
-        Type *idx_base_unc = idx_base_t;
-        if (idx_base_unc && idx_base_unc->kind == TY_CONST)
-            idx_base_unc = idx_base_unc->u.const_.base;
+        Type *idx_base_unc = ty_unconst(ctx->ts, idx_base_t);
         const char *idx_sn_raw = (idx_base_unc && idx_base_unc->kind == TY_STRUCT)
                              ? idx_base_unc->u.struct_.name : NULL;
         char *idx_mangled = NULL;
@@ -2904,8 +2895,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
              * for those; use AST path for simple typedef/volatile cases. */
             bool use_ast = true;
             if (cast_t) {
-                Type *pb = cast_t;
-                if (pb->kind == TY_CONST) pb = pb->u.const_.base;
+                Type *pb = ty_unconst(ctx->ts, cast_t);
                 /* For PTR(FUNC(ret=PTR(FUNC))) doubly-nested function pointer
                  * casts, use ty_from_ast (not sema's cast_t which may be wrong)
                  * so cg_type gets the correct nested structure. */
@@ -5344,9 +5334,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
         {
             Type *lt = sema_type_of(expr->u.binop.lhs);
             lt = cg_resolve_type(ctx, lt);
-            Type *lt_unc = lt;
-            if (lt_unc && lt_unc->kind == TY_CONST)
-                lt_unc = lt_unc->u.const_.base;
+            Type *lt_unc = ty_unconst(ctx->ts, lt);
             if (!lt_unc || lt_unc->kind != TY_STRUCT) break;
             const char *sn_raw = lt_unc->u.struct_.name;
             if (!sn_raw || lt_unc->u.struct_.nargs == 0 || !ctx->file_scope)
@@ -5464,9 +5452,9 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
         Type *recv_t = expr->u.method_call.recv->sem_type;
         if (recv_t) {
             Type *st = recv_t;
-            if (st && st->kind == TY_CONST) st = st->u.const_.base;
+            st = ty_unconst(ctx->ts, st);
             if (st && st->kind == TY_PTR)   st = st->u.ptr.base;
-            if (st && st->kind == TY_CONST) st = st->u.const_.base;
+            st = ty_unconst(ctx->ts, st);
             if (st && st->kind == TY_STRUCT && st->u.struct_.name) {
                 const char *sname = st->u.struct_.name;
                 const char *mname = expr->u.method_call.method;
@@ -5689,9 +5677,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
          * cg_emit_gfunc_specs emit the forward decl and definition. */
         Type *base_t = sema_type_of(expr->u.index_.base);
         base_t = cg_resolve_type(ctx, base_t);
-        Type *base_unc = base_t;
-        if (base_unc && base_unc->kind == TY_CONST)
-            base_unc = base_unc->u.const_.base;
+        Type *base_unc = ty_unconst(ctx->ts, base_t);
         const char *sn_raw = (base_unc && base_unc->kind == TY_STRUCT)
                          ? base_unc->u.struct_.name : NULL;
         if (!sn_raw || base_unc->u.struct_.nargs == 0 || !ctx->file_scope)

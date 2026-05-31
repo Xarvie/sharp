@@ -15,16 +15,11 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <shlwapi.h>
 #else
 #include <sys/stat.h>
 #include <unistd.h>
 #include <limits.h>
 #define MAX_PATH PATH_MAX
-
-#if defined(__APPLE__)
-#include <mach-o/dyld.h>
-#endif
 #endif
 
 /* Helper: compare two version strings like "10.0.26100.0" */
@@ -62,142 +57,11 @@ static void add_sys_path_if_valid(CppCtx *ctx, const char *path) {
     strarr_push(&ctx->sys_include_paths, cpp_xstrdup(path));
 }
 
-/* Find the zig installation directory (host-independent).
- * Returns the dir path in out_buf (size MAX_PATH), or NULL on failure. */
-static const char *try_find_zig_dir(char *out_buf, size_t buf_size) {
-#ifdef _WIN32
-    /* Priority 1: same directory as the running sharpc.exe */
-    char sharpc_path[MAX_PATH];
-    DWORD sharpc_len = GetModuleFileNameA(NULL, sharpc_path, sizeof(sharpc_path));
-    if (sharpc_len > 0 && sharpc_len < sizeof(sharpc_path)) {
-        char *sep = strrchr(sharpc_path, '\\');
-        if (!sep) sep = strrchr(sharpc_path, '/');
-        if (sep) {
-            *sep = '\0';
-            char test[MAX_PATH];
-            snprintf(test, sizeof test, "%s\\zig\\lib\\libc", sharpc_path);
-            if (PathIsDirectoryA(test)) {
-                snprintf(out_buf, buf_size, "%s\\zig", sharpc_path);
-                return out_buf;
-            }
-            /* Also check parent directory */
-            sep = strrchr(sharpc_path, '\\');
-            if (!sep) sep = strrchr(sharpc_path, '/');
-            if (sep) {
-                *sep = '\0';
-                snprintf(test, sizeof test, "%s\\zig\\lib\\libc", sharpc_path);
-                if (PathIsDirectoryA(test)) {
-                    snprintf(out_buf, buf_size, "%s\\zig", sharpc_path);
-                    return out_buf;
-                }
-            }
-        }
-    }
-
-    /* Priority 2: PATH search */
-    if (!SearchPathA(NULL, "zig.exe", NULL, (DWORD)buf_size, out_buf, NULL))
-        return NULL;
-    char *last_sep = strrchr(out_buf, '\\');
-    if (!last_sep) last_sep = strrchr(out_buf, '/');
-    if (!last_sep) return NULL;
-    *last_sep = '\0';
-    /* Verify */
-    char test[MAX_PATH];
-    snprintf(test, sizeof test, "%s\\lib\\libc", out_buf);
-    if (!PathIsDirectoryA(test)) return NULL;
-    return out_buf;
-#else
-    /* Priority 1: resolve self exe path, look for zig nearby */
-    char exe_path[2048];
-    ssize_t exe_len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (exe_len > 0 && (size_t)exe_len < sizeof(exe_path)) {
-        exe_path[exe_len] = '\0';
-        char *last_sep = strrchr(exe_path, '/');
-        if (last_sep) {
-            size_t dirlen = (size_t)(last_sep - exe_path);
-
-            /* Priority 1a: {sharp_bin}/zig */
-            {
-                char candidate[2048];
-                snprintf(candidate, sizeof(candidate), "%.*s/zig",
-                         (int)dirlen, exe_path);
-                struct stat st;
-                if (stat(candidate, &st) == 0 && (st.st_mode & S_IXUSR)) {
-                    char test[2048];
-                    snprintf(test, sizeof(test), "%.*s/lib/libc",
-                             (int)dirlen, exe_path);
-                    if (stat(test, &st) == 0 && S_ISDIR(st.st_mode)) {
-                        strncpy(out_buf, exe_path, buf_size - 1);
-                        out_buf[dirlen] = '\0';
-                        return out_buf;
-                    }
-                }
-            }
-
-            /* Priority 1b: {sharp_bin}/../zig (check binary at ../zig/zig, install dir at ../zig) */
-            if (dirlen >= 1) {
-                char parent_dir[2048];
-                memcpy(parent_dir, exe_path, dirlen);
-                parent_dir[dirlen] = '\0';
-                char *parent_sep = strrchr(parent_dir, '/');
-                if (parent_sep) {
-                    size_t pdirlen = (size_t)(parent_sep - parent_dir);
-                    char candidate[2048];
-                    snprintf(candidate, sizeof(candidate), "%.*s/zig/zig",
-                             (int)pdirlen, parent_dir);
-                    struct stat st2;
-                    if (stat(candidate, &st2) == 0 && (st2.st_mode & S_IXUSR)) {
-                        char test[2048];
-                        snprintf(test, sizeof(test), "%.*s/zig/lib/libc",
-                                 (int)pdirlen, parent_dir);
-                        if (stat(test, &st2) == 0 && S_ISDIR(st2.st_mode)) {
-                            snprintf(out_buf, buf_size, "%.*s/zig",
-                                     (int)pdirlen, parent_dir);
-                            return out_buf;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /* Priority 2: search PATH for "zig" */
-    const char *path_env = getenv("PATH");
-    if (!path_env) return NULL;
-
-    char path_copy[2048];
-    strncpy(path_copy, path_env, sizeof(path_copy) - 1);
-    path_copy[sizeof(path_copy) - 1] = '\0';
-
-    char *saveptr = NULL;
-    char *dir = strtok_r(path_copy, ":", &saveptr);
-    while (dir) {
-        char candidate[2048];
-        snprintf(candidate, sizeof(candidate), "%s/zig", dir);
-        struct stat st;
-        if (stat(candidate, &st) == 0 && (st.st_mode & S_IXUSR)) {
-            /* Found executable zig */
-            strncpy(out_buf, dir, buf_size - 1);
-            out_buf[buf_size - 1] = '\0';
-
-            /* Verify this looks like a zig install (has lib/libc) */
-            char test[2048];
-            snprintf(test, sizeof(test), "%s/lib/libc", out_buf);
-            if (stat(test, &st) == 0 && S_ISDIR(st.st_mode)) {
-                return out_buf;
-            }
-        }
-        dir = strtok_r(NULL, ":", &saveptr);
-    }
-    return NULL;
-#endif
-}
-
 /* Add a zig libc include path (e.g. "any-windows-any", "generic-mingw")
  * to ctx->sys_include_paths. */
 static void add_zig_sub_path(CppCtx *ctx, const char *rel) {
-    char zdir[MAX_PATH];
-    if (!try_find_zig_dir(zdir, sizeof zdir)) return;
+    const char *zdir = cpp_find_zig_install_dir();
+    if (!zdir) return;
     char path[MAX_PATH];
 #ifdef _WIN32
     snprintf(path, sizeof path, "%s\\%s", zdir, rel);
@@ -810,121 +674,6 @@ static const char *zig_include_dir_for_os(const char *os) {
     return NULL;
 }
 
-/* Find the zig installation directory by locating the zig executable.
- * Returns a static path buffer with the zig install dir, or NULL on failure. */
-static const char *find_zig_install_dir(void) {
-    static char zig_dir[MAX_PATH];
-    static int cached = 0;
-    if (cached) return (zig_dir[0]) ? zig_dir : NULL;
-    cached = 1;
-
-#ifdef _WIN32
-    /* Find zig via PATH search */
-    char zig_path[MAX_PATH];
-    if (!SearchPathA(NULL, "zig.exe", NULL, sizeof(zig_path), zig_path, NULL))
-        return NULL;
-
-    /* zig_dir = dirname of zig_path */
-    char *last_sep = strrchr(zig_path, '\\');
-    if (!last_sep) {
-        last_sep = strrchr(zig_path, '/');
-    }
-    if (!last_sep) return NULL;
-
-    size_t dlen = (size_t)(last_sep - zig_path);
-    if (dlen >= sizeof(zig_dir)) return NULL;
-    memcpy(zig_dir, zig_path, dlen);
-    zig_dir[dlen] = '\0';
-
-    /* Verify this looks like a zig install (has lib/libc) */
-    char test[MAX_PATH];
-    snprintf(test, sizeof test, "%s\\lib\\libc", zig_dir);
-    if (!PathIsDirectoryA(test)) return NULL;
-
-    return zig_dir;
-#else
-    /* Priority 1: resolve self exe path, look for zig nearby */
-    char exe_path[4096];
-    ssize_t exe_len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (exe_len > 0 && (size_t)exe_len < sizeof(exe_path)) {
-        exe_path[exe_len] = '\0';
-        char *last_sep = strrchr(exe_path, '/');
-        if (last_sep) {
-            size_t dirlen = (size_t)(last_sep - exe_path);
-
-            /* Priority 1a: {sharp_bin}/zig */
-            {
-                char candidate[2048];
-                snprintf(candidate, sizeof(candidate), "%.*s/zig",
-                         (int)dirlen, exe_path);
-                struct stat st;
-                if (stat(candidate, &st) == 0 && (st.st_mode & S_IXUSR)) {
-                    strncpy(zig_dir, exe_path, sizeof(zig_dir) - 1);
-                    zig_dir[dirlen] = '\0';
-                    char test[2048];
-                    snprintf(test, sizeof(test), "%s/lib/libc", zig_dir);
-                    if (stat(test, &st) == 0 && S_ISDIR(st.st_mode))
-                        return zig_dir;
-                }
-            }
-
-            /* Priority 1b: {sharp_bin}/../zig (check binary at ../zig/zig, install dir at ../zig) */
-            if (dirlen >= 1) {
-                char parent_dir[4096];
-                memcpy(parent_dir, exe_path, dirlen);
-                parent_dir[dirlen] = '\0';
-                char *parent_sep = strrchr(parent_dir, '/');
-                if (parent_sep) {
-                    size_t pdirlen = (size_t)(parent_sep - parent_dir);
-                    char candidate[2048];
-                    snprintf(candidate, sizeof(candidate), "%.*s/zig/zig",
-                             (int)pdirlen, parent_dir);
-                    struct stat st2;
-                    if (stat(candidate, &st2) == 0 && (st2.st_mode & S_IXUSR)) {
-                        snprintf(zig_dir, sizeof(zig_dir), "%.*s/zig",
-                                 (int)pdirlen, parent_dir);
-                        char test[2048];
-                        snprintf(test, sizeof(test), "%s/lib/libc", zig_dir);
-                        if (stat(test, &st2) == 0 && S_ISDIR(st2.st_mode))
-                            return zig_dir;
-                    }
-                }
-            }
-        }
-    }
-
-    /* Priority 2: search PATH for "zig" */
-    const char *path_env = getenv("PATH");
-    if (!path_env) return NULL;
-
-    char path_copy[2048];
-    strncpy(path_copy, path_env, sizeof(path_copy) - 1);
-    path_copy[sizeof(path_copy) - 1] = '\0';
-
-    char *saveptr = NULL;
-    char *dir = strtok_r(path_copy, ":", &saveptr);
-    while (dir) {
-        char candidate[2048];
-        snprintf(candidate, sizeof(candidate), "%s/zig", dir);
-        struct stat st;
-        if (stat(candidate, &st) == 0 && (st.st_mode & S_IXUSR)) {
-            /* Found executable zig */
-            strncpy(zig_dir, dir, sizeof(zig_dir) - 1);
-            zig_dir[sizeof(zig_dir) - 1] = '\0';
-
-            /* Verify this looks like a zig install (has lib/libc) */
-            char test[2048];
-            snprintf(test, sizeof(test), "%s/lib/libc", zig_dir);
-            if (stat(test, &st) == 0 && S_ISDIR(st.st_mode)) {
-                return zig_dir;
-            }
-        }
-        dir = strtok_r(NULL, ":", &saveptr);
-    }
-    return NULL;
-#endif
-}
-
 void cpp_detect_target_sys_paths(CppCtx *ctx, const char *target) {
     const char *target_os = extract_target_os(target);
     if (!target_os) return;
@@ -934,7 +683,7 @@ void cpp_detect_target_sys_paths(CppCtx *ctx, const char *target) {
 
     /* 1. Cross-compile mode: find zig installation and add target-specific
      *    libc include directories. This works on any host for any target. */
-    const char *zig_dir = find_zig_install_dir();
+    const char *zig_dir = cpp_find_zig_install_dir();
     if (zig_dir) {
         char path[MAX_PATH];
 
@@ -1044,8 +793,8 @@ static void add_zig_path(CppCtx *ctx, const char *zig_dir, const char *rel) {
  */
 void cpp_detect_zig_sys_paths(CppCtx *ctx, const char *target) {
 #ifdef _WIN32
-    char zig_dir[MAX_PATH];
-    if (!try_find_zig_dir(zig_dir, sizeof(zig_dir))) {
+    const char *zig_dir = cpp_find_zig_install_dir();
+    if (!zig_dir) {
         cpp_detect_sys_include_paths(ctx);
         return;
     }
@@ -1151,8 +900,8 @@ void cpp_detect_zig_sys_paths(CppCtx *ctx, const char *target) {
     }
 #else
     /* Linux/macOS: find zig dir and construct Unix-style paths */
-    char zig_dir[MAX_PATH];
-    if (!try_find_zig_dir(zig_dir, sizeof(zig_dir))) {
+    const char *zig_dir = cpp_find_zig_install_dir();
+    if (!zig_dir) {
         cpp_detect_sys_include_paths(ctx);
         return;
     }

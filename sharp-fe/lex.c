@@ -231,7 +231,6 @@ static size_t int_suffix_len(const char *text, size_t len) {
     else if (s >= 2 && (text[s-1]=='l'||text[s-1]=='L')) s--;
     /* Then u/U. */
     if (s >= 2 && (text[s-1]=='u'||text[s-1]=='U')) s--;
-    else if (s > 0 && s < len && (text[s-1]=='u'||text[s-1]=='U')) s--;
     /* If we only consumed 'u' but there's an 'll' or 'l' before it in the
      * body, re-try with u-first order to handle 1llu/1llu suffixes. */
     if (len - s == 1 && s >= 2) {
@@ -347,7 +346,6 @@ static void parse_float_literal(SharpTok *t, FeDiagArr *diags) {
     if (errno == ERANGE)
         FE_WARNING(diags, t->loc,
             "floating constant '%.*s' out of range", (int)t->len, text);
-    (void)diags;
 }
 
 /* =========================================================================

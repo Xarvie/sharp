@@ -155,10 +155,10 @@ static Type *arith_conv(TyStore *ts, Type *a, Type *b) {
      * guards below and cause an out-of-bounds read in rank[] (TY_CONST is
      * beyond TY_ULONGLONG which is the last index in the array).
      * Note: TY_VOLATILE does not exist in the type system (volatile is an
-     * AST-level qualifier stripped by ty_from_ast); only TY_CONST needs
+     * AST-level qualifier stripped by ty_from_ast); only TY_CONST and TY_ATOMIC need
      * peeling here. */
-    while (a && a->kind == TY_CONST) a = a->u.const_.base;
-    while (b && b->kind == TY_CONST) b = b->u.const_.base;
+    while (a && (a->kind == TY_CONST || a->kind == TY_ATOMIC)) a = ty_unconst(ts, a);
+    while (b && (b->kind == TY_CONST || b->kind == TY_ATOMIC)) b = ty_unconst(ts, b);
     if (!a || !b) return ts ? ty_int(ts) : a;
     /* double wins */
     if (a->kind == TY_LONGDOUBLE || b->kind == TY_LONGDOUBLE) return ty_longdouble(ts, "long double");
@@ -384,9 +384,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
      * level of pointer) and report "operator '!=' not defined for
      * struct type" even though the operands are pointers. */
     {
-        Type *lt_unconst = lt;
-        if (lt_unconst && lt_unconst->kind == TY_CONST)
-            lt_unconst = lt_unconst->u.const_.base;
+        Type *lt_unconst = ty_unconst(ts, lt);
         bool lhs_is_struct_value =
             lt_unconst && lt_unconst->kind == TY_STRUCT;
         const char *op_nm = lhs_is_struct_value ? op_overload_name(op) : NULL;
@@ -419,9 +417,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
              * like __typeof__(...) have no struct scope. */
             if (ss_s && ss->ctx && ss->ctx->file_scope) {
                 /* Obtain the RHS type for overload disambiguation. */
-                Type *rt_unc = rt;
-                if (rt_unc && rt_unc->kind == TY_CONST)
-                    rt_unc = rt_unc->u.const_.base;
+                Type *rt_unc = ty_unconst(ts, rt);
 
                 for (Symbol *fsym = scope_lookup_local(
                              ss->ctx->file_scope, op_nm);
@@ -439,9 +435,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
                     if (!p0 || !p0->u.param_decl.type) continue;
                     Type *p0t = ty_from_ast(ts, p0->u.param_decl.type,
                                             ss->scope, NULL);
-                    Type *p0t_unc = p0t;
-                    if (p0t_unc && p0t_unc->kind == TY_CONST)
-                        p0t_unc = p0t_unc->u.const_.base;
+                    Type *p0t_unc = ty_unconst(ts, p0t);
                     if (!p0t_unc || p0t_unc->kind != TY_STRUCT) continue;
                     if (!lt_unconst || lt_unconst->kind != TY_STRUCT) continue;
                     if (strcmp(p0t_unc->u.struct_.name,
@@ -458,9 +452,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
                         if (p1 && p1->u.param_decl.type) {
                             Type *p1t = ty_from_ast(ts,
                                 p1->u.param_decl.type, ss->scope, NULL);
-                            Type *p1t_unc = p1t;
-                            if (p1t_unc && p1t_unc->kind == TY_CONST)
-                                p1t_unc = p1t_unc->u.const_.base;
+                            Type *p1t_unc = ty_unconst(ts, p1t);
                             if (p1t_unc && p1t_unc->kind == TY_STRUCT &&
                                 strcmp(p1t_unc->u.struct_.name,
                                        rt_unc->u.struct_.name) != 0)
@@ -499,9 +491,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
                                     if (p1 && p1->u.param_decl.type) {
                                         Type *p1t = ty_from_ast(ts,
                                             p1->u.param_decl.type, mscope, NULL);
-                                        Type *p1u = p1t;
-                                        if (p1u && p1u->kind == TY_CONST)
-                                            p1u = p1u->u.const_.base;
+                                        Type *p1u = ty_unconst(ts, p1t);
                                         if (p1u && p1u->kind == TY_STRUCT &&
                                             strcmp(p1u->u.struct_.name,
                                                    rt_unc->u.struct_.name) != 0)
@@ -622,8 +612,7 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
         if (ot && (ot->kind == TY_STRUCT ||
                    (ot->kind == TY_CONST && ot->u.const_.base &&
                     ot->u.const_.base->kind == TY_STRUCT))) {
-            Type *ot_unc = ot;
-            if (ot_unc->kind == TY_CONST) ot_unc = ot_unc->u.const_.base;
+            Type *ot_unc = ty_unconst(ts, ot);
             const char *op_nm = (op == STOK_MINUS) ? "operator-" : "operator+";
             /* (1) struct scope */
             Scope *ss_s = struct_scope_of(ts, ot, ss->scope);
@@ -648,9 +637,7 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
                     if (p0 && p0->u.param_decl.type) {
                         Type *p0t = ty_from_ast(ts, p0->u.param_decl.type,
                                                 ss->scope, NULL);
-                        Type *p0t_unc = p0t;
-                        if (p0t_unc && p0t_unc->kind == TY_CONST)
-                            p0t_unc = p0t_unc->u.const_.base;
+                        Type *p0t_unc = ty_unconst(ts, p0t);
                         if (p0t_unc && p0t_unc->kind == TY_STRUCT &&
                             ot_unc->kind == TY_STRUCT &&
                             strcmp(p0t_unc->u.struct_.name,
@@ -769,9 +756,9 @@ static Type *sema_call(SS *ss, AstNode *expr) {
      * Strip one layer of TY_PTR (and optional TY_CONST) to reach TY_FUNC. */
     {
         Type *inner = callee_t;
-        if (inner && inner->kind == TY_CONST)  inner = inner->u.const_.base;
+        inner = ty_unconst(ts, inner);
         if (inner && inner->kind == TY_PTR)    inner = inner->u.ptr.base;
-        if (inner && inner->kind == TY_CONST)  inner = inner->u.const_.base;
+        inner = ty_unconst(ts, inner);
         if (inner && inner->kind == TY_FUNC)   return inner->u.func.ret;
     }
     /* For identifiers resolved to a SYM_FUNC decl, we can look up the ret type
@@ -1747,8 +1734,7 @@ static Type *sema_field_access_expr(SS *ss, AstNode *expr) {
 
     /* Validate arrow: recv must be a pointer. */
     if (arrow) {
-        Type *base = recv_t;
-        if (base->kind == TY_CONST) base = base->u.const_.base;
+        Type *base = ty_unconst(ts, recv_t);
         if (!base || !ty_is_pointer(base)) {
             sema_err(ss, expr->loc, "'->' requires pointer operand");
             return ty_error(ts);
@@ -1938,17 +1924,16 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
      * the real dispatch via cg_resolve_type. */
     {
         Type *peel = recv_t;
-        if (peel && peel->kind == TY_CONST) peel = peel->u.const_.base;
+        peel = ty_unconst(ts, peel);
         if (peel && peel->kind == TY_PTR)   peel = peel->u.ptr.base;
-        if (peel && peel->kind == TY_CONST) peel = peel->u.const_.base;
+        peel = ty_unconst(ts, peel);
         if (peel && peel->kind == TY_PARAM)
             return ty_int(ts);  /* lenient placeholder; cg resolves for real */
     }
 
     /* Validate arrow: recv must be a pointer. */
     if (arrow) {
-        Type *base = recv_t;
-        if (base && base->kind == TY_CONST) base = base->u.const_.base;
+        Type *base = ty_unconst(ts, recv_t);
         if (!base || !ty_is_pointer(base)) {
             sema_err(ss, expr->loc, "'->' requires pointer operand");
             return ty_error(ts);
@@ -2384,7 +2369,7 @@ static int eval_has_operator(SS *ss, const AstNode *expr) {
     if (!t || ty_is_error(t)) return 0;
     /* Defer to instantiation when T still has TY_PARAM. */
     if (ty_contains_param(t)) return -1;
-    while (t && t->kind == TY_CONST) t = t->u.const_.base;
+    while (t && (t->kind == TY_CONST || t->kind == TY_ATOMIC)) t = ty_unconst(ss->ctx->ts, t);
     if (!t || t->kind != TY_STRUCT) return 0;
     AstNode *sd = t->u.struct_.decl;
     if (!sd || !sd->sem_scope) return 0;
@@ -2503,7 +2488,7 @@ static int eval_has_method(SS *ss, const AstNode *expr) {
     if (!t || ty_is_error(t)) return 0;
     /* v0.13: defer to instantiation time when T still has TY_PARAM. */
     if (ty_contains_param(t)) return -1;
-    while (t && t->kind == TY_CONST) t = t->u.const_.base;
+    while (t && (t->kind == TY_CONST || t->kind == TY_ATOMIC)) t = ty_unconst(ss->ctx->ts, t);
     if (!t || t->kind != TY_STRUCT) return 0;
     AstNode *sd = t->u.struct_.decl;
     if (!sd || !sd->sem_scope) return 0;
@@ -2544,7 +2529,7 @@ static int eval_has_field(SS *ss, const AstNode *expr) {
     Type *t = resolve_intrinsic_type_arg(ss, ty_arg);
     if (!t || ty_is_error(t)) return 0;
     if (ty_contains_param(t)) return -1;
-    while (t && t->kind == TY_CONST) t = t->u.const_.base;
+    while (t && (t->kind == TY_CONST || t->kind == TY_ATOMIC)) t = ty_unconst(ss->ctx->ts, t);
     if (!t || t->kind != TY_STRUCT) return 0;
     AstNode *sd = t->u.struct_.decl;
     if (!sd || !sd->sem_scope) return 0;
