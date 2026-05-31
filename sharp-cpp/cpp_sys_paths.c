@@ -59,7 +59,7 @@ static void add_sys_path_if_valid(CppCtx *ctx, const char *path) {
             return;
     }
 
-    strarr_push(&ctx->sys_include_paths, strdup(path));
+    strarr_push(&ctx->sys_include_paths, cpp_xstrdup(path));
 }
 
 /* Find the zig installation directory (host-independent).
@@ -541,8 +541,7 @@ static char *run_command_and_capture(const char *cmd) {
     long len = ftell(fp);
     fseek(fp, 0, SEEK_SET);
     
-    char *buf = malloc(len + 1);
-    if (!buf) { fclose(fp); return NULL; }
+    char *buf = cpp_xmalloc(len + 1);
     
     fread(buf, 1, len, fp);
     buf[len] = '\0';
@@ -553,15 +552,13 @@ static char *run_command_and_capture(const char *cmd) {
     if (!fp) return NULL;
     
     size_t cap = 8192, buf_len = 0;
-    char *buf = malloc(cap);
-    if (!buf) { pclose(fp); return NULL; }
+    char *buf = cpp_xmalloc(cap);
     size_t nr;
     while ((nr = fread(buf + buf_len, 1, cap - buf_len - 1, fp)) > 0) {
         buf_len += nr;
         if (buf_len + 1 >= cap) {
             cap *= 2;
-            buf = realloc(buf, cap);
-            if (!buf) { pclose(fp); return NULL; }
+            buf = cpp_xrealloc(buf, cap);
         }
     }
     buf[buf_len] = '\0';
@@ -1371,12 +1368,7 @@ capture_zig_cc_verbose(const char *zig_exe, const char *target)
         return NULL;
     }
 
-    char *buf = malloc((size_t)fsize + 1);
-    if (!buf) {
-        fclose(f);
-        remove(err_path);
-        return NULL;
-    }
+    char *buf = cpp_xmalloc((size_t)fsize + 1);
 
     size_t nread = fread(buf, 1, (size_t)fsize, f);
     buf[nread] = '\0';

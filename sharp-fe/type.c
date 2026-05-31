@@ -80,6 +80,16 @@ static bool ty_compound_eq(const Type *a, const Type *b) {
     }
 }
 
+static void ts_compound_push(TyStore *ts, Type *t) {
+    if (ts->compound_len == ts->compound_cap) {
+        size_t nc = ts->compound_cap ? ts->compound_cap * 2 : 16;
+        ts->compound = realloc(ts->compound, nc * sizeof *ts->compound);
+        if (!ts->compound) { perror("sharp-fe type"); abort(); }
+        ts->compound_cap = nc;
+    }
+    ts->compound[ts->compound_len++] = t;
+}
+
 static Type *ts_intern(TyStore *ts, Type candidate) {
     for (size_t i = 0; i < ts->compound_len; i++)
         if (ty_compound_eq(ts->compound[i], &candidate)) return ts->compound[i];
@@ -105,13 +115,7 @@ static Type *ts_intern(TyStore *ts, Type candidate) {
         t->u.func.params = copy;
     }
 
-    if (ts->compound_len == ts->compound_cap) {
-        size_t nc = ts->compound_cap ? ts->compound_cap * 2 : 16;
-        ts->compound = realloc(ts->compound, nc * sizeof *ts->compound);
-        if (!ts->compound) { perror("sharp-fe type"); abort(); }
-        ts->compound_cap = nc;
-    }
-    ts->compound[ts->compound_len++] = t;
+    ts_compound_push(ts, t);
     return t;
 }
 
@@ -250,13 +254,7 @@ Type *ty_struct_type(TyStore *ts, const char *name,
         memcpy(copy, t->u.struct_.args, sz);
         t->u.struct_.args = copy;
     }
-    if (ts->compound_len == ts->compound_cap) {
-        size_t nc = ts->compound_cap ? ts->compound_cap * 2 : 32;
-        ts->compound = realloc(ts->compound, nc * sizeof *ts->compound);
-        if (!ts->compound) { perror("sharp-fe type"); abort(); }
-        ts->compound_cap = nc;
-    }
-    ts->compound[ts->compound_len++] = t;
+    ts_compound_push(ts, t);
     return t;
 }
 Type *ty_enum_type(TyStore *ts, const char *name, AstNode *decl) {
@@ -270,13 +268,7 @@ Type *ty_enum_type(TyStore *ts, const char *name, AstNode *decl) {
     Type *t = malloc(sizeof *t);
     if (!t) { perror("sharp-fe type"); abort(); }
     *t = candidate;
-    if (ts->compound_len == ts->compound_cap) {
-        size_t nc = ts->compound_cap ? ts->compound_cap * 2 : 16;
-        ts->compound = realloc(ts->compound, nc * sizeof *ts->compound);
-        if (!ts->compound) { perror("sharp-fe type"); abort(); }
-        ts->compound_cap = nc;
-    }
-    ts->compound[ts->compound_len++] = t;
+    ts_compound_push(ts, t);
     return t;
 }
 Type *ty_param(TyStore *ts, const char *name) {
@@ -298,13 +290,7 @@ Type *ty_vector_type(TyStore *ts, Type *elem, int count, const char *name) {
     Type *t = malloc(sizeof *t);
     if (!t) { perror("sharp-fe type"); abort(); }
     *t = candidate;
-    if (ts->compound_len == ts->compound_cap) {
-        size_t nc = ts->compound_cap ? ts->compound_cap * 2 : 16;
-        ts->compound = realloc(ts->compound, nc * sizeof *ts->compound);
-        if (!ts->compound) { perror("sharp-fe type"); abort(); }
-        ts->compound_cap = nc;
-    }
-    ts->compound[ts->compound_len++] = t;
+    ts_compound_push(ts, t);
     return t;
 }
 
@@ -407,16 +393,21 @@ Type *ty_unconst(TyStore *ts, Type *t) {
 Type *ty_deref(const Type *t) {
     if (!t) return NULL;
     if (t->kind == TY_PTR) return t->u.ptr.base;
-    /* Array decay: T[N] -> T when subscripted / dereferenced. */
     if (t->kind == TY_ARRAY) return t->u.array.base;
-    if (t->kind == TY_CONST && t->u.const_.base->kind == TY_PTR)
-        return t->u.const_.base->u.ptr.base;
-    if (t->kind == TY_CONST && t->u.const_.base->kind == TY_ARRAY)
-        return t->u.const_.base->u.array.base;
-    if (t->kind == TY_ATOMIC && t->u.atomic.base->kind == TY_PTR)
-        return t->u.atomic.base->u.ptr.base;
-    if (t->kind == TY_ATOMIC && t->u.atomic.base->kind == TY_ARRAY)
-        return t->u.atomic.base->u.array.base;
+    if (t->kind == TY_CONST) {
+        if (!t->u.const_.base) return NULL;
+        if (t->u.const_.base->kind == TY_PTR)
+            return t->u.const_.base->u.ptr.base;
+        if (t->u.const_.base->kind == TY_ARRAY)
+            return t->u.const_.base->u.array.base;
+    }
+    if (t->kind == TY_ATOMIC) {
+        if (!t->u.atomic.base) return NULL;
+        if (t->u.atomic.base->kind == TY_PTR)
+            return t->u.atomic.base->u.ptr.base;
+        if (t->u.atomic.base->kind == TY_ARRAY)
+            return t->u.atomic.base->u.array.base;
+    }
     return NULL;
 }
 
@@ -452,6 +443,10 @@ Type *ty_from_name(TyStore *ts, const char *name) {
     /* S1: composed C type names produced by parse_decl_specifiers().
      * The order matters only for short-circuit speed; correctness is
      * by exact-string match. */
+    /* Known simplification: 'signed char' maps to ty_char rather than
+     * a distinct TY_SCHAR.  In C, char/signed char/unsigned char are
+     * three distinct types, but Sharp's type system currently does not
+     * distinguish them. */
     if (!strcmp(name,"signed char"))                 return ty_char(ts);
     if (!strcmp(name,"unsigned char"))               return ty_uchar(ts);
     if (!strcmp(name,"signed short")||

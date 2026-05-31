@@ -1097,6 +1097,20 @@ static TokList resolve_all_has_include(CppState *st, const TokList *in,
 }
 
 /* Process #if <constant-expression>. */
+static intmax_t eval_condition(CppState *st, TokList *line, CppLoc loc, bool *err) {
+    TokList preresolved = resolve_all_defined(st->macros, line);
+    TokList hi_resolved = resolve_all_has_include(st, &preresolved, loc.file);
+    tl_free(&preresolved);
+    TokList expanded = {0};
+    macro_expand(&hi_resolved, st->macros, st->interns, st->diags, &expanded);
+    tl_free(&hi_resolved);
+    TokList postexp = resolve_all_defined(st->macros, &expanded);
+    tl_free(&expanded);
+    intmax_t val = cpp_eval_if_expr(&postexp, st->macros, st->interns, st->diags, err);
+    tl_free(&postexp);
+    return val;
+}
+
 static void handle_if(CppState *st, TokList *line, CppLoc loc) {
     /* Phase R5: if we're inside a dead branch already, the nested #if
      * pushes a frame but its expression must not be evaluated.  C99
@@ -1153,27 +1167,8 @@ static void handle_if(CppState *st, TokList *line, CppLoc loc) {
             n->tok = ft;
         }
     }
-    /* Step 1: resolve defined() BEFORE macro expansion (ISO C11 §6.10.1p4) */
-    TokList preresolved = resolve_all_defined(st->macros, line);
-    /* Step 1b: resolve __has_include(...) (C23 §6.10.1).
-     * Phase 8: thread loc.file through so __has_include_next can compute
-     * its skip-dir relative to the file being preprocessed. */
-    TokList hi_resolved = resolve_all_has_include(st, &preresolved, loc.file);
-    tl_free(&preresolved);
-    /* Step 2: macro-expand the remaining tokens */
-    TokList expanded = {0};
-    macro_expand(&hi_resolved, st->macros, st->interns, st->diags, &expanded);
-    tl_free(&hi_resolved);
-    /* Step 2b: resolve defined() that appeared from macro expansion
-     * (GCC extension — defined() in macro bodies is non-standard but
-     * MinGW headers rely on it heavily, e.g. __INTRINSIC_PROLOG). */
-    TokList postexp = resolve_all_defined(st->macros, &expanded);
-    tl_free(&expanded);
-    /* Step 3: evaluate the constant expression */
     bool err = false;
-    intmax_t val = cpp_eval_if_expr(&postexp, st->macros, st->interns,
-                                     st->diags, &err);
-    tl_free(&postexp);
+    intmax_t val = eval_condition(st, line, loc, &err);
     handle_if_common(st, !err && val != 0, loc);
 }
 
@@ -1240,24 +1235,8 @@ static void handle_elif(CppState *st, TokList *line, CppLoc loc) {
         }
     }
 
-    /* Step 1: resolve defined() BEFORE macro expansion (ISO C11 §6.10.1p4) */
-    TokList preresolved = resolve_all_defined(st->macros, line);
-    /* Step 1b: resolve __has_include(...) (C23 §6.10.1).
-     * Phase 8: thread loc.file through for __has_include_next. */
-    TokList hi_resolved = resolve_all_has_include(st, &preresolved, loc.file);
-    tl_free(&preresolved);
-    /* Step 2: macro-expand the remaining tokens */
-    TokList expanded = {0};
-    macro_expand(&hi_resolved, st->macros, st->interns, st->diags, &expanded);
-    tl_free(&hi_resolved);
-    /* Step 2b: resolve defined() that appeared from macro expansion */
-    TokList postexp = resolve_all_defined(st->macros, &expanded);
-    tl_free(&expanded);
-    /* Step 3: evaluate the constant expression */
     bool err = false;
-    intmax_t val = cpp_eval_if_expr(&postexp, st->macros, st->interns,
-                                     st->diags, &err);
-    tl_free(&postexp);
+    intmax_t val = eval_condition(st, line, loc, &err);
     bool cond = !err && val != 0;
 
     /* Only activate if parent scopes are all live */

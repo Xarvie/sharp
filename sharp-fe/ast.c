@@ -327,9 +327,13 @@ static AstNode *clone_size_expr(const AstNode *e) {
     switch (e->kind) {
     case AST_INT_LIT:
         n->u.int_lit = e->u.int_lit;
+        if (n->u.int_lit.orig_text)
+            n->u.int_lit.orig_text = cpp_xstrdup(n->u.int_lit.orig_text);
         break;
     case AST_CHAR_LIT:
         n->u.char_lit = e->u.char_lit;
+        if (n->u.char_lit.orig_text)
+            n->u.char_lit.orig_text = cpp_xstrdup(n->u.char_lit.orig_text);
         break;
     case AST_IDENT:
         n->u.ident.name = cpp_xstrdup(e->u.ident.name ? e->u.ident.name : "");

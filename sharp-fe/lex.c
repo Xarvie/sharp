@@ -356,6 +356,11 @@ static void parse_float_literal(SharpTok *t, FeDiagArr *diags) {
 
 /* Decode one escape sequence starting at *p (after the backslash).
  * Advances *p past the consumed characters. */
+static int hex_digit(char c) {
+    return isdigit((unsigned char)c) ? (c - '0')
+         : (tolower((unsigned char)c) - 'a' + 10);
+}
+
 static int64_t decode_escape(const char **p, const char *end) {
     if (*p >= end) return '\\';
     char c = *(*p)++;
@@ -384,8 +389,7 @@ static int64_t decode_escape(const char **p, const char *end) {
         /* Hex: any number of hex digits. */
         int64_t val = 0;
         while (*p < end && isxdigit((unsigned char)**p)) {
-            int d = isdigit((unsigned char)**p) ? (**p - '0')
-                  : (tolower((unsigned char)**p) - 'a' + 10);
+            int d = hex_digit(**p);
             val = (val << 4) | d;
             (*p)++;
         }
@@ -395,8 +399,7 @@ static int64_t decode_escape(const char **p, const char *end) {
         /* UCN \uXXXX */
         int64_t val = 0;
         for (int i = 0; i < 4 && *p < end && isxdigit((unsigned char)**p); i++) {
-            int d = isdigit((unsigned char)**p) ? (**p - '0')
-                  : (tolower((unsigned char)**p) - 'a' + 10);
+            int d = hex_digit(**p);
             val = (val << 4) | d;
             (*p)++;
         }
@@ -406,8 +409,7 @@ static int64_t decode_escape(const char **p, const char *end) {
         /* UCN \UXXXXXXXX */
         int64_t val = 0;
         for (int i = 0; i < 8 && *p < end && isxdigit((unsigned char)**p); i++) {
-            int d = isdigit((unsigned char)**p) ? (**p - '0')
-                  : (tolower((unsigned char)**p) - 'a' + 10);
+            int d = hex_digit(**p);
             val = (val << 4) | d;
             (*p)++;
         }

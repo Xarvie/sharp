@@ -198,6 +198,14 @@ Symbol *scope_lookup_value(Scope *s, const char *name) {
     return type_sym;
 }
 
+static bool is_self_typedef(const AstNode *decl, const char *name) {
+    return decl && decl->kind == AST_TYPEDEF_DECL &&
+           decl->u.typedef_decl.target &&
+           decl->u.typedef_decl.target->kind == AST_TYPE_NAME &&
+           decl->u.typedef_decl.target->u.type_name.name &&
+           strcmp(decl->u.typedef_decl.target->u.type_name.name, name) == 0;
+}
+
 Symbol *scope_define(Scope *s, SymKind kind, const char *name,
                      AstNode *decl, FeDiagArr *diags) {
     /* Check for redefinition in the same scope. */
@@ -308,18 +316,8 @@ Symbol *scope_define(Scope *s, SymKind kind, const char *name,
         if (kind == SYM_TYPE && existing->kind == SYM_TYPE && decl) {
             AstNode *od = existing->decl;
             AstNode *nd = decl;
-            bool od_is_self_typedef =
-                od && od->kind == AST_TYPEDEF_DECL &&
-                od->u.typedef_decl.target &&
-                od->u.typedef_decl.target->kind == AST_TYPE_NAME &&
-                od->u.typedef_decl.target->u.type_name.name &&
-                strcmp(od->u.typedef_decl.target->u.type_name.name, name) == 0;
-            bool nd_is_self_typedef =
-                nd && nd->kind == AST_TYPEDEF_DECL &&
-                nd->u.typedef_decl.target &&
-                nd->u.typedef_decl.target->kind == AST_TYPE_NAME &&
-                nd->u.typedef_decl.target->u.type_name.name &&
-                strcmp(nd->u.typedef_decl.target->u.type_name.name, name) == 0;
+            bool od_is_self_typedef = is_self_typedef(od, name);
+            bool nd_is_self_typedef = is_self_typedef(nd, name);
             if (od_is_self_typedef && nd && nd->kind == AST_STRUCT_DEF) {
                 existing->decl = nd;  /* promote typedef → struct def */
                 existing->was_typedef = true; /* remember: also typedef'd */
@@ -903,7 +901,7 @@ Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
                  * e.g. typedef struct __pthread * pthread_t;
                  * The target is AST_TYPE_PTR -> AST_TYPE_NAME("__pthread") */
                 AstNode *inner = d->u.typedef_decl.target;
-                while (inner->kind == AST_TYPE_PTR)
+                while (inner && inner->kind == AST_TYPE_PTR)
                     inner = inner->u.type_ptr.base;
                 if (inner->kind == AST_TYPE_NAME)
                     tag = inner->u.type_name.name;
@@ -970,10 +968,7 @@ Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
                  * (e.g. struct and function), check next in bucket for another struct. */
                 {
                     const char *check_name = sname;
-                    unsigned h = 5381;
-                    for (const unsigned char *p = (const unsigned char *)check_name; *p; p++)
-                        h = h * 33 ^ *p;
-                    h &= (fs->nbuckets - 1);
+                    unsigned h = sym_hash(check_name) & (fs->nbuckets - 1);
                     for (Symbol *nxt = tsym->next; nxt; nxt = nxt->next) {
                         if (nxt == (Symbol*)1) continue;
                         if (strcmp(nxt->name, sname) == 0 &&

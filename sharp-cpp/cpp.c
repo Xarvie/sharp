@@ -339,16 +339,12 @@ static CppResult build_result(CppState *st, CppCtx *ctx, CppDiagArr *diags) {
      * table which is freed by cpp_state_free below. */
     res.nincluded = st->included.len;
     if (st->included.len > 0) {
-        res.included_files = malloc(st->included.len * sizeof(char *));
-        if (res.included_files) {
-            for (size_t i = 0; i < st->included.len; i++)
-                res.included_files[i] = cpp_xstrdup(st->included.data[i]);
-        }
-        res.nincluded = res.included_files ? st->included.len : 0;
+        res.included_files = cpp_xmalloc(st->included.len * sizeof(char *));
+        for (size_t i = 0; i < st->included.len; i++)
+            res.included_files[i] = cpp_xstrdup(st->included.data[i]);
 
-        /* Transfer system-header flag array for -MMD filtering */
-        res.included_is_sys = malloc(st->included.len * sizeof(bool));
-        if (res.included_is_sys && st->included_is_sys)
+        res.included_is_sys = cpp_xmalloc(st->included.len * sizeof(bool));
+        if (st->included_is_sys)
             memcpy(res.included_is_sys, st->included_is_sys,
                    st->included.len * sizeof(bool));
     } else {

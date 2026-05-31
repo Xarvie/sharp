@@ -8,6 +8,7 @@
  */
 #define _GNU_SOURCE
 #include "cpp.h"
+#include "cpp_internal.h"
 #include "macro.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,8 +59,7 @@ execZig(const char *cmd)
 #endif
 
     size_t len = strlen(cmd) + 1024;
-    char *full = malloc(len);
-    if (!full) return NULL;
+    char *full = cpp_xmalloc(len);
     snprintf(full, len, "%s > \"%s\" 2> \"%s\"", cmd, out_path, err_path);
 
     int exit_code = system(full);
@@ -84,11 +84,9 @@ execZig(const char *cmd)
     fseek(f, 0, SEEK_END);
     long flen = ftell(f);
     fseek(f, 0, SEEK_SET);
-    char *buf = malloc((size_t)flen + 1);
-    if (buf) {
-        size_t rd = fread(buf, 1, (size_t)flen, f);
-        buf[rd] = '\0';
-    }
+    char *buf = cpp_xmalloc((size_t)flen + 1);
+    size_t rd = fread(buf, 1, (size_t)flen, f);
+    buf[rd] = '\0';
     fclose(f);
     remove(out_path);
     return buf;
@@ -130,7 +128,7 @@ install_macros_from_zig(CppCtx *ctx, const char *zig_output)
                 const char *rp = strchr(fbody, ')');
                 if (rp) {
                     size_t sig_len = (size_t)(rp + 1 - fbody);
-                    char *name = malloc(sig_len + 1);
+                    char *name = cpp_xmalloc(sig_len + 1);
                     memcpy(name, fbody, sig_len);
                     name[sig_len] = '\0';
 
@@ -138,7 +136,7 @@ install_macros_from_zig(CppCtx *ctx, const char *zig_output)
                     while (*val == ' ' || *val == '\t') val++;
                     size_t val_len = len - (size_t)(val - line);
                     if (val_len > 0 && val[val_len - 1] == '\r') val_len--;
-                    char *value = malloc(val_len + 1);
+                    char *value = cpp_xmalloc(val_len + 1);
                     memcpy(value, val, val_len);
                     value[val_len] = '\0';
 
@@ -149,7 +147,7 @@ install_macros_from_zig(CppCtx *ctx, const char *zig_output)
                 }
             } else {
                 /* Object-like macro: #define NAME value */
-                char *name = malloc(name_len + 1);
+                char *name = cpp_xmalloc(name_len + 1);
                 memcpy(name, body, name_len);
                 name[name_len] = '\0';
 
@@ -157,7 +155,7 @@ install_macros_from_zig(CppCtx *ctx, const char *zig_output)
                 while (*val == ' ' || *val == '\t') val++;
                 size_t val_len = len - (size_t)(val - line);
                 if (val_len > 0 && val[val_len - 1] == '\r') val_len--;
-                char *value = malloc(val_len + 1);
+                char *value = cpp_xmalloc(val_len + 1);
                 memcpy(value, val, val_len);
                 value[val_len] = '\0';
 
@@ -167,7 +165,7 @@ install_macros_from_zig(CppCtx *ctx, const char *zig_output)
                  * can define __ENABLE_LEGACY_MAC_AVAILABILITY downstream.      */
                 if (strcmp(name, "__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__") == 0) {
                     has_env_mac_min_required = 1;
-                    env_mac_min_value = malloc(strlen(value) + 1);
+                    env_mac_min_value = cpp_xmalloc(strlen(value) + 1);
                     strcpy(env_mac_min_value, value);
                 }
 

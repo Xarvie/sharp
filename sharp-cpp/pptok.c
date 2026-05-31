@@ -228,6 +228,133 @@ static int reader_peekc(CppReader *rd) {
  * Reader construction / destruction
  * ====================================================================== */
 
+static char *convert_raw_strings_cpp(const char *src, size_t len, size_t *out_len) {
+    size_t cap = len + len / 4 + 64;
+    char *out = (char *)cpp_xmalloc(cap);
+    size_t w = 0;
+    size_t r_pos = 0;
+
+    while (r_pos < len) {
+        if (w + 4 >= cap) {
+            cap = cap * 2;
+            out = (char *)cpp_xrealloc(out, cap);
+        }
+
+        if (src[r_pos] == '"') {
+            out[w++] = src[r_pos++];
+            while (r_pos < len && src[r_pos] != '"') {
+                if (src[r_pos] == '\\' && r_pos + 1 < len)
+                    out[w++] = src[r_pos++];
+                if (w >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
+                out[w++] = src[r_pos++];
+            }
+            if (r_pos < len) out[w++] = src[r_pos++];
+            continue;
+        }
+        if (src[r_pos] == '\'') {
+            out[w++] = src[r_pos++];
+            while (r_pos < len && src[r_pos] != '\'') {
+                if (src[r_pos] == '\\' && r_pos + 1 < len)
+                    out[w++] = src[r_pos++];
+                if (w >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
+                out[w++] = src[r_pos++];
+            }
+            if (r_pos < len) out[w++] = src[r_pos++];
+            continue;
+        }
+        if (r_pos + 1 < len && src[r_pos] == '/' && src[r_pos+1] == '/') {
+            while (r_pos < len && src[r_pos] != '\n') {
+                if (w >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
+                out[w++] = src[r_pos++];
+            }
+            continue;
+        }
+        if (r_pos + 1 < len && src[r_pos] == '/' && src[r_pos+1] == '*') {
+            while (r_pos < len) {
+                if (w >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
+                out[w++] = src[r_pos++];
+                if (r_pos >= 2 && src[r_pos-2] == '*' && src[r_pos-1] == '/') break;
+            }
+            continue;
+        }
+
+        int at_boundary = (r_pos == 0) || !((src[r_pos-1] >= 'a' && src[r_pos-1] <= 'z') ||
+                                              (src[r_pos-1] >= 'A' && src[r_pos-1] <= 'Z') ||
+                                              (src[r_pos-1] >= '0' && src[r_pos-1] <= '9') ||
+                                              src[r_pos-1] == '_');
+        if (at_boundary && src[r_pos] == 'r' && r_pos + 1 < len && src[r_pos+1] == '"') {
+            const char *after_q = src + r_pos + 2;
+            const char *close = memchr(after_q, '"', len - (after_q - src));
+            if (close) {
+                size_t content_len = close - after_q;
+                if (w + content_len * 2 + 8 >= cap) {
+                    cap = w + content_len * 2 + 64;
+                    out = (char *)cpp_xrealloc(out, cap);
+                }
+                out[w++] = '"';
+                for (size_t i = 0; i < content_len; i++) {
+                    unsigned char c = (unsigned char)after_q[i];
+                    if (c == '\\')      { out[w++] = '\\'; out[w++] = '\\'; }
+                    else if (c == '"')  { out[w++] = '\\'; out[w++] = '"';  }
+                    else if (c == '\n') { out[w++] = '\\'; out[w++] = 'n';  }
+                    else if (c == '\t') { out[w++] = '\\'; out[w++] = 't';  }
+                    else if (c == '\r') { out[w++] = '\\'; out[w++] = 'r';  }
+                    else out[w++] = c;
+                }
+                out[w++] = '"';
+                r_pos = close - src + 1;
+                continue;
+            }
+        }
+        if (at_boundary && src[r_pos] == 'r' && r_pos + 1 < len && src[r_pos+1] == '#') {
+            size_t nhash = 0;
+            size_t h_pos = r_pos + 1;
+            while (h_pos < len && src[h_pos] == '#') { nhash++; h_pos++; }
+            if (h_pos < len && src[h_pos] == '"') {
+                const char *content_start = src + h_pos + 1;
+                const char *cs = content_start;
+                const char *close = NULL;
+                while (cs < src + len) {
+                    if (*cs == '"') {
+                        size_t nh = 0;
+                        while (cs + 1 + nh < src + len && cs[1+nh] == '#') nh++;
+                        if (nh == nhash && (cs + 1 + nh >= src + len || cs[1+nh] != '#')) {
+                            close = cs;
+                            break;
+                        }
+                    }
+                    cs++;
+                }
+                if (close) {
+                    size_t content_len = close - content_start;
+                    if (w + content_len * 2 + 8 >= cap) {
+                        cap = w + content_len * 2 + 64;
+                        out = (char *)cpp_xrealloc(out, cap);
+                    }
+                    out[w++] = '"';
+                    for (size_t i = 0; i < content_len; i++) {
+                        unsigned char c = (unsigned char)content_start[i];
+                        if (c == '\\')      { out[w++] = '\\'; out[w++] = '\\'; }
+                        else if (c == '"')  { out[w++] = '\\'; out[w++] = '"';  }
+                        else if (c == '\n') { out[w++] = '\\'; out[w++] = 'n';  }
+                        else if (c == '\t') { out[w++] = '\\'; out[w++] = 't';  }
+                        else if (c == '\r') { out[w++] = '\\'; out[w++] = 'r';  }
+                        else out[w++] = c;
+                    }
+                    out[w++] = '"';
+                    r_pos = close - src + 1 + nhash;
+                    continue;
+                }
+            }
+        }
+
+        out[w++] = src[r_pos++];
+    }
+    out[w] = '\0';
+    if (out_len) *out_len = w;
+    return out;
+}
+
 CppReader *reader_new_from_file(const char *filename,
                                 InternTable *interns,
                                 CppDiagArr *diags) {
@@ -262,128 +389,17 @@ CppReader *reader_new_from_file(const char *filename,
     fclose(f);
     buf[nr] = '\0';
 
-    /* Convert Rust-style raw strings r#"..."# to standard C string
-     * literals before the tokenizer sees them.  This prevents '#' chars
-     * inside raw strings from being interpreted as preprocessor directives.
-     * Only apply to Sharp source files (.ce, .he), not standard C files. */
     {
-        int is_sharp = 0;
-        {
-            const char *ext = strrchr(filename, '.');
-            if (ext) {
-                if (strcmp(ext, ".ce") == 0 || strcmp(ext, ".he") == 0)
-                    is_sharp = 1;
-            }
-        }
-        if (is_sharp) {
-            size_t needed = nr * 2 + 2;  /* worst case: every char gets escaped */
-            char *out = (char *)cpp_xmalloc(needed);
-            size_t w = 0;
-            size_t r_pos = 0;
-            while (r_pos < nr) {
-                /* Skip string literals */
-                if (buf[r_pos] == '"') {
-                    out[w++] = buf[r_pos++];
-                    while (r_pos < nr && buf[r_pos] != '"') {
-                        if (buf[r_pos] == '\\' && r_pos + 1 < nr)
-                            out[w++] = buf[r_pos++];
-                        out[w++] = buf[r_pos++];
-                    }
-                    if (r_pos < nr) out[w++] = buf[r_pos++];
-                    continue;
-                }
-                /* Skip char literals */
-                if (buf[r_pos] == '\'') {
-                    out[w++] = buf[r_pos++];
-                    while (r_pos < nr && buf[r_pos] != '\'') {
-                        if (buf[r_pos] == '\\' && r_pos + 1 < nr)
-                            out[w++] = buf[r_pos++];
-                        out[w++] = buf[r_pos++];
-                    }
-                    if (r_pos < nr) out[w++] = buf[r_pos++];
-                    continue;
-                }
-                /* Skip line comments */
-                if (r_pos + 1 < nr && buf[r_pos] == '/' && buf[r_pos+1] == '/') {
-                    out[w++] = buf[r_pos++];
-                    out[w++] = buf[r_pos++];
-                    while (r_pos < nr && buf[r_pos] != '\n')
-                        out[w++] = buf[r_pos++];
-                    continue;
-                }
-                /* Skip block comments */
-                if (r_pos + 1 < nr && buf[r_pos] == '/' && buf[r_pos+1] == '*') {
-                    out[w++] = buf[r_pos++];
-                    out[w++] = buf[r_pos++];
-                    while (r_pos + 1 < nr) {
-                        if (buf[r_pos] == '*' && buf[r_pos+1] == '/') {
-                            out[w++] = buf[r_pos++];
-                            out[w++] = buf[r_pos++];
-                            break;
-                        }
-                        out[w++] = buf[r_pos++];
-                    }
-                    continue;
-                }
-                /* Check for r#" pattern — must be at token boundary */
-                int at_boundary = (r_pos == 0) || !(
-                    (buf[r_pos-1] >= 'a' && buf[r_pos-1] <= 'z') ||
-                    (buf[r_pos-1] >= 'A' && buf[r_pos-1] <= 'Z') ||
-                    (buf[r_pos-1] >= '0' && buf[r_pos-1] <= '9') ||
-                    buf[r_pos-1] == '_');
-                if (at_boundary && buf[r_pos] == 'r' && r_pos + 1 < nr && buf[r_pos+1] == '#') {
-                    /* Count hashes */
-                    size_t h = r_pos + 1;
-                    while (h < nr && buf[h] == '#') h++;
-                    size_t nhash = h - r_pos - 1;
-                    if (h < nr && buf[h] == '"') {
-                        /* Raw string found. Convert to C string literal. */
-                        const char *content_start = buf + h + 1;
-                        const char *cs = content_start;
-                        const char *close = NULL;
-                        while (cs < buf + nr) {
-                            if (*cs == '"') {
-                                size_t n2 = 0;
-                                while (cs + 1 + n2 < buf + nr && cs[1+n2] == '#') n2++;
-                                if (n2 == nhash && (cs + 1 + n2 >= buf + nr || cs[1+n2] != '#')) {
-                                    close = cs;
-                                    break;
-                                }
-                            }
-                            cs++;
-                        }
-                        if (close) {
-                            size_t clen = (size_t)(close - content_start);
-                            /* Write: " ... " */
-                            if (w + clen * 2 + 4 >= needed) {
-                                needed = (w + clen * 2 + 4) * 2;
-                                out = (char *)cpp_xrealloc(out, needed);
-                            }
-                            out[w++] = '"';
-                            for (size_t i = 0; i < clen; i++) {
-                                unsigned char c = (unsigned char)content_start[i];
-                                if (c == '\\')      { out[w++] = '\\'; out[w++] = '\\'; }
-                                else if (c == '"')  { out[w++] = '\\'; out[w++] = '"';  }
-                                else if (c == '\n') { out[w++] = '\\'; out[w++] = 'n';  }
-                                else if (c == '\t') { out[w++] = '\\'; out[w++] = 't';  }
-                                else if (c == '\r') { out[w++] = '\\'; out[w++] = 'r';  }
-                                else out[w++] = c;
-                            }
-                            out[w++] = '"';
-                            r_pos = (size_t)(close - buf) + 1 + nhash + 1;
-                            continue;
-                        }
-                    }
-                    /* Not a valid raw string, copy 'r' as literal */
-                    out[w++] = buf[r_pos++];
-                    continue;
-                }
-                out[w++] = buf[r_pos++];
-            }
-            out[w] = '\0';
+        int is_sharp_ext = 0;
+        const char *ext = strrchr(filename, '.');
+        if (ext && (strcmp(ext, ".ce") == 0 || strcmp(ext, ".he") == 0))
+            is_sharp_ext = 1;
+        if (is_sharp_ext) {
+            size_t out_len = 0;
+            char *converted = convert_raw_strings_cpp(buf, (size_t)nr, &out_len);
             free(buf);
-            buf = out;
-            nr = w;
+            buf = converted;
+            nr = (int)out_len;
         }
     }
 
@@ -412,124 +428,19 @@ CppReader *reader_new_from_buf(const char *buf, size_t len,
     memcpy(copy, buf, len);
     copy[len] = '\0';
 
-    /* Raw string conversion (same as reader_new_from_file) — only for
-     * Sharp source files (.ce, .he). */
     {
-        int is_sharp = 0;
+        int is_sharp_ext = 0;
         if (filename) {
             const char *ext = strrchr(filename, '.');
-            if (ext) {
-                if (strcmp(ext, ".ce") == 0 || strcmp(ext, ".he") == 0)
-                    is_sharp = 1;
-            }
+            if (ext && (strcmp(ext, ".ce") == 0 || strcmp(ext, ".he") == 0))
+                is_sharp_ext = 1;
         }
-        if (is_sharp) {
-            size_t nr = len;
-            char *b = copy;
-            size_t needed = nr * 2 + 2;
-            char *out = (char *)cpp_xmalloc(needed);
-            size_t w = 0;
-            size_t r_pos = 0;
-            while (r_pos < nr) {
-                /* Skip string literals */
-                if (b[r_pos] == '"') {
-                    out[w++] = b[r_pos++];
-                    while (r_pos < nr && b[r_pos] != '"') {
-                        if (b[r_pos] == '\\' && r_pos + 1 < nr)
-                            out[w++] = b[r_pos++];
-                        out[w++] = b[r_pos++];
-                    }
-                    if (r_pos < nr) out[w++] = b[r_pos++];
-                    continue;
-                }
-                /* Skip char literals */
-                if (b[r_pos] == '\'') {
-                    out[w++] = b[r_pos++];
-                    while (r_pos < nr && b[r_pos] != '\'') {
-                        if (b[r_pos] == '\\' && r_pos + 1 < nr)
-                            out[w++] = b[r_pos++];
-                        out[w++] = b[r_pos++];
-                    }
-                    if (r_pos < nr) out[w++] = b[r_pos++];
-                    continue;
-                }
-                /* Skip line comments */
-                if (r_pos + 1 < nr && b[r_pos] == '/' && b[r_pos+1] == '/') {
-                    out[w++] = b[r_pos++];
-                    out[w++] = b[r_pos++];
-                    while (r_pos < nr && b[r_pos] != '\n')
-                        out[w++] = b[r_pos++];
-                    continue;
-                }
-                /* Skip block comments */
-                if (r_pos + 1 < nr && b[r_pos] == '/' && b[r_pos+1] == '*') {
-                    out[w++] = b[r_pos++];
-                    out[w++] = b[r_pos++];
-                    while (r_pos + 1 < nr) {
-                        if (b[r_pos] == '*' && b[r_pos+1] == '/') {
-                            out[w++] = b[r_pos++];
-                            out[w++] = b[r_pos++];
-                            break;
-                        }
-                        out[w++] = b[r_pos++];
-                    }
-                    continue;
-                }
-                /* Check for r#" pattern — must be at token boundary */
-                int at_boundary = (r_pos == 0) || !(
-                    (b[r_pos-1] >= 'a' && b[r_pos-1] <= 'z') ||
-                    (b[r_pos-1] >= 'A' && b[r_pos-1] <= 'Z') ||
-                    (b[r_pos-1] >= '0' && b[r_pos-1] <= '9') ||
-                    b[r_pos-1] == '_');
-                if (at_boundary && b[r_pos] == 'r' && r_pos + 1 < nr && b[r_pos+1] == '#') {
-                    size_t h = r_pos + 1;
-                    while (h < nr && b[h] == '#') h++;
-                    size_t nhash = h - r_pos - 1;
-                    if (h < nr && b[h] == '"') {
-                        const char *content_start = b + h + 1;
-                        const char *cs = content_start;
-                        const char *close = NULL;
-                        while (cs < b + nr) {
-                            if (*cs == '"') {
-                                size_t n2 = 0;
-                                while (cs + 1 + n2 < b + nr && cs[1+n2] == '#') n2++;
-                                if (n2 == nhash && (cs + 1 + n2 >= b + nr || cs[1+n2] != '#')) {
-                                    close = cs;
-                                    break;
-                                }
-                            }
-                            cs++;
-                        }
-                        if (close) {
-                            size_t clen = (size_t)(close - content_start);
-                            if (w + clen * 2 + 4 >= needed) {
-                                needed = (w + clen * 2 + 4) * 2;
-                                out = (char *)cpp_xrealloc(out, needed);
-                            }
-                            out[w++] = '"';
-                            for (size_t i = 0; i < clen; i++) {
-                                unsigned char c = (unsigned char)content_start[i];
-                                if (c == '\\')      { out[w++] = '\\'; out[w++] = '\\'; }
-                                else if (c == '"')  { out[w++] = '\\'; out[w++] = '"';  }
-                                else if (c == '\n') { out[w++] = '\\'; out[w++] = 'n';  }
-                                else if (c == '\t') { out[w++] = '\\'; out[w++] = 't';  }
-                                else if (c == '\r') { out[w++] = '\\'; out[w++] = 'r';  }
-                                else out[w++] = c;
-                            }
-                            out[w++] = '"';
-                            r_pos = (size_t)(close - b) + 1 + nhash + 1;
-                            continue;
-                        }
-                    }
-                    out[w++] = b[r_pos++];
-                    continue;
-                }
-                out[w++] = b[r_pos++];
-            }
-            out[w] = '\0';
+        if (is_sharp_ext) {
+            size_t out_len = 0;
+            char *converted = convert_raw_strings_cpp(copy, len, &out_len);
             free(copy);
-            copy = out;
-            len = w;
+            copy = converted;
+            len = out_len;
         }
     }
 
