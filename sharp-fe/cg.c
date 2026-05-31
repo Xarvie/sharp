@@ -8,53 +8,6 @@
 #include <stdarg.h>
 
 /* =========================================================================
- * String Builder
- * ====================================================================== */
-typedef struct { char *buf; size_t len, cap; } CgSB;
-
-static void cgb_push(CgSB *sb, char c) {
-    if (sb->len + 1 >= sb->cap) {
-        sb->cap = sb->cap ? sb->cap * 2 : 256;
-        sb->buf = realloc(sb->buf, sb->cap);
-        if (!sb->buf) abort();
-    }
-    sb->buf[sb->len++] = c;
-    sb->buf[sb->len]   = '\0';
-}
-
-static void cgb_puts(CgSB *sb, const char *s) {
-    for (; *s; s++) cgb_push(sb, *s);
-}
-
-static void cgb_vprintf(CgSB *sb, const char *fmt, va_list ap) {
-    va_list ap2;
-    va_copy(ap2, ap);
-    int n = vsnprintf(NULL, 0, fmt, ap2);
-    va_end(ap2);
-    if (n <= 0) return;
-    while (sb->len + (size_t)n + 1 >= sb->cap) {
-        sb->cap = sb->cap ? sb->cap * 2 : 256;
-        sb->buf = realloc(sb->buf, sb->cap);
-        if (!sb->buf) abort();
-    }
-    vsnprintf(sb->buf + sb->len, (size_t)(n + 1), fmt, ap);
-    sb->len += (size_t)n;
-}
-
-static void cgb_printf(CgSB *sb, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    cgb_vprintf(sb, fmt, ap);
-    va_end(ap);
-}
-
-static char *cgb_take(CgSB *sb) {
-    char *s = sb->buf ? sb->buf : cpp_xstrdup("");
-    sb->buf = NULL; sb->len = sb->cap = 0;
-    return s;
-}
-
-/* =========================================================================
  * CgCtx
  * ====================================================================== */
 /* ── CgCtx — code-generation context ───────────────────────────────────────
@@ -71,7 +24,7 @@ struct CgCtx {
     /* ── Group A: Core ──────────────────────────────────────────────── */
     TyStore       *ts;           /* type store (owns all Type* nodes)       */
     Scope         *file_scope;   /* top-level scope for symbol resolution   */
-    CgSB           out;          /* output string buffer                    */
+    StrBuf         out;          /* output string buffer                    */
     int            indent;       /* current indentation level               */
 
     /* ── Group B: Source navigation ────────────────────────────────── */
@@ -160,7 +113,7 @@ static void cg_const_expr(CgCtx *ctx, const AstNode *e); /* forward */
 
 /* Phase 11 forward declarations */
 static char *cg_mangle_inst(const char *sname, Type **args, size_t nargs);
-static void  cgb_mangle_type(CgSB *sb, Type *t);
+static void  cgb_mangle_type(StrBuf *sb, Type *t);
 static char *cg_mangle_type_str(Type *t);
 static void cg_type_from_ast(CgCtx *ctx, const AstNode *n);
 static void cg_emit_func_params_ast(CgCtx *ctx, const AstNode *fn_ast);
@@ -201,10 +154,10 @@ void cg_ctx_free(CgCtx *ctx) {
  * Indentation helpers
  * ====================================================================== */
 static void cg_indent(CgCtx *ctx) {
-    for (int i = 0; i < ctx->indent; i++) cgb_puts(&ctx->out, "    ");
+    for (int i = 0; i < ctx->indent; i++) sb_push_cstr(&ctx->out, "    ");
 }
-static void cg_nl(CgCtx *ctx)        { cgb_push(&ctx->out, '\n'); }
-static void cg_puts(CgCtx *ctx, const char *s) { cgb_puts(&ctx->out, s); }
+static void cg_nl(CgCtx *ctx)        { sb_push_ch(&ctx->out, '\n'); }
+static void cg_puts(CgCtx *ctx, const char *s) { sb_push_cstr(&ctx->out, s); }
 
 /* =========================================================================
  * #line directive support (commercial-grade source mapping)
@@ -253,10 +206,10 @@ static const char *cg_resolve_path(const char *file) {
 static void cg_escape_filename(CgCtx *ctx, const char *file) {
     for (; *file; file++) {
         if (*file == '\\' || *file == '"') {
-            cgb_push(&ctx->out, '\\');
-            cgb_push(&ctx->out, *file);
+            sb_push_ch(&ctx->out, '\\');
+            sb_push_ch(&ctx->out, *file);
         } else {
-            cgb_push(&ctx->out, *file);
+            sb_push_ch(&ctx->out, *file);
         }
     }
 }
@@ -273,12 +226,12 @@ static bool cg_emit_linemarker(CgCtx *ctx, CppLoc loc) {
     if (ctx->last_loc_file && ctx->last_loc_line == loc.line &&
         strcmp(ctx->last_loc_file, abs_file) == 0) return false;
 
-    cgb_push(&ctx->out, '\n');
-    cgb_puts(&ctx->out, "#line ");
-    cgb_printf(&ctx->out, "%d", loc.line);
-    cgb_puts(&ctx->out, " \"");
+    sb_push_ch(&ctx->out, '\n');
+    sb_push_cstr(&ctx->out, "#line ");
+    sb_printf(&ctx->out, "%d", loc.line);
+    sb_push_cstr(&ctx->out, " \"");
     cg_escape_filename(ctx, abs_file);
-    cgb_puts(&ctx->out, "\"\n");
+    sb_push_cstr(&ctx->out, "\"\n");
 
     ctx->last_loc_file = abs_file;
     ctx->last_loc_line = loc.line;
@@ -362,7 +315,7 @@ static inline bool field_is_comma_cont(const AstNode *n) {
 static void cg_printf(CgCtx *ctx, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    cgb_vprintf(&ctx->out, fmt, ap);
+    sb_vprintf(&ctx->out, fmt, ap);
     va_end(ap);
 }
 
@@ -2074,15 +2027,8 @@ static const char *binop_str(SharpTokKind op) {
 
 /* Get the struct name from a type (TY_STRUCT), stripping const/ptr. */
 static const char *struct_name_of(Type *t) {
-    while (t) {
-        if (t->kind == TY_STRUCT) return t->u.struct_.name;
-        if (t->kind == TY_CONST)  { t = t->u.const_.base; continue; }
-        if (t->kind == TY_PTR)    { t = t->u.ptr.base; continue; }
-        if (t->kind == TY_ARRAY)  { t = t->u.array.base; continue; }
-        if (t->kind == TY_ATOMIC) { t = t->u.atomic.base; continue; }
-        break;
-    }
-    return NULL;
+    Type *s = ty_peel_to_struct(t);
+    return s ? s->u.struct_.name : NULL;
 }
 
 /* Return the C operator precedence for a binary/ternary/assign op.
@@ -2229,7 +2175,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
          * The parser's concatenation preserves the exact token structure
          * that gcc -E would produce. */
         for (size_t i = 0; i < len; i++)
-            cgb_push(&ctx->out, t[i]);
+            sb_push_ch(&ctx->out, t[i]);
         break;
     }
     case AST_IDENT:
@@ -4903,66 +4849,66 @@ static void cg_struct(CgCtx *ctx, const AstNode *sd) {
  * Phase 11: Generic monomorphization
  * ====================================================================== */
 
-/* Append the mangled suffix for a Type to a CgSB. */
-static void cgb_mangle_type(CgSB *sb, Type *t) {
-    if (!t) { cgb_puts(sb, "void"); return; }
+/* Append the mangled suffix for a Type to a StrBuf. */
+static void cgb_mangle_type(StrBuf *sb, Type *t) {
+    if (!t) { sb_push_cstr(sb, "void"); return; }
     switch (t->kind) {
-    case TY_VOID:      cgb_puts(sb, "void");   break;
-    case TY_BOOL:      cgb_puts(sb, "bool");   break;
-    case TY_CHAR:      cgb_puts(sb, "char");   break;
-    case TY_SHORT:     cgb_puts(sb, "short");  break;
-    case TY_INT:       cgb_puts(sb, "int");    break;
-    case TY_LONG:      cgb_puts(sb, "long");   break;
-    case TY_LONGLONG:  cgb_puts(sb, "llong");  break;
-    case TY_UCHAR:     cgb_puts(sb, "uchar");  break;
-    case TY_USHORT:    cgb_puts(sb, "ushort"); break;
-    case TY_UINT:      cgb_puts(sb, "uint");   break;
-    case TY_ULONG:     cgb_puts(sb, "ulong");  break;
-    case TY_ULONGLONG: cgb_puts(sb, "ullong"); break;
-    case TY_FLOAT:     cgb_puts(sb, "float");  break;
-    case TY_DOUBLE:    cgb_puts(sb, "double"); break;
-    case TY_LONGDOUBLE:cgb_puts(sb, "ldouble");break;
-    case TY_PTR:   cgb_puts(sb, "P"); cgb_mangle_type(sb, t->u.ptr.base); break;
-    case TY_CONST: cgb_puts(sb, "c"); cgb_mangle_type(sb, t->u.const_.base); break;
-    case TY_ARRAY: cgb_mangle_type(sb, t->u.array.base); cgb_puts(sb, "a"); break;
-    case TY_FUNC:  cgb_puts(sb, "F"); cgb_mangle_type(sb, t->u.func.ret); break;
+    case TY_VOID:      sb_push_cstr(sb, "void");   break;
+    case TY_BOOL:      sb_push_cstr(sb, "bool");   break;
+    case TY_CHAR:      sb_push_cstr(sb, "char");   break;
+    case TY_SHORT:     sb_push_cstr(sb, "short");  break;
+    case TY_INT:       sb_push_cstr(sb, "int");    break;
+    case TY_LONG:      sb_push_cstr(sb, "long");   break;
+    case TY_LONGLONG:  sb_push_cstr(sb, "llong");  break;
+    case TY_UCHAR:     sb_push_cstr(sb, "uchar");  break;
+    case TY_USHORT:    sb_push_cstr(sb, "ushort"); break;
+    case TY_UINT:      sb_push_cstr(sb, "uint");   break;
+    case TY_ULONG:     sb_push_cstr(sb, "ulong");  break;
+    case TY_ULONGLONG: sb_push_cstr(sb, "ullong"); break;
+    case TY_FLOAT:     sb_push_cstr(sb, "float");  break;
+    case TY_DOUBLE:    sb_push_cstr(sb, "double"); break;
+    case TY_LONGDOUBLE:sb_push_cstr(sb, "ldouble");break;
+    case TY_PTR:   sb_push_cstr(sb, "P"); cgb_mangle_type(sb, t->u.ptr.base); break;
+    case TY_CONST: sb_push_cstr(sb, "c"); cgb_mangle_type(sb, t->u.const_.base); break;
+    case TY_ARRAY: cgb_mangle_type(sb, t->u.array.base); sb_push_cstr(sb, "a"); break;
+    case TY_FUNC:  sb_push_cstr(sb, "F"); cgb_mangle_type(sb, t->u.func.ret); break;
     case TY_STRUCT:
-        cgb_puts(sb, t->u.struct_.name);
+        sb_push_cstr(sb, t->u.struct_.name);
         for (size_t i = 0; i < t->u.struct_.nargs; i++) {
-            cgb_puts(sb, "__");
+            sb_push_cstr(sb, "__");
             cgb_mangle_type(sb, t->u.struct_.args[i]);
         }
         break;
     case TY_ENUM:
-        cgb_puts(sb, "E");
-        cgb_puts(sb, t->u.enum_.name);
+        sb_push_cstr(sb, "E");
+        sb_push_cstr(sb, t->u.enum_.name);
         break;
-    case TY_PARAM: cgb_puts(sb, t->u.param.name); break;
+    case TY_PARAM: sb_push_cstr(sb, t->u.param.name); break;
     case TY_VECTOR:
-        cgb_puts(sb, "V");
+        sb_push_cstr(sb, "V");
         cgb_mangle_type(sb, t->u.vector.elem);
-        cgb_printf(sb, "%d", t->u.vector.count);
+        sb_printf(sb, "%d", t->u.vector.count);
         break;
-    default:       cgb_printf(sb, "T%d", t->kind); break;
+    default:       sb_printf(sb, "T%d", t->kind); break;
     }
 }
 
 /* Mangle a Type* to a malloc'd string (used for operator overloading
  * name construction where we need the full type, not just the kind). */
 static char *cg_mangle_type_str(Type *t) {
-    CgSB sb = {0};
+    StrBuf sb = {0};
     cgb_mangle_type(&sb, t);
-    return cgb_take(&sb);
+    return sb_take(&sb);
 }
 
 static char *cg_mangle_inst(const char *sname, Type **args, size_t nargs) {
-    CgSB sb = {0};
-    cgb_puts(&sb, sname);
+    StrBuf sb = {0};
+    sb_push_cstr(&sb, sname);
     for (size_t i = 0; i < nargs; i++) {
-        cgb_puts(&sb, "__");
+        sb_push_cstr(&sb, "__");
         cgb_mangle_type(&sb, args[i]);
     }
-    return cgb_take(&sb);
+    return sb_take(&sb);
 }
 
 /* subst_type removed — its logic is identical to ty_subst() in type.c,
@@ -5357,12 +5303,12 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                         char *inst_sn = cg_mangle_inst(sn_raw,
                             lt_unc->u.struct_.args, nargs);
                         const char *eff_sn = inst_sn ? inst_sn : sn_raw;
-                        CgSB sb = {0};
-                        cgb_puts(&sb, eff_sn);
-                        cgb_puts(&sb, "__op_");
-                        cgb_puts(&sb, op_suffix(binop_str(
+                        StrBuf sb = {0};
+                        sb_push_cstr(&sb, eff_sn);
+                        sb_push_cstr(&sb, "__op_");
+                        sb_push_cstr(&sb, op_suffix(binop_str(
                                                   expr->u.binop.op)));
-                        char *mn = cgb_take(&sb);
+                        char *mn = sb_take(&sb);
                         free(inst_sn);
                         if (!cg_gfunc_seen(ctx, mn))
                             gfinst_push(ctx, efn, mn, pvals, np);
@@ -5475,18 +5421,18 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                                 np == st->u.struct_.nargs) {
                                 resolved_args = pvals;  /* already resolved above */
                             }
-                            CgSB sb = {0};
+                            StrBuf sb = {0};
                             /* Mangle struct name: HashMap<Point,int> → HashMap__Point__int */
                             char *inst_sn = st->u.struct_.nargs > 0
                                 ? cg_mangle_inst(sname, resolved_args ? resolved_args : st->u.struct_.args, st->u.struct_.nargs)
                                 : NULL;
                             const char *effective_sn = inst_sn ? inst_sn : sname;
-                            cgb_puts(&sb, effective_sn);
-                            cgb_puts(&sb, "__");
-                            cgb_puts(&sb, efn->u.func_def.name);
+                            sb_push_cstr(&sb, effective_sn);
+                            sb_push_cstr(&sb, "__");
+                            sb_push_cstr(&sb, efn->u.func_def.name);
                             /* Extension methods use the struct's type args;
                              * don't append method-level generic params here. */
-                            char *mn = cgb_take(&sb);
+                            char *mn = sb_take(&sb);
                             free(inst_sn);
                             if (!cg_gfunc_seen(ctx, mn))
                                 gfinst_push(ctx, efn, mn, pvals, np);
@@ -5594,11 +5540,11 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                                 ? cg_mangle_inst(tname, targs, nargs)
                                 : NULL;
                             const char *effective_sn = inst_sn ? inst_sn : tname;
-                            CgSB sb = {0};
-                            cgb_puts(&sb, effective_sn);
-                            cgb_puts(&sb, "__");
-                            cgb_puts(&sb, efn->u.func_def.name);
-                            char *mn = cgb_take(&sb);
+                            StrBuf sb = {0};
+                            sb_push_cstr(&sb, effective_sn);
+                            sb_push_cstr(&sb, "__");
+                            sb_push_cstr(&sb, efn->u.func_def.name);
+                            char *mn = sb_take(&sb);
                             free(inst_sn);
                             if (!cg_gfunc_seen(ctx, mn))
                                 gfinst_push(ctx, efn, mn, pvals, np);
@@ -5694,10 +5640,10 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                 char *inst_sn = cg_mangle_inst(sn_raw,
                     base_unc->u.struct_.args, nargs);
                 const char *eff_sn = inst_sn ? inst_sn : sn_raw;
-                CgSB sb = {0};
-                cgb_puts(&sb, eff_sn);
-                cgb_puts(&sb, "__op_idx");
-                char *mn = cgb_take(&sb);
+                StrBuf sb = {0};
+                sb_push_cstr(&sb, eff_sn);
+                sb_push_cstr(&sb, "__op_idx");
+                char *mn = sb_take(&sb);
                 free(inst_sn);
                 if (!cg_gfunc_seen(ctx, mn))
                     gfinst_push(ctx, efn, mn, pvals, np);
@@ -6005,13 +5951,13 @@ static void cg_collect_gfunc_call(CgCtx *ctx, const AstNode *call) {
     }
 
     /* Build mangled name: funcname__T1__T2 */
-    CgSB sb = {0};
-    cgb_puts(&sb, fn->u.func_def.name);
+    StrBuf sb = {0};
+    sb_push_cstr(&sb, fn->u.func_def.name);
     for (size_t i = 0; i < np; i++) {
-        cgb_puts(&sb, "__");
+        sb_push_cstr(&sb, "__");
         cgb_mangle_type(&sb, pvals[i]);
     }
-    char *mn = cgb_take(&sb);
+    char *mn = sb_take(&sb);
 
     if (!cg_gfunc_seen(ctx, mn)) {
         gfinst_push(ctx, fn, mn, pvals, np);
@@ -6159,14 +6105,14 @@ static const char *cg_gfunc_mangle_for_call(CgCtx *ctx, const char *fname,
         }
     }
 
-    CgSB sb = {0};
-    cgb_puts(&sb, fname);
+    StrBuf sb = {0};
+    sb_push_cstr(&sb, fname);
     for (size_t i = 0; i < np; i++) {
-        cgb_puts(&sb, "__");
+        sb_push_cstr(&sb, "__");
         if (pvals[i]) cgb_mangle_type(&sb, pvals[i]);
-        else cgb_puts(&sb, "unk");
+        else sb_push_cstr(&sb, "unk");
     }
-    char *mn = cgb_take(&sb);
+    char *mn = sb_take(&sb);
     /* Store in ctx to avoid leaking -- we push it to gfn_names for lifetime */
     if (ctx->ngfn == ctx->gfn_cap) {
         ctx->gfn_cap = ctx->gfn_cap ? ctx->gfn_cap * 2 : 8;
@@ -8170,8 +8116,8 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
      * those specs land before Phase 3's user decls (Point, isize, etc.),
      * producing references to undeclared types.  We capture the spec
      * output and replay it after Phase 3. */
-    CgSB saved_out = ctx->out;
-    CgSB spec_buf  = {0};
+    StrBuf saved_out = ctx->out;
+    StrBuf spec_buf  = {0};
     ctx->out = spec_buf;
     for (size_t i = 0; i < file->u.file.decls.len; i++) {
         AstNode *raw_d = file->u.file.decls.data[i];
@@ -8205,13 +8151,13 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                                     if (!targs[j] || cg_type_has_params(targs[j])) all_ok = false;
                                 }
                                 if (all_ok) {
-                                    CgSB sb = {0};
-                                    cgb_puts(&sb, fn->u.func_def.name);
+                                    StrBuf sb = {0};
+                                    sb_push_cstr(&sb, fn->u.func_def.name);
                                     for (size_t j = 0; j < np; j++) {
-                                        cgb_puts(&sb, "__");
+                                        sb_push_cstr(&sb, "__");
                                         cgb_mangle_type(&sb, targs[j]);
                                     }
-                                    char *mn = cgb_take(&sb);
+                                    char *mn = sb_take(&sb);
                                     gfinst_push(ctx, fn, mn, targs, np);
                                     free(mn);
                                 }
@@ -8296,7 +8242,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
     /* End of Phase 2 collection. Pull the captured spec output back out
      * and restore ctx->out to the main buffer.  Specs will be emitted
      * after Phase 3 below, so they reference user decls already defined. */
-    CgSB captured_specs = ctx->out;
+    StrBuf captured_specs = ctx->out;
     ctx->out = saved_out;
 
     /* Phase 3a: emit non-function user decls (structs, typedefs, enums,
@@ -8450,7 +8396,7 @@ skip_td:;
      * that `HashMap__Point__int { HashMapEntry__Point__int* entries; ... }`
      * has all referenced types already declared. */
     if (captured_specs.buf && captured_specs.len > 0) {
-        cgb_puts(&ctx->out, captured_specs.buf);
+        sb_push_cstr(&ctx->out, captured_specs.buf);
     }
     free(captured_specs.buf);
     
@@ -8526,5 +8472,5 @@ skip_td:;
 
 char *cg_generate(CgCtx *ctx, const AstNode *file) {
     cg_file(ctx, file);
-    return cgb_take(&ctx->out);
+    return sb_take(&ctx->out);
 }

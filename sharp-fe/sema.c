@@ -5,40 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <stdarg.h>
-
-static Type *ty_peel_to_struct(Type *t) {
-    while (t) {
-        if (t->kind == TY_STRUCT) return t;
-        if (t->kind == TY_CONST)  { t = t->u.const_.base; continue; }
-        if (t->kind == TY_PTR)    { t = t->u.ptr.base; continue; }
-        if (t->kind == TY_ARRAY)  { t = t->u.array.base; continue; }
-        break;
-    }
-    return NULL;
-}
 
 static bool is_comparison_op(SharpTokKind op) {
     return op == STOK_EQEQ || op == STOK_BANGEQ ||
            op == STOK_LT   || op == STOK_GT ||
            op == STOK_LTEQ || op == STOK_GTEQ;
-}
-
-static Symbol *find_extension_method(Scope *file_scope,
-                                      const char *struct_name,
-                                      const char *method_name) {
-    if (!file_scope || !struct_name || !method_name) return NULL;
-    for (size_t i = 0; i < file_scope->nbuckets; i++) {
-        for (Symbol *s = file_scope->buckets[i]; s && s != (Symbol*)1; s = s->next) {
-            if (s->kind != SYM_FUNC || !s->decl) continue;
-            if (s->decl->kind != AST_FUNC_DEF) continue;
-            if (!s->decl->u.func_def.struct_name) continue;
-            if (strcmp(s->decl->u.func_def.struct_name, struct_name) != 0) continue;
-            if (s->decl->u.func_def.name && strcmp(s->decl->u.func_def.name, method_name) == 0)
-                return s;
-        }
-    }
-    return NULL;
 }
 
 /* =========================================================================
@@ -110,37 +81,6 @@ static const char *op_overload_name(SharpTokKind k);
 static bool recv_object_is_const(Type *t);
 static Type *sema_field_access_expr(SS *ss, AstNode *expr);
 static Type *sema_method_call_expr(SS *ss, AstNode *expr);
-
-/* =========================================================================
- * Diagnostic helpers
- * ====================================================================== */
-static void sema_diag(SS *ss, CppLoc loc, int level, const char *fmt, va_list ap) {
-    va_list ap2;
-    va_copy(ap2, ap);
-    int n = vsnprintf(NULL, 0, fmt, ap);
-    va_end(ap);
-    if (n < 0) n = 0;
-    char *msg = malloc((size_t)(n + 1));
-    if (!msg) abort();
-    vsnprintf(msg, (size_t)(n + 1), fmt, ap2);
-    va_end(ap2);
-    CppDiag d = { level, loc, msg };
-    fe_diag_push(ss->ctx->diags, d);
-}
-
-static void sema_err(SS *ss, CppLoc loc, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    sema_diag(ss, loc, CPP_DIAG_ERROR, fmt, ap);
-    va_end(ap);
-}
-
-static void sema_warn(SS *ss, CppLoc loc, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    sema_diag(ss, loc, CPP_DIAG_WARNING, fmt, ap);
-    va_end(ap);
-}
 
 /* =========================================================================
  * Type helpers
@@ -365,7 +305,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
     for (size_t i = 0; i < sizeof assigns / sizeof assigns[0]; i++) {
         if (op == assigns[i]) {
             if (!assign_compat(ts, lt, rt))
-                sema_err(ss, expr->loc,
+                FE_ERROR(ss->ctx->diags, expr->loc,
                     "incompatible types in assignment: cannot assign %s to %s",
                     ty_kind_name(rt->kind), ty_kind_name(lt->kind));
             return lt;
@@ -513,7 +453,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
 
             /* Struct found but no method or free-function operator. */
             if (ss_s && !ty_is_error(lt))
-                sema_err(ss, expr->loc,
+                FE_ERROR(ss->ctx->diags, expr->loc,
                     "operator '%s' not defined for struct type",
                     op_nm + 8); /* skip "operator" prefix */
             if (ss_s) return ty_error(ts);
@@ -549,7 +489,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
          * is still valid C; let cc verify the actual types. */
         if (!ty_is_error(lt) && !ty_is_error(rt) &&
             (!ty_is_scalar(lt) || !ty_is_scalar(rt)))
-            sema_err(ss, expr->loc, "comparison of non-scalar types");
+            FE_ERROR(ss->ctx->diags, expr->loc, "comparison of non-scalar types");
         return ty_int(ts);
     }
 
@@ -594,7 +534,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
     if (op == STOK_COMMA) return rt;
 
     if (!ty_is_error(lt) && !ty_is_error(rt))
-        sema_err(ss, expr->loc, "invalid operand types for binary operator");
+        FE_ERROR(ss->ctx->diags, expr->loc, "invalid operand types for binary operator");
     return ty_error(ts);
 }
 
@@ -664,7 +604,7 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
             }
         }
         if (!ty_is_arithmetic(ot))
-            sema_err(ss, expr->loc, "unary arithmetic on non-arithmetic type");
+            FE_ERROR(ss->ctx->diags, expr->loc, "unary arithmetic on non-arithmetic type");
         return ty_is_arithmetic(ot) ? ot : ty_int(ts);
     }
     if (op == STOK_AMP) {
@@ -682,14 +622,14 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
     }
     if (op == STOK_STAR) {
         if (!ty_is_pointer(ot)) {
-            sema_err(ss, expr->loc, "dereference of non-pointer");
+            FE_ERROR(ss->ctx->diags, expr->loc, "dereference of non-pointer");
             return ty_error(ts);
         }
         return ty_deref(ot);
     }
     if (op == STOK_PLUSPLUS || op == STOK_MINUSMINUS) {
         if (!ty_is_scalar(ot))
-            sema_err(ss, expr->loc, "++ / -- on non-scalar");
+            FE_ERROR(ss->ctx->diags, expr->loc, "++ / -- on non-scalar");
         return ot;
     }
     return ot;
@@ -965,7 +905,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
              * #define strdup(p) Curl_cstrdup(p)), the original name used as
              * an rvalue isn't found in scope.  void* lets cast expressions
              * like (FnType)strdup type-check; cc resolves the actual name. */
-            sema_warn(ss, expr->loc, "undefined name '%s'", name);
+            FE_WARNING(ss->ctx->diags, expr->loc, "undefined name '%s'", name);
             t = ty_ptr(ts, ty_void(ts));
         } else {
             AstNode *decl = sym->decl;
@@ -1072,7 +1012,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
             case SYM_BUILTIN:
             case SYM_TYPE:
                 /* Type names used as expressions are errors. */
-                sema_err(ss, expr->loc, "'%s' is a type, not a value", name);
+                FE_ERROR(ss->ctx->diags, expr->loc, "'%s' is a type, not a value", name);
                 t = ty_error(ts);
                 break;
             case SYM_FIELD: {
@@ -1100,7 +1040,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
     case AST_TERNARY: {
         Type *cond_t = sema_expr(ss, expr->u.ternary.cond);
         if (!ty_is_scalar(cond_t))
-            sema_err(ss, expr->loc, "ternary condition must be scalar");
+            FE_ERROR(ss->ctx->diags, expr->loc, "ternary condition must be scalar");
         Type *a = sema_expr(ss, expr->u.ternary.then_);
         Type *b = sema_expr(ss, expr->u.ternary.else_);
         if (ty_is_arithmetic(a) && ty_is_arithmetic(b))
@@ -1221,7 +1161,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                         t = sema_subst_for_struct(ts, base_t, t);
                 } else {
                     if (!ty_is_error(base_t))
-                        sema_err(ss, expr->loc, "subscript of non-pointer / non-indexable type");
+                        FE_ERROR(ss->ctx->diags, expr->loc, "subscript of non-pointer / non-indexable type");
                     t = ty_error(ts);
                 }
             }
@@ -1308,7 +1248,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                         msg = msgbuf;
                     }
                 }
-                sema_err(ss, expr->loc, "@static_assert: %s", msg);
+                FE_ERROR(ss->ctx->diags, expr->loc, "@static_assert: %s", msg);
             }
             /* If result == -1, condition is non-constant → no compile-time error. */
             t = ty_void(ts);
@@ -1332,7 +1272,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
             /* @type_name(T): returns const char*.  The string is a heap-
              * allocated mangled name; cg emits it as a literal. */
             if (expr->u.at_intrinsic.args.len != 1) {
-                sema_err(ss, expr->loc,
+                FE_ERROR(ss->ctx->diags, expr->loc,
                     "@type_name requires exactly 1 argument, got %zu",
                     expr->u.at_intrinsic.args.len);
                 t = ty_error(ts);
@@ -1348,7 +1288,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
             /* @to_cstr(expr): convert sp_str_t slice to NUL-terminated C string.
              * Requires exactly 1 argument. Returns const char*. */
             if (expr->u.at_intrinsic.args.len != 1) {
-                sema_err(ss, expr->loc,
+                FE_ERROR(ss->ctx->diags, expr->loc,
                     "@to_cstr requires exactly 1 argument, got %zu",
                     expr->u.at_intrinsic.args.len);
                 t = ty_error(ts);
@@ -1357,7 +1297,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                 t = ty_ptr(ts, ty_const(ts, ty_char(ts)));
             }
         } else {
-            sema_err(ss, expr->loc, "unknown @intrinsic '%s'", iname);
+            FE_ERROR(ss->ctx->diags, expr->loc, "unknown @intrinsic '%s'", iname);
             t = ty_error(ts);
         }
         break;
@@ -1492,7 +1432,7 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
         /* Type-check init vs declared type. */
         if (init_t && !ty_is_error(decl_type) && !ty_is_error(init_t)) {
             if (!assign_compat(ts, decl_type, init_t))
-                sema_err(ss, vd->loc,
+                FE_ERROR(ss->ctx->diags, vd->loc,
                     "cannot initialize '%s' with value of type '%s'",
                     ty_kind_name(decl_type->kind), ty_kind_name(init_t->kind));
         }
@@ -1505,12 +1445,12 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
         if (!ret) break; /* outside a function? */
         if (!stmt->u.return_.value) {
             if (!ty_is_void(ret))
-                sema_err(ss, stmt->loc,
+                FE_ERROR(ss->ctx->diags, stmt->loc,
                     "non-void function must return a value");
         } else {
             Type *vt = sema_expr(ss, stmt->u.return_.value);
             if (ty_is_void(ret))
-                sema_err(ss, stmt->loc,
+                FE_ERROR(ss->ctx->diags, stmt->loc,
                     "void function cannot return a value");
             else {
                 /* C 6.8.6.4: the value is converted as if by assignment
@@ -1521,7 +1461,7 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
                 Type *vt_uc  = ty_unconst(ts, vt);
                 if (!assign_compat(ts, ret_uc, vt_uc) &&
                     !ty_is_error(ret_uc) && !ty_is_error(vt_uc))
-                    sema_err(ss, stmt->loc,
+                    FE_ERROR(ss->ctx->diags, stmt->loc,
                         "return type mismatch: expected %s, got %s",
                         ty_kind_name(ret->kind), ty_kind_name(vt->kind));
             }
@@ -1562,7 +1502,7 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
             /* Runtime condition — check both branches as usual. */
             Type *ct = sema_expr(ss, cond);
             if (!ty_is_scalar(ct))
-                sema_err(ss, stmt->loc, "if condition must be scalar");
+                FE_ERROR(ss->ctx->diags, stmt->loc, "if condition must be scalar");
             sema_stmt(ss, stmt->u.if_.then_);
             sema_stmt(ss, stmt->u.if_.else_);
         }
@@ -1572,7 +1512,7 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
     case AST_WHILE: {
         Type *ct = sema_expr(ss, stmt->u.while_.cond);
         if (!ty_is_scalar(ct))
-            sema_err(ss, stmt->loc, "while condition must be scalar");
+            FE_ERROR(ss->ctx->diags, stmt->loc, "while condition must be scalar");
         sema_stmt(ss, stmt->u.while_.body);
         break;
     }
@@ -1584,7 +1524,7 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
         if (stmt->u.for_.cond) {
             Type *ct = sema_expr(&inner, stmt->u.for_.cond);
             if (!ty_is_scalar(ct))
-                sema_err(ss, stmt->loc, "for condition must be scalar");
+                FE_ERROR(ss->ctx->diags, stmt->loc, "for condition must be scalar");
         }
         if (stmt->u.for_.post) sema_expr(&inner, stmt->u.for_.post);
         sema_stmt(&inner, stmt->u.for_.body);
@@ -1595,7 +1535,7 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
         sema_stmt(ss, stmt->u.do_while.body);
         Type *ct = sema_expr(ss, stmt->u.do_while.cond);
         if (!ty_is_scalar(ct))
-            sema_err(ss, stmt->loc, "do-while condition must be scalar");
+            FE_ERROR(ss->ctx->diags, stmt->loc, "do-while condition must be scalar");
         break;
     }
 
@@ -1736,7 +1676,7 @@ static Type *sema_field_access_expr(SS *ss, AstNode *expr) {
     if (arrow) {
         Type *base = ty_unconst(ts, recv_t);
         if (!base || !ty_is_pointer(base)) {
-            sema_err(ss, expr->loc, "'->' requires pointer operand");
+            FE_ERROR(ss->ctx->diags, expr->loc, "'->' requires pointer operand");
             return ty_error(ts);
         }
     }
@@ -1763,7 +1703,7 @@ static Type *sema_field_access_expr(SS *ss, AstNode *expr) {
     Symbol *fsym = struct_member(ts, recv_t, field, ss->ctx->file_scope);
     if (!fsym) {
         if (!ty_is_error(recv_t))
-            sema_err(ss, expr->loc,
+            FE_ERROR(ss->ctx->diags, expr->loc,
                 "no member '%s' in struct", field);
         return ty_error(ts);
     }
@@ -1904,7 +1844,7 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
                     return ret_t;
                 }
             }
-            sema_err(ss, expr->loc,
+            FE_ERROR(ss->ctx->diags, expr->loc,
                 "no associated function '%s' in type '%s'", method, assoc_struct_name);
             return ty_error(ts);
         }
@@ -1935,7 +1875,7 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
     if (arrow) {
         Type *base = ty_unconst(ts, recv_t);
         if (!base || !ty_is_pointer(base)) {
-            sema_err(ss, expr->loc, "'->' requires pointer operand");
+            FE_ERROR(ss->ctx->diags, expr->loc, "'->' requires pointer operand");
             return ty_error(ts);
         }
     }
@@ -1967,7 +1907,7 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
             }
         }
         if (!ty_is_error(recv_t))
-            sema_err(ss, expr->loc,
+            FE_ERROR(ss->ctx->diags, expr->loc,
                 "no method '%s' in struct", method);
         return ty_error(ts);
     }
@@ -1978,7 +1918,7 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
     /* const receiver check. */
     bool is_const_recv = recv_object_is_const(recv_t);
     if (is_const_recv && !fn->u.func_def.is_const_method) {
-        sema_err(ss, expr->loc,
+        FE_ERROR(ss->ctx->diags, expr->loc,
             "cannot call non-const method '%s' on const receiver", method);
     }
 
@@ -2566,54 +2506,40 @@ static int eval_is_pointer(SS *ss, const AstNode *expr) {
  * string literal.  Mangling rules mirror cg.c's cgb_mangle_type (spec §
  * 名字改编). */
 
-/* Tiny growing buffer for the type mangler. */
-typedef struct { char *buf; size_t len; size_t cap; } TnSb;
-static void tn_putc(TnSb *sb, char c) {
-    if (sb->len + 2 > sb->cap) {
-        sb->cap = sb->cap ? sb->cap * 2 : 32;
-        sb->buf = realloc(sb->buf, sb->cap);
-        if (!sb->buf) abort();
-    }
-    sb->buf[sb->len++] = c;
-    sb->buf[sb->len] = '\0';
-}
-static void tn_puts(TnSb *sb, const char *s) {
-    while (*s) tn_putc(sb, *s++);
-}
-static void tn_mangle(TnSb *sb, const Type *t) {
-    if (!t) { tn_puts(sb, "void"); return; }
+static void tn_mangle(StrBuf *sb, const Type *t) {
+    if (!t) { sb_push_cstr(sb, "void"); return; }
     switch (t->kind) {
-    case TY_VOID:      tn_puts(sb, "void");    break;
-    case TY_BOOL:      tn_puts(sb, "bool");    break;
-    case TY_CHAR:      tn_puts(sb, "char");    break;
-    case TY_SHORT:     tn_puts(sb, "short");   break;
-    case TY_INT:       tn_puts(sb, "int");     break;
-    case TY_LONG:      tn_puts(sb, "long");    break;
-    case TY_LONGLONG:  tn_puts(sb, "llong");   break;
-    case TY_UCHAR:     tn_puts(sb, "uchar");   break;
-    case TY_USHORT:    tn_puts(sb, "ushort");  break;
-    case TY_UINT:      tn_puts(sb, "uint");    break;
-    case TY_ULONG:     tn_puts(sb, "ulong");   break;
-    case TY_ULONGLONG: tn_puts(sb, "ullong");  break;
-    case TY_FLOAT:     tn_puts(sb, "float");   break;
-    case TY_DOUBLE:    tn_puts(sb, "double");  break;
-    case TY_LONGDOUBLE:tn_puts(sb, "ldouble"); break;
-    case TY_PTR:   tn_putc(sb, 'P'); tn_mangle(sb, t->u.ptr.base);   break;
-    case TY_CONST: tn_putc(sb, 'c'); tn_mangle(sb, t->u.const_.base); break;
-    case TY_ARRAY: tn_mangle(sb, t->u.array.base); tn_putc(sb, 'a');  break;
-    case TY_FUNC:  tn_putc(sb, 'F'); tn_mangle(sb, t->u.func.ret);   break;
+    case TY_VOID:      sb_push_cstr(sb, "void");    break;
+    case TY_BOOL:      sb_push_cstr(sb, "bool");    break;
+    case TY_CHAR:      sb_push_cstr(sb, "char");    break;
+    case TY_SHORT:     sb_push_cstr(sb, "short");   break;
+    case TY_INT:       sb_push_cstr(sb, "int");     break;
+    case TY_LONG:      sb_push_cstr(sb, "long");    break;
+    case TY_LONGLONG:  sb_push_cstr(sb, "llong");   break;
+    case TY_UCHAR:     sb_push_cstr(sb, "uchar");   break;
+    case TY_USHORT:    sb_push_cstr(sb, "ushort");  break;
+    case TY_UINT:      sb_push_cstr(sb, "uint");    break;
+    case TY_ULONG:     sb_push_cstr(sb, "ulong");   break;
+    case TY_ULONGLONG: sb_push_cstr(sb, "ullong");  break;
+    case TY_FLOAT:     sb_push_cstr(sb, "float");   break;
+    case TY_DOUBLE:    sb_push_cstr(sb, "double");  break;
+    case TY_LONGDOUBLE:sb_push_cstr(sb, "ldouble"); break;
+    case TY_PTR:   sb_push_ch(sb, 'P'); tn_mangle(sb, t->u.ptr.base);   break;
+    case TY_CONST: sb_push_ch(sb, 'c'); tn_mangle(sb, t->u.const_.base); break;
+    case TY_ARRAY: tn_mangle(sb, t->u.array.base); sb_push_ch(sb, 'a');  break;
+    case TY_FUNC:  sb_push_ch(sb, 'F'); tn_mangle(sb, t->u.func.ret);   break;
     case TY_STRUCT:
-        tn_puts(sb, t->u.struct_.name);
+        sb_push_cstr(sb, t->u.struct_.name);
         for (size_t i = 0; i < t->u.struct_.nargs; i++) {
-            tn_puts(sb, "__");
+            sb_push_cstr(sb, "__");
             tn_mangle(sb, t->u.struct_.args[i]);
         }
         break;
-    case TY_PARAM: tn_puts(sb, t->u.param.name); break;
+    case TY_PARAM: sb_push_cstr(sb, t->u.param.name); break;
     default: {
         char tmp[16];
         snprintf(tmp, sizeof tmp, "T%d", (int)t->kind);
-        tn_puts(sb, tmp);
+        sb_push_cstr(sb, tmp);
         break;
     }
     }
@@ -2629,7 +2555,7 @@ static char *compute_type_name(SS *ss, const AstNode *expr) {
         if (r) memcpy(r, e, n);
         return r;
     }
-    TnSb sb = {0};
+    StrBuf sb = {0};
     tn_mangle(&sb, t);
     if (sb.buf) return sb.buf;
     char *r = malloc(1);

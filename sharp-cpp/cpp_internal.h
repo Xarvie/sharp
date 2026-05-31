@@ -143,12 +143,20 @@ static inline void sb_push(StrBuf *sb, const char *s, size_t n) {
 static inline void sb_push_cstr(StrBuf *sb, const char *s) {
     if (s) sb_push(sb, s, strlen(s));
 }
+static inline void sb_vprintf(StrBuf *sb, const char *fmt, va_list ap) {
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf(NULL, 0, fmt, ap2);
+    va_end(ap2);
+    if (n <= 0) return;
+    sb_grow(sb, (size_t)n);
+    vsnprintf(sb->buf + sb->len, (size_t)(n + 1), fmt, ap);
+    sb->len += (size_t)n;
+}
 static inline void sb_printf(StrBuf *sb, const char *fmt, ...) {
-    char tmp[4096];
     va_list ap; va_start(ap, fmt);
-    int n = vsnprintf(tmp, sizeof tmp, fmt, ap);
+    sb_vprintf(sb, fmt, ap);
     va_end(ap);
-    if (n > 0) sb_push(sb, tmp, (size_t)n < sizeof tmp ? (size_t)n : sizeof tmp - 1);
 }
 static inline void sb_free(StrBuf *sb) {
     free(sb->buf); sb->buf = NULL; sb->len = sb->cap = 0;

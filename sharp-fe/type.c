@@ -411,6 +411,18 @@ Type *ty_deref(const Type *t) {
     return NULL;
 }
 
+Type *ty_peel_to_struct(Type *t) {
+    while (t) {
+        if (t->kind == TY_STRUCT) return t;
+        if (t->kind == TY_CONST)  { t = t->u.const_.base; continue; }
+        if (t->kind == TY_PTR)    { t = t->u.ptr.base; continue; }
+        if (t->kind == TY_ARRAY)  { t = t->u.array.base; continue; }
+        if (t->kind == TY_ATOMIC) { t = t->u.atomic.base; continue; }
+        break;
+    }
+    return NULL;
+}
+
 /* =========================================================================
  * Name → primitive type
  * ====================================================================== */

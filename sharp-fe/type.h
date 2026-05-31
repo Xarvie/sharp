@@ -167,6 +167,10 @@ Type *ty_unconst(TyStore *ts, Type *t);
 /** Return the pointee type, or NULL if not a pointer. */
 Type *ty_deref(const Type *t);
 
+/** Peel through const/ptr/array/atomic wrappers to find the underlying
+ *  TY_STRUCT; returns NULL if no struct is found. */
+Type *ty_peel_to_struct(Type *t);
+
 /* -------------------------------------------------------------------------
  * Lookup: built-in type name → Type* (NULL if not a built-in name)
  * ---------------------------------------------------------------------- */

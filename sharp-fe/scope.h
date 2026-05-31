@@ -206,6 +206,12 @@ const char *sym_kind_name(SymKind k);
 /** Return a human-readable name for a ScopeKind. */
 const char *scope_kind_name(ScopeKind k);
 
+/** Find an extension method in a file scope by struct name and method name.
+ * Scans all buckets for a SYM_FUNC whose decl is an AST_FUNC_DEF with
+ * the given struct_name and method_name.  Returns the first match, or NULL. */
+Symbol *find_extension_method(Scope *file_scope, const char *struct_name,
+                              const char *method_name);
+
 #ifdef __cplusplus
 }
 #endif
