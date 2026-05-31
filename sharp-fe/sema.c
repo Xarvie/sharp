@@ -551,7 +551,9 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
          * Lookup order: (1) struct method operator-() (2) free operator-(T). */
         if (ot && (ot->kind == TY_STRUCT ||
                    (ot->kind == TY_CONST && ot->u.const_.base &&
-                    ot->u.const_.base->kind == TY_STRUCT))) {
+                    ot->u.const_.base->kind == TY_STRUCT) ||
+                   (ot->kind == TY_ATOMIC && ot->u.atomic.base &&
+                    ot->u.atomic.base->kind == TY_STRUCT))) {
             Type *ot_unc = ty_unconst(ts, ot);
             const char *op_nm = (op == STOK_MINUS) ? "operator-" : "operator+";
             /* (1) struct scope */
@@ -1655,12 +1657,13 @@ static Symbol *struct_member(TyStore *ts, Type *recv_type, const char *name,
  * "const B*" or "const B" — the object referred to is const. */
 static bool recv_object_is_const(Type *t) {
     if (!t) return false;
-    if (t->kind == TY_CONST) return true;  /* const B (value) */
-    /* B* const: pointer is const but object is not */
-    /* const B*: pointee is const */
+    if (t->kind == TY_CONST) return true;
+    if (t->kind == TY_ATOMIC && t->u.atomic.base &&
+        t->u.atomic.base->kind == TY_CONST) return true;
     if (t->kind == TY_PTR) {
         Type *base = t->u.ptr.base;
-        if (base && base->kind == TY_CONST) return true; /* const B* */
+        while (base && base->kind == TY_ATOMIC) base = base->u.atomic.base;
+        if (base && base->kind == TY_CONST) return true;
     }
     return false;
 }
@@ -2506,45 +2509,6 @@ static int eval_is_pointer(SS *ss, const AstNode *expr) {
  * string literal.  Mangling rules mirror cg.c's cgb_mangle_type (spec §
  * 名字改编). */
 
-static void tn_mangle(StrBuf *sb, const Type *t) {
-    if (!t) { sb_push_cstr(sb, "void"); return; }
-    switch (t->kind) {
-    case TY_VOID:      sb_push_cstr(sb, "void");    break;
-    case TY_BOOL:      sb_push_cstr(sb, "bool");    break;
-    case TY_CHAR:      sb_push_cstr(sb, "char");    break;
-    case TY_SHORT:     sb_push_cstr(sb, "short");   break;
-    case TY_INT:       sb_push_cstr(sb, "int");     break;
-    case TY_LONG:      sb_push_cstr(sb, "long");    break;
-    case TY_LONGLONG:  sb_push_cstr(sb, "llong");   break;
-    case TY_UCHAR:     sb_push_cstr(sb, "uchar");   break;
-    case TY_USHORT:    sb_push_cstr(sb, "ushort");  break;
-    case TY_UINT:      sb_push_cstr(sb, "uint");    break;
-    case TY_ULONG:     sb_push_cstr(sb, "ulong");   break;
-    case TY_ULONGLONG: sb_push_cstr(sb, "ullong");  break;
-    case TY_FLOAT:     sb_push_cstr(sb, "float");   break;
-    case TY_DOUBLE:    sb_push_cstr(sb, "double");  break;
-    case TY_LONGDOUBLE:sb_push_cstr(sb, "ldouble"); break;
-    case TY_PTR:   sb_push_ch(sb, 'P'); tn_mangle(sb, t->u.ptr.base);   break;
-    case TY_CONST: sb_push_ch(sb, 'c'); tn_mangle(sb, t->u.const_.base); break;
-    case TY_ARRAY: tn_mangle(sb, t->u.array.base); sb_push_ch(sb, 'a');  break;
-    case TY_FUNC:  sb_push_ch(sb, 'F'); tn_mangle(sb, t->u.func.ret);   break;
-    case TY_STRUCT:
-        sb_push_cstr(sb, t->u.struct_.name);
-        for (size_t i = 0; i < t->u.struct_.nargs; i++) {
-            sb_push_cstr(sb, "__");
-            tn_mangle(sb, t->u.struct_.args[i]);
-        }
-        break;
-    case TY_PARAM: sb_push_cstr(sb, t->u.param.name); break;
-    default: {
-        char tmp[16];
-        snprintf(tmp, sizeof tmp, "T%d", (int)t->kind);
-        sb_push_cstr(sb, tmp);
-        break;
-    }
-    }
-}
-
 static char *compute_type_name(SS *ss, const AstNode *expr) {
     if (!expr || expr->u.at_intrinsic.args.len < 1) return NULL;
     Type *t = resolve_intrinsic_type_arg(ss, expr->u.at_intrinsic.args.data[0]);
@@ -2556,7 +2520,7 @@ static char *compute_type_name(SS *ss, const AstNode *expr) {
         return r;
     }
     StrBuf sb = {0};
-    tn_mangle(&sb, t);
+    ty_mangle(&sb, t);
     if (sb.buf) return sb.buf;
     char *r = malloc(1);
     if (r) r[0] = '\0';

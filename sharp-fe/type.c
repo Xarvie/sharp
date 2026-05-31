@@ -1111,7 +1111,60 @@ void ty_print(const Type *t, FILE *fp) {
         break;
     }
 }
-/* close the default: */ 
+
+void ty_mangle(StrBuf *sb, const Type *t) {
+    if (!t) { sb_push_cstr(sb, "void"); return; }
+    switch (t->kind) {
+    case TY_VOID:      sb_push_cstr(sb, "void");    break;
+    case TY_BOOL:      sb_push_cstr(sb, "bool");    break;
+    case TY_CHAR:      sb_push_cstr(sb, "char");    break;
+    case TY_SHORT:     sb_push_cstr(sb, "short");   break;
+    case TY_INT:       sb_push_cstr(sb, "int");     break;
+    case TY_LONG:      sb_push_cstr(sb, "long");    break;
+    case TY_LONGLONG:  sb_push_cstr(sb, "llong");   break;
+    case TY_UCHAR:     sb_push_cstr(sb, "uchar");   break;
+    case TY_USHORT:    sb_push_cstr(sb, "ushort");  break;
+    case TY_UINT:      sb_push_cstr(sb, "uint");    break;
+    case TY_ULONG:     sb_push_cstr(sb, "ulong");   break;
+    case TY_ULONGLONG: sb_push_cstr(sb, "ullong");  break;
+    case TY_FLOAT:     sb_push_cstr(sb, "float");   break;
+    case TY_DOUBLE:    sb_push_cstr(sb, "double");  break;
+    case TY_LONGDOUBLE:sb_push_cstr(sb, "ldouble"); break;
+    case TY_PTR:    sb_push_ch(sb, 'P'); ty_mangle(sb, t->u.ptr.base);    break;
+    case TY_CONST:  sb_push_ch(sb, 'c'); ty_mangle(sb, t->u.const_.base); break;
+    case TY_ARRAY:  ty_mangle(sb, t->u.array.base); sb_push_ch(sb, 'a');  break;
+    case TY_FUNC:   sb_push_ch(sb, 'F'); ty_mangle(sb, t->u.func.ret);    break;
+    case TY_STRUCT:
+        sb_push_cstr(sb, t->u.struct_.name);
+        for (size_t i = 0; i < t->u.struct_.nargs; i++) {
+            sb_push_cstr(sb, "__");
+            ty_mangle(sb, t->u.struct_.args[i]);
+        }
+        break;
+    case TY_ENUM:
+        sb_push_ch(sb, 'E');
+        sb_push_cstr(sb, t->u.enum_.name);
+        break;
+    case TY_PARAM: sb_push_cstr(sb, t->u.param.name); break;
+    case TY_VECTOR:
+        sb_push_ch(sb, 'V');
+        ty_mangle(sb, t->u.vector.elem);
+        {
+            char tmp[16];
+            snprintf(tmp, sizeof tmp, "%d", t->u.vector.count);
+            sb_push_cstr(sb, tmp);
+        }
+        break;
+    default: {
+        char tmp[16];
+        snprintf(tmp, sizeof tmp, "T%d", (int)t->kind);
+        sb_push_cstr(sb, tmp);
+        break;
+    }
+    }
+}
+
+/* close the default:  */ 
 
 /* ── Generic type substitution ──────────────────────────────────────────── */
 Type *ty_subst(TyStore *ts, Type *t,

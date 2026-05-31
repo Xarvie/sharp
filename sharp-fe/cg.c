@@ -113,7 +113,6 @@ static void cg_const_expr(CgCtx *ctx, const AstNode *e); /* forward */
 
 /* Phase 11 forward declarations */
 static char *cg_mangle_inst(const char *sname, Type **args, size_t nargs);
-static void  cgb_mangle_type(StrBuf *sb, Type *t);
 static char *cg_mangle_type_str(Type *t);
 static void cg_type_from_ast(CgCtx *ctx, const AstNode *n);
 static void cg_emit_func_params_ast(CgCtx *ctx, const AstNode *fn_ast);
@@ -253,7 +252,7 @@ static bool cg_is_rvalue_struct(const AstNode *expr) {
     if (!expr) return false;
     Type *t = expr->sem_type;
     if (!t) return false;
-    if (t->kind == TY_CONST) t = t->u.const_.base;
+    t = ty_unconst(NULL, t);
     if (!t || t->kind != TY_STRUCT) return false;
     /* If it's not an lvalue, C forbids & on it. */
     return !is_lvalue(expr);
@@ -605,8 +604,9 @@ static void cg_type_from_ast(CgCtx *ctx, const AstNode *n) {
                     strncmp(check->u.struct_.name, "__anon_", 7) == 0) {
                     preserve_typedef = true; break;
                 }
-                if (check->kind == TY_PTR)   { check = check->u.ptr.base;    continue; }
-                if (check->kind == TY_CONST) { check = check->u.const_.base; continue; }
+                if (check->kind == TY_PTR)    { check = check->u.ptr.base;    continue; }
+                if (check->kind == TY_CONST)  { check = check->u.const_.base; continue; }
+                if (check->kind == TY_ATOMIC) { check = check->u.atomic.base; continue; }
                 break;
             }
         }
@@ -1415,6 +1415,10 @@ static Type *cg_resolve_type(CgCtx *ctx, Type *t) {
     if (t->kind == TY_CONST) {
         Type *base = cg_resolve_type(ctx, t->u.const_.base);
         return base == t->u.const_.base ? t : ty_const(ctx->ts, base);
+    }
+    if (t->kind == TY_ATOMIC) {
+        Type *base = cg_resolve_type(ctx, t->u.atomic.base);
+        return base == t->u.atomic.base ? t : ty_atomic(ctx->ts, base);
     }
     if (t->kind == TY_PARAM) {
         for (size_t i = 0; i < ctx->ngp; i++) {
@@ -3576,8 +3580,8 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
                 Type *arr_base = t->u.array.base;
                 /* Peel const layers to check for error base */
                 const Type *peek = arr_base;
-                while (peek && peek->kind == TY_CONST)
-                    peek = peek->u.const_.base;
+                while (peek && (peek->kind == TY_CONST || peek->kind == TY_ATOMIC))
+                    peek = ty_unconst(NULL, peek);
                 if (peek && ty_is_error(peek) && vd->u.var_decl.type) {
                     const AstNode *ast_base = vd->u.var_decl.type;
                     while (ast_base && ast_base->kind == AST_TYPE_ARRAY)
@@ -4849,55 +4853,11 @@ static void cg_struct(CgCtx *ctx, const AstNode *sd) {
  * Phase 11: Generic monomorphization
  * ====================================================================== */
 
-/* Append the mangled suffix for a Type to a StrBuf. */
-static void cgb_mangle_type(StrBuf *sb, Type *t) {
-    if (!t) { sb_push_cstr(sb, "void"); return; }
-    switch (t->kind) {
-    case TY_VOID:      sb_push_cstr(sb, "void");   break;
-    case TY_BOOL:      sb_push_cstr(sb, "bool");   break;
-    case TY_CHAR:      sb_push_cstr(sb, "char");   break;
-    case TY_SHORT:     sb_push_cstr(sb, "short");  break;
-    case TY_INT:       sb_push_cstr(sb, "int");    break;
-    case TY_LONG:      sb_push_cstr(sb, "long");   break;
-    case TY_LONGLONG:  sb_push_cstr(sb, "llong");  break;
-    case TY_UCHAR:     sb_push_cstr(sb, "uchar");  break;
-    case TY_USHORT:    sb_push_cstr(sb, "ushort"); break;
-    case TY_UINT:      sb_push_cstr(sb, "uint");   break;
-    case TY_ULONG:     sb_push_cstr(sb, "ulong");  break;
-    case TY_ULONGLONG: sb_push_cstr(sb, "ullong"); break;
-    case TY_FLOAT:     sb_push_cstr(sb, "float");  break;
-    case TY_DOUBLE:    sb_push_cstr(sb, "double"); break;
-    case TY_LONGDOUBLE:sb_push_cstr(sb, "ldouble");break;
-    case TY_PTR:   sb_push_cstr(sb, "P"); cgb_mangle_type(sb, t->u.ptr.base); break;
-    case TY_CONST: sb_push_cstr(sb, "c"); cgb_mangle_type(sb, t->u.const_.base); break;
-    case TY_ARRAY: cgb_mangle_type(sb, t->u.array.base); sb_push_cstr(sb, "a"); break;
-    case TY_FUNC:  sb_push_cstr(sb, "F"); cgb_mangle_type(sb, t->u.func.ret); break;
-    case TY_STRUCT:
-        sb_push_cstr(sb, t->u.struct_.name);
-        for (size_t i = 0; i < t->u.struct_.nargs; i++) {
-            sb_push_cstr(sb, "__");
-            cgb_mangle_type(sb, t->u.struct_.args[i]);
-        }
-        break;
-    case TY_ENUM:
-        sb_push_cstr(sb, "E");
-        sb_push_cstr(sb, t->u.enum_.name);
-        break;
-    case TY_PARAM: sb_push_cstr(sb, t->u.param.name); break;
-    case TY_VECTOR:
-        sb_push_cstr(sb, "V");
-        cgb_mangle_type(sb, t->u.vector.elem);
-        sb_printf(sb, "%d", t->u.vector.count);
-        break;
-    default:       sb_printf(sb, "T%d", t->kind); break;
-    }
-}
-
 /* Mangle a Type* to a malloc'd string (used for operator overloading
  * name construction where we need the full type, not just the kind). */
 static char *cg_mangle_type_str(Type *t) {
     StrBuf sb = {0};
-    cgb_mangle_type(&sb, t);
+    ty_mangle(&sb, t);
     return sb_take(&sb);
 }
 
@@ -4906,7 +4866,7 @@ static char *cg_mangle_inst(const char *sname, Type **args, size_t nargs) {
     sb_push_cstr(&sb, sname);
     for (size_t i = 0; i < nargs; i++) {
         sb_push_cstr(&sb, "__");
-        cgb_mangle_type(&sb, args[i]);
+        ty_mangle(&sb, args[i]);
     }
     return sb_take(&sb);
 }
@@ -5749,6 +5709,10 @@ static void infer_ty_params(const char **pnames, Type **pvals, size_t np,
         infer_ty_params(pnames, pvals, np, formal->u.const_.base, actual);
         return;
     }
+    if (formal->kind == TY_ATOMIC) {
+        infer_ty_params(pnames, pvals, np, formal->u.atomic.base, actual);
+        return;
+    }
     /* Struct: match generic args */
     if (formal->kind == TY_STRUCT && actual->kind == TY_STRUCT &&
         formal->u.struct_.nargs == actual->u.struct_.nargs) {
@@ -5955,7 +5919,7 @@ static void cg_collect_gfunc_call(CgCtx *ctx, const AstNode *call) {
     sb_push_cstr(&sb, fn->u.func_def.name);
     for (size_t i = 0; i < np; i++) {
         sb_push_cstr(&sb, "__");
-        cgb_mangle_type(&sb, pvals[i]);
+        ty_mangle(&sb, pvals[i]);
     }
     char *mn = sb_take(&sb);
 
@@ -6109,7 +6073,7 @@ static const char *cg_gfunc_mangle_for_call(CgCtx *ctx, const char *fname,
     sb_push_cstr(&sb, fname);
     for (size_t i = 0; i < np; i++) {
         sb_push_cstr(&sb, "__");
-        if (pvals[i]) cgb_mangle_type(&sb, pvals[i]);
+        if (pvals[i]) ty_mangle(&sb, pvals[i]);
         else sb_push_cstr(&sb, "unk");
     }
     char *mn = sb_take(&sb);
@@ -8155,7 +8119,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                                     sb_push_cstr(&sb, fn->u.func_def.name);
                                     for (size_t j = 0; j < np; j++) {
                                         sb_push_cstr(&sb, "__");
-                                        cgb_mangle_type(&sb, targs[j]);
+                                        ty_mangle(&sb, targs[j]);
                                     }
                                     char *mn = sb_take(&sb);
                                     gfinst_push(ctx, fn, mn, targs, np);

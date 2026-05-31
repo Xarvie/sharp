@@ -196,6 +196,7 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
  * ---------------------------------------------------------------------- */
 const char *ty_kind_name(TyKind k);
 void        ty_print(const Type *t, FILE *fp);
+void        ty_mangle(StrBuf *sb, const Type *t);
 
 #ifdef __cplusplus
 }
