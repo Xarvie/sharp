@@ -2242,9 +2242,6 @@ static AstNode *splice_placeholder(AstNode *root, AstNode *ph, AstNode *replacem
     return root;
 }
 
-/* Forward decl — used by direct-declarator's function-suffix path. */
-static void parse_param_list_inner(PS *ps, AstVec *params);
-
 /* Decide whether `(` at the current position opens a sub-declarator
  * (e.g. `int (*p)(int)`, `int (foo)(int)`) or a parameter list
  * (e.g. `int f(int)`).
@@ -3120,6 +3117,18 @@ static AstNode *parse_array_suffix(PS *ps, AstNode *inner_ty) {
  * the rest are pushed to ps->pending_decls and drained by the caller.
  * If `stmt_wrap` is true, VAR_DECL nodes are wrapped in AST_DECL_STMT.
  * ====================================================================== */
+static void mark_transparent_union_by_name(PS *ps, const char *name) {
+    for (size_t i = 0; i < ps->pending_decls.len; i++) {
+        AstNode *pd = ps->pending_decls.data[i];
+        if (pd && pd->kind == AST_STRUCT_DEF &&
+            pd->u.struct_def.is_union && pd->u.struct_def.name &&
+            strcmp(pd->u.struct_def.name, name) == 0) {
+            pd->u.struct_def.is_transparent_union = true;
+            break;
+        }
+    }
+}
+
 static AstNode *parse_init_declarator_list(PS *ps, const DeclSpecs *ds, bool stmt_wrap) {
     AstNode *first_node = NULL;
     bool     is_first   = true;
@@ -3208,17 +3217,7 @@ static AstNode *parse_init_declarator_list(PS *ps, const DeclSpecs *ds, bool stm
              * — mark the anonymous union so ty_from_ast returns first member. */
             if (var_gcc_attrs && strstr(var_gcc_attrs, "transparent_union") &&
                 vty && vty->kind == AST_TYPE_NAME && vty->u.type_name.name) {
-                /* Find the matching struct_def in pending_decls */
-                const char *uname = vty->u.type_name.name;
-                for (size_t _tui = 0; _tui < ps->pending_decls.len; _tui++) {
-                    AstNode *_pd = ps->pending_decls.data[_tui];
-                    if (_pd && _pd->kind == AST_STRUCT_DEF &&
-                        _pd->u.struct_def.is_union && _pd->u.struct_def.name &&
-                        strcmp(_pd->u.struct_def.name, uname) == 0) {
-                        _pd->u.struct_def.is_transparent_union = true;
-                        break;
-                    }
-                }
+                mark_transparent_union_by_name(ps, vty->u.type_name.name);
             }
             /* `typedef T NAME;` — produce AST_TYPEDEF_DECL.  Any pointer
              * / array / function suffix has already been folded into vty
@@ -4250,26 +4249,14 @@ static AstNode *parse_top_decl(PS *ps) {
                           (ps->last_decl_attr ? ps->last_decl_attr : NULL);
         if (_ta && strstr(_ta, "transparent_union")) {
             AstNode *target = full_ty;
-            /* Peel const/restrict/pointer wrappers to reach the struct def */
             while (target && (target->kind == AST_TYPE_CONST ||
                               target->kind == AST_TYPE_PTR ||
                               target->kind == AST_TYPE_VOLATILE))
-                target = target->u.type_const.base;  /* all share same union offset */
+                target = target->u.type_const.base;
             if (target && target->kind == AST_STRUCT_DEF && target->u.struct_def.is_union)
                 target->u.struct_def.is_transparent_union = true;
-            /* Also check by name if target is AST_TYPE_NAME */
-            if (full_ty && full_ty->kind == AST_TYPE_NAME) {
-                /* Look up in pending_decls for the struct node */
-                for (size_t _pi = 0; _pi < ps->pending_decls.len; _pi++) {
-                    AstNode *pd = ps->pending_decls.data[_pi];
-                    if (pd && pd->kind == AST_STRUCT_DEF && pd->u.struct_def.is_union &&
-                        pd->u.struct_def.name && full_ty->u.type_name.name &&
-                        strcmp(pd->u.struct_def.name, full_ty->u.type_name.name) == 0) {
-                        pd->u.struct_def.is_transparent_union = true;
-                        break;
-                    }
-                }
-            }
+            if (full_ty && full_ty->kind == AST_TYPE_NAME)
+                mark_transparent_union_by_name(ps, full_ty->u.type_name.name);
         }
         free(top_gcc_attrs); /* typedefs don't propagate gcc_attrs to cg_func */
         /* capture declarator-suffix attribute for the typedef node. */

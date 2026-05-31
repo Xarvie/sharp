@@ -38,6 +38,7 @@
 /* Forward declaration */
 static void fix_token_ptrs(CppState *st, const char *old_buf);
 static PPTok make_file_tok(CppState *st, CppLoc loc);
+static PPTok make_line_tok(CppState *st, CppLoc loc);
 static PPTok make_counter_tok(CppState *st, CppLoc loc);
 
 
@@ -1140,13 +1141,8 @@ static void handle_if(CppState *st, TokList *line, CppLoc loc) {
         if (n->tok.kind != CPPT_IDENT) continue;
         const char *sp = pptok_spell(&n->tok);
         if (strcmp(sp, "__LINE__") == 0) {
-            char buf[32];
-            snprintf(buf, sizeof buf, "%d", loc.line);
-            PPTok lt = {0};
-            lt.kind = CPPT_PP_NUMBER;
-            lt.loc  = n->tok.loc;
+            PPTok lt = make_line_tok(st, loc);
             lt.leading_ws = n->tok.leading_ws;
-            sb_push_cstr(&lt.spell, buf);
             pptok_free(&n->tok);
             n->tok = lt;
         } else if (strcmp(sp, "__FILE__") == 0) {
