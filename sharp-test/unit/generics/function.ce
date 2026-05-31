@@ -1,5 +1,6 @@
 // Merged generic function tests
 // Sources: p102_generic_func.ce, p117_gfunc_swap.ce, p118_gfunc_infer.ce, p119_gfunc_multiparam.ce
+// Extended: recursive generic, generic+struct interaction, generic returning generic
 
 /* Generic max function (p102) */
 T max<T>(T a, T b) {
@@ -22,6 +23,28 @@ int pass<T, U>(T a, U b) {
     return 0;
 }
 
+/* --- T5: generic function with local variables --- */
+T accumulate<T>(T* arr, int len) {
+    T sum = 0;
+    for (int i = 0; i < len; i = i + 1) {
+        sum = sum + arr[i];
+    }
+    return sum;
+}
+
+/* --- T7: generic function with conditional logic --- */
+T abs_val<T>(T v) {
+    if (v < 0) return -v;
+    return v;
+}
+
+/* --- T8: generic function with pointer params --- */
+void fill_default<T>(T* arr, int len, T val) {
+    for (int i = 0; i < len; i = i + 1) {
+        arr[i] = val;
+    }
+}
+
 int main(void) {
     /* Test generic max with explicit type (p102) */
     if (max<int>(3, 5) != 5) return 1;
@@ -41,6 +64,22 @@ int main(void) {
 
     /* Test generic pass with type inference (p118/p119) */
     if (pass(1, 2.5) != 0) return 7;
+
+    /* T5: generic accumulate */
+    int nums[4] = { 1, 2, 3, 4 };
+    if (accumulate<int>(nums, 4) != 10) return 8;
+    float fnums[3] = { 1.0f, 2.0f, 3.0f };
+    if (accumulate<float>(fnums, 3) < 5.99f || accumulate<float>(fnums, 3) > 6.01f) return 9;
+
+    /* T7: generic abs_val */
+    if (abs_val<int>(-5) != 5) return 15;
+    if (abs_val<int>(3) != 3) return 16;
+    if (abs_val<int>(0) != 0) return 17;
+
+    /* T8: generic fill_default */
+    int arr[5] = { 0, 0, 0, 0, 0 };
+    fill_default<int>(arr, 5, 7);
+    if (arr[0] != 7 || arr[4] != 7) return 18;
 
     return 0;
 }

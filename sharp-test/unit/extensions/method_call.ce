@@ -1,5 +1,5 @@
 // 来源: p240_ext_method_call.ce
-// 扩展方法调用: this.* 模式
+// 扩展方法调用: this.* 模式 + 链式调用 + 递归扩展方法 + 泛型扩展方法
 
 #include <stdbool.h>
 
@@ -16,7 +16,51 @@ bool Rect.is_square(this) const {
     return this->w == this->h;
 }
 
+// --- T4: extension method calling another extension (chain) ---
+int Rect.double_area(this) const {
+    return this->area() * 2;
+}
+
+bool Rect.is_tall(this) const {
+    return this->h > this->w;
+}
+
+// --- T5: extension method that modifies this then calls another method ---
+void Rect.scale(this, int factor) {
+    this->w = this->w * factor;
+    this->h = this->h * factor;
+}
+
+int Rect.scaled_area(this, int factor) {
+    this->scale(factor);
+    return this->area();
+}
+
+// --- T6: recursive extension method ---
+long fib_helper(long n) {
+    if (n <= 1) return n;
+    return fib_helper(n - 1) + fib_helper(n - 2);
+}
+
+class Seq {
+    long offset;
+};
+long Seq.nth_fib(this, long n) const {
+    return this->offset + fib_helper(n);
+}
+
+// --- T7: generic extension method ---
+class Wrapper<T> {
+    T inner;
+}
+T Wrapper<T>.get(this) { return this->inner; }
+void Wrapper<T>.set(this, T v) { this->inner = v; }
+T Wrapper<T>.transform(this, T(*fn)(T)) { return fn(this->inner); }
+
+int double_it(int x) { return x * 2; }
+
 int main() {
+    // T1-T3: original tests
     Rect r;
     r.w = 5; r.h = 7;
     int a = r.area();
@@ -30,6 +74,31 @@ int main() {
     if (!s2.is_square()) return 4;
     int a2 = s2.area();
     if (a2 != 100) return 5;
+
+    // T4: extension calling extension
+    if (r.double_area() != 70) return 6;
+    if (r.is_tall() != true) return 7;
+    if (s2.is_tall() != false) return 8;
+
+    // T5: modify then call
+    Rect r2;
+    r2.w = 3; r2.h = 4;
+    int sa = r2.scaled_area(2);
+    if (sa != 48) return 9;
+    if (r2.w != 6 || r2.h != 8) return 10;
+
+    // T6: recursive extension
+    Seq seq;
+    seq.offset = 100;
+    if (seq.nth_fib(5) != 105) return 11;
+    if (seq.nth_fib(0) != 100) return 12;
+
+    // T7: generic extension method
+    Wrapper<int> wi;
+    wi.set(21);
+    if (wi.get() != 21) return 13;
+    int doubled = wi.transform(double_it);
+    if (doubled != 42) return 14;
 
     return 0;
 }

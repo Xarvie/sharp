@@ -1,5 +1,5 @@
 // 来源: p143_export_inst.ce, p144_export_only.ce, p145_export_gfunc.ce
-// export 关键字: 泛型函数实例化标记
+// export 关键字: 泛型函数实例化标记 + 泛型struct extern + 多实例化
 
 void swap<T>(T* a, T* b) {
     T tmp = *a;
@@ -8,6 +8,29 @@ void swap<T>(T* a, T* b) {
 }
 extern swap<int>;
 extern swap<float>;
+
+// --- T4: generic struct with extern instantiation ---
+class Box<T> {
+    T value;
+}
+T Box<T>.get(this) { return this->value; }
+void Box<T>.set(this, T v) { this->value = v; }
+extern Box<int>;
+extern Box<double>;
+
+// --- T5: generic function returning generic type ---
+T identity<T>(T x) { return x; }
+extern identity<int>;
+extern identity<float>;
+
+// --- T6: generic function with two type params ---
+void fill<T, U>(T* dst, T val, U count) {
+    for (U i = 0; i < count; i = i + 1) {
+        dst[i] = val;
+    }
+}
+extern fill<int, int>;
+extern fill<float, int>;
 
 int test_export_int() {
     int x = 5, y = 10;
@@ -32,5 +55,28 @@ int main(void) {
     if (r2 != 0) return r2;
     int r3 = test_export_gfunc();
     if (r3 != 0) return r3;
+
+    // T4: generic struct extern instantiation
+    Box<int> bi;
+    bi.set(42);
+    if (bi.get() != 42) return 4;
+
+    Box<double> bd;
+    bd.set(3.14);
+    if (bd.get() < 3.13 || bd.get() > 3.15) return 5;
+
+    // T5: generic identity function
+    if (identity<int>(7) != 7) return 6;
+    if (identity<float>(2.5f) < 2.49f || identity<float>(2.5f) > 2.51f) return 7;
+
+    // T6: generic fill function
+    int arr[4];
+    fill<int, int>(arr, 99, 4);
+    if (arr[0] != 99 || arr[3] != 99) return 8;
+
+    float farr[3];
+    fill<float, int>(farr, 1.0f, 3);
+    if (farr[0] < 0.99f || farr[2] > 1.01f) return 9;
+
     return 0;
 }

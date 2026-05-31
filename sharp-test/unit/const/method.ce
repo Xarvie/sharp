@@ -1,5 +1,5 @@
 // 来源: p141_const_method.ce, p147_const_nonconst_mix.ce, p148_const_method_params.ce
-// const 方法测试: 基础 const 方法 + const/non-const 混合 + const 方法参数
+// const 方法测试: 基础 + 混合 + 参数 + 链式调用 + const对象调用 + 嵌套const
 
 // === p141: const 方法基础 (size vs push) ===
 class Vec {
@@ -26,6 +26,34 @@ void BBox.move(this, long dx, long dy) { this->x = this->x + dx; this->y = this-
 long BBox.at_x(this) const { return this->x; }
 long BBox.at_y(this) const { return this->y; }
 
+// --- T4: const method returning *this for chaining ---
+class Builder {
+    int val;
+};
+Builder* Builder.set(this, int v) { this->val = v; return this; }
+int Builder.build(this) const { return this->val; }
+
+// --- T5: const object calling const methods ---
+class Sensor {
+    int reading;
+    int id;
+};
+int Sensor.reading_val(this) const { return this->reading; }
+int Sensor.ident(this) const { return this->id; }
+void Sensor.calibrate(this, int r) { this->reading = r; }
+
+// --- T6: nested const method calling another const method ---
+class Line {
+    long x1, y1, x2, y2;
+};
+long Line.dx(this) const { return this->x2 - this->x1; }
+long Line.dy(this) const { return this->y2 - this->y1; }
+long Line.length_sq(this) const {
+    long ddx = this->dx();
+    long ddy = this->dy();
+    return ddx * ddx + ddy * ddy;
+}
+
 int main(void) {
     // --- p141 ---
     int arr[10];
@@ -49,6 +77,26 @@ int main(void) {
     long sx = b.at_x();       // 4
     long sy = b.at_y();       // 6
     if (a + sx + sy != 210) return 3;
+
+    // --- T4: const method chaining ---
+    Builder bd;
+    bd.val = 0;
+    bd.set(77);
+    int built = bd.build();
+    if (built != 77) return 4;
+
+    // --- T5: const object calling const methods ---
+    Sensor sen;
+    sen.reading = 42;
+    sen.id = 7;
+    const Sensor* cs = &sen;
+    if (cs->reading_val() != 42) return 5;
+    if (cs->ident() != 7) return 6;
+
+    // --- T6: nested const method calling const method ---
+    Line ln;
+    ln.x1 = 0; ln.y1 = 0; ln.x2 = 3; ln.y2 = 4;
+    if (ln.length_sq() != 25) return 7;
 
     return 0;
 }

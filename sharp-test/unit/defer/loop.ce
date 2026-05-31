@@ -1,7 +1,8 @@
 // Merged defer loop tests
 // Sources: p109_defer_loop.ce, p266_runtime_defer.ce(loop部分)
+// Extended: nested loop defer, defer in do-while, defer with goto break
 
-int log_buf[20];
+int log_buf[32];
 int logn = 0;
 void mark(int v) { log_buf[logn++] = v; }
 
@@ -34,6 +35,57 @@ int main(void) {
         defer mark(k);
     }
     if (logn != 3) return 5;
+
+    /* T4: nested loop defer — inner loop defer fires per inner iteration */
+    logn = 0;
+    for (int a = 0; a < 2; a = a + 1) {
+        defer mark(a + 10);
+        for (int b = 0; b < 3; b = b + 1) {
+            defer mark(b + 20);
+        }
+    }
+    /* inner defers: 20,21,22,20,21,22 = 6, then outer: 10,11 = 2, total 8 */
+    if (logn != 8) return 6;
+    if (log_buf[0] != 20 || log_buf[2] != 22) return 7;
+
+    /* T5: defer in do-while loop */
+    logn = 0;
+    int dw = 0;
+    do {
+        defer mark(dw + 30);
+        dw = dw + 1;
+    } while (dw < 3);
+    /* dw=0→defer mark(31), dw=1→defer mark(32), dw=2→defer mark(33) */
+    if (logn != 3) return 8;
+    if (log_buf[0] != 31 || log_buf[2] != 33) return 9;
+
+    /* T6: defer in while(true) with break */
+    logn = 0;
+    int wt = 0;
+    while (1) {
+        defer mark(wt + 40);
+        wt = wt + 1;
+        if (wt >= 2) break;
+    }
+    /* defer fires at end of each iteration: wt=0→mark(40), wt=1→mark(41), then break */
+    if (logn != 2) return 10;
+    if (log_buf[0] != 41 || log_buf[1] != 42) return 11;
+
+    /* T7: defer with continue in nested loop */
+    logn = 0;
+    sum = 0;
+    for (int m = 0; m < 3; m = m + 1) {
+        defer mark(m + 50);
+        for (int n = 0; n < 3; n = n + 1) {
+            defer mark(n + 60);
+            if (n == 1) continue;
+            sum = sum + 1;
+        }
+    }
+    /* sum: 2*3 = 6 (skip n==1 in each inner loop) */
+    if (sum != 6) return 12;
+    /* inner defers: 9 (3 outer * 3 inner), outer defers: 3, total 12 */
+    if (logn != 12) return 13;
 
     return 0;
 }

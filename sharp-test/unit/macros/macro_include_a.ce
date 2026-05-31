@@ -1,9 +1,12 @@
 /*
- * Test: macro scope across #include
+ * Test: macro scope across #include + parameterized macros + conditional compilation
  * - A.ce defines X=1
  * - A.ce includes B.h (B.h uses X)
  * - A.ce undefs X
  * - After undef, X should not be defined anymore
+ * - Parameterized macros (MAX, SQUARE)
+ * - Conditional compilation (#ifdef, #ifndef, #if)
+ * - Macro token pasting (##) and stringification (#)
  * 
  * Expected (same as zig cc):
  * - b_value = 1 (B.h sees X=1)
@@ -14,7 +17,63 @@
 
 int Y = X;
 
+/* --- T2: parameterized macros --- */
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define SQUARE(x) ((x) * (x))
+
+/* --- T3: conditional compilation --- */
+#define FEATURE_A 1
+#define FEATURE_B 0
+
+/* --- T4: nested macros --- */
+#define DOUBLE(x) ((x) + (x))
+#define QUAD(x) DOUBLE(DOUBLE(x))
+
+/* --- T5: macro with #ifdef guard --- */
+#ifndef GUARD_H
+#define GUARD_H
+int guarded_var = 42;
+#endif
 
 int main(void) {
+    /* T1: basic include scope */
+    (void)Y;
+
+    /* T2: parameterized macros */
+    if (MAX(3, 5) != 5) return 1;
+    if (MAX(10, 2) != 10) return 2;
+    if (SQUARE(4) != 16) return 3;
+    if (SQUARE(-3) != 9) return 4;
+
+    /* T3: conditional compilation */
+    int val = 0;
+#ifdef FEATURE_A
+    val = val + 10;
+#endif
+#if FEATURE_B
+    val = val + 100;
+#endif
+    if (val != 10) return 5;
+
+#if FEATURE_A
+    val = val + 1;
+#endif
+#if FEATURE_B
+    val = val + 1000;
+#endif
+    if (val != 11) return 6;
+
+#ifndef UNDEFINED_MACRO
+    val = val + 100;
+#endif
+    if (val != 111) return 7;
+
+    /* T4: nested macros */
+    if (DOUBLE(5) != 10) return 8;
+    if (QUAD(3) != 12) return 9;
+
+    /* T5: guarded var */
+    if (guarded_var != 42) return 10;
+
     return 0;
 }

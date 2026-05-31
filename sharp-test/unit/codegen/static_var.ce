@@ -1,5 +1,5 @@
 // 来源: p277_static_var.ce
-// C代码生成: static变量与初始化
+// C代码生成: static变量与初始化 — 基础 + 递归 + 多static + static const + static pointer
 
 int g_counter = 0;
 
@@ -13,21 +13,76 @@ void increment_global() {
     g_counter = g_counter + 1;
 }
 
+// --- T4: static in recursive function ---
+int fib_memo(int n) {
+    static int call_count = 0;
+    call_count = call_count + 1;
+    if (n <= 1) return n;
+    return fib_memo(n - 1) + fib_memo(n - 2);
+}
+
+// --- T5: multiple static locals in one function ---
+int multi_static() {
+    static int a = 1;
+    static int b = 10;
+    static int c = 100;
+    a = a + 1;
+    b = b + 10;
+    c = c + 100;
+    return a + b + c;
+}
+
+// --- T6: static pointer variable ---
+int* get_static_ptr() {
+    static int value = 0;
+    value = value + 10;
+    return &value;
+}
+
+// --- T7: static const variable ---
+int use_const_static() {
+    static const int limit = 42;
+    return limit;
+}
+
 int main() {
-    // Global variable
+    // T1: Global variable
     g_counter = 0;
     increment_global();
     increment_global();
     increment_global();
     if (g_counter != 3) return 1;
 
-    // Static local
+    // T2: Static local
     int a = get_next();  /* 101 */
     int b = get_next();  /* 102 */
     int c = get_next();  /* 103 */
     if (a != 101) return 2;
     if (b != 102) return 3;
     if (c != 103) return 4;
+
+    // T4: static in recursive function
+    int r = fib_memo(5);
+    if (r != 5) return 5;
+
+    // T5: multiple static locals
+    int m1 = multi_static();  /* 2+20+200 = 222 */
+    int m2 = multi_static();  /* 3+30+300 = 333 */
+    int m3 = multi_static();  /* 4+40+400 = 444 */
+    if (m1 != 222) return 6;
+    if (m2 != 333) return 7;
+    if (m3 != 444) return 8;
+
+    // T6: static pointer
+    int* p1 = get_static_ptr();
+    int* p2 = get_static_ptr();
+    if (*p1 != 20) return 9;
+    if (*p2 != 20) return 10;
+    if (p1 != p2) return 11;
+
+    // T7: static const
+    if (use_const_static() != 42) return 12;
+    if (use_const_static() != 42) return 13;
 
     return 0;
 }

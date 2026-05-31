@@ -1,5 +1,9 @@
 // 来源: p259_goto.ce
-// goto 和 label 控制流
+// goto 和 label 控制流: 基础 + goto+defer交互 + 嵌套跳转 + switch中goto
+
+int log_buf[32];
+int logn = 0;
+void mark(int v) { log_buf[logn++] = v; }
 
 int main() {
     // T1: forward goto
@@ -42,6 +46,60 @@ L_B:
     goto L_C;
 L_C:
     if (val != 1) return 4;
+
+    // T5: goto out of nested scope
+    {
+        int nested = 10;
+        {
+            int deep = 20;
+            if (deep == 20) goto L_out_nested;
+            nested = 99;
+        }
+    }
+L_out_nested:
+    val = 55;
+    if (val != 55) return 5;
+
+    // T6: goto out of nested scope (no defer crossing)
+    {
+        int nested = 10;
+        {
+            int deep = 20;
+            if (deep == 20) goto L_out_nested2;
+            nested = 99;
+        }
+    }
+L_out_nested2:
+    val = 66;
+    if (val != 66) return 6;
+
+    // T7: goto in switch
+    int sw_val = 0;
+    switch (2) {
+        case 1: sw_val = 10; break;
+        case 2: sw_val = 20; goto L_after_switch;
+        case 3: sw_val = 30; break;
+    }
+    sw_val = sw_val + 100;
+L_after_switch:
+    if (sw_val != 20) return 8;
+
+    // T8: computed jump pattern (state machine via goto)
+    int state = 0;
+    int result = 0;
+L_state_0:
+    result = result + 1;
+    state = 1;
+    goto L_state_1;
+L_state_1:
+    result = result + 10;
+    state = 2;
+    goto L_state_2;
+L_state_2:
+    result = result + 100;
+    goto L_state_done;
+L_state_done:
+    if (result != 111) return 9;
 
     return 0;
 }

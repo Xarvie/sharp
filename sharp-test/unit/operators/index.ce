@@ -1,15 +1,80 @@
 // 来源: p112_operator_index.ce
-// operator[] 重载测试
+// operator[] 重载测试: 基础读取 + 写入 + const重载 + 泛型operator[]
 
+// --- T1: basic read-only operator[] ---
 class Arr {
     int data[4];
 }
 int Arr.operator[](this, int i) { return this->data[i]; }
 
+// --- T2: operator[] with write via pointer return ---
+class IntVec {
+    int data[8];
+    int len;
+}
+IntVec IntVec.new() { IntVec v; v.len = 0; return v; }
+void IntVec.push(this, int val) { this->data[this->len] = val; this->len = this->len + 1; }
+int* IntVec.operator[](this, int i) { return &this->data[i]; }
+
+// --- T3: const operator[] returning value (read) vs non-const returning pointer (write) ---
+class Buffer {
+    int buf[16];
+    int sz;
+}
+Buffer Buffer.new() { Buffer b; b.sz = 0; return b; }
+void Buffer.append(this, int v) { this->buf[this->sz] = v; this->sz = this->sz + 1; }
+int Buffer.operator[](this, int i) const { return this->buf[i]; }
+int* Buffer.mut_at(this, int i) { return &this->buf[i]; }
+
+// --- T4: generic operator[] ---
+class Stack<T> {
+    T items[16];
+    int top;
+}
+Stack<T> Stack<T>.new() { Stack<T> s; s.top = 0; return s; }
+void Stack<T>.push(this, T val) { this->items[this->top] = val; this->top = this->top + 1; }
+T Stack<T>.operator[](this, int i) { return this->items[i]; }
+
 int main(void) {
+    // T1: basic read
     Arr a;
     a.data[0] = 10; a.data[1] = 20; a.data[2] = 30; a.data[3] = 40;
     if (a[0] != 10) return 1;
     if (a[2] != 30) return 2;
+
+    // T2: write through pointer-returning operator[]
+    IntVec iv = IntVec.new();
+    iv.push(100);
+    iv.push(200);
+    iv.push(300);
+    if (*iv[0] != 100) return 3;
+    if (*iv[1] != 200) return 4;
+    *iv[1] = 999;
+    if (*iv[1] != 999) return 5;
+
+    // T3: const vs non-const
+    Buffer buf = Buffer.new();
+    buf.append(11);
+    buf.append(22);
+    buf.append(33);
+    if (buf[0] != 11) return 6;
+    if (buf[2] != 33) return 7;
+    *buf.mut_at(1) = 88;
+    if (buf[1] != 88) return 8;
+
+    // T4: generic operator[]
+    Stack<int> si = Stack<int>.new();
+    si.push(7);
+    si.push(14);
+    si.push(21);
+    if (si[0] != 7) return 9;
+    if (si[2] != 21) return 10;
+
+    Stack<float> sf = Stack<float>.new();
+    sf.push(1.5f);
+    sf.push(2.5f);
+    if (sf[0] < 1.49f || sf[0] > 1.51f) return 11;
+    if (sf[1] < 2.49f || sf[1] > 2.51f) return 12;
+
     return 0;
 }

@@ -1,7 +1,6 @@
 // 来源: p158_module_basic.ce
 // 模块导入基础测试: 函数/结构体/类型定义/枚举 跨文件引用
 
-#include <stdio.h>
 #include "basic.he"
 
 int main(void) {
@@ -26,9 +25,6 @@ int main(void) {
 
     enum Color c = RED;
     enum Status s = DEFAULT_STATUS;
-
-    printf("sum=%d product=%.2f\n", sum, product);
-    printf("pt=(%.1f,%.1f) rect=%.1fx%.1f\n", pt.x, pt.y, rect.width, rect.height);
 
     if (sum != 30) return 1;
     if (product < 11.99f || product > 12.01f) return 2;
