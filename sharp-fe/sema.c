@@ -12,6 +12,12 @@ static bool is_comparison_op(SharpTokKind op) {
            op == STOK_LTEQ || op == STOK_GTEQ;
 }
 
+static bool is_gcc_builtin_name(const char *name) {
+    return strncmp(name, "__builtin_", 10) == 0 ||
+           strncmp(name, "__atomic_",   9) == 0 ||
+           strncmp(name, "__sync_",     7) == 0;
+}
+
 /* =========================================================================
  * Internal state
  * ====================================================================== */
@@ -64,6 +70,31 @@ static Type *sema_subst_for_struct(TyStore *ts, Type *recv_base, Type *t) {
     Type *r = ty_subst(ts, t, pnames, recv_base->u.struct_.args, np);
     free(pnames);
     return r;
+}
+
+static Type *sema_subst_generic_receiver(SS *ss, const AstNode *recv_node, Type *ret_t) {
+    if (!recv_node || recv_node->kind != AST_CAST ||
+        recv_node->u.cast.operand != NULL ||
+        !recv_node->u.cast.type ||
+        recv_node->u.cast.type->kind != AST_TYPE_GENERIC)
+        return ret_t;
+    const AstNode *gt = recv_node->u.cast.type;
+    const char *gname = gt->u.type_generic.name;
+    size_t ngt = gt->u.type_generic.args.len;
+    Type **gtargs = ngt ? malloc(ngt * sizeof *gtargs) : NULL;
+    if (gtargs || ngt == 0) {
+        TyStore *ts = ss->ctx->ts;
+        for (size_t gi = 0; gi < ngt; gi++)
+            gtargs[gi] = ty_from_ast(ts, gt->u.type_generic.args.data[gi], ss->scope, NULL);
+        Symbol *gsym = scope_lookup_type(ss->scope, gname);
+        AstNode *gdecl = (gsym && gsym->decl && gsym->decl->kind == AST_STRUCT_DEF)
+                         ? gsym->decl : NULL;
+        Type *concrete = ty_struct_type(ts, gname, gtargs, ngt, gdecl);
+        if (concrete && !ty_is_error(concrete))
+            ret_t = sema_subst_for_struct(ts, concrete, ret_t);
+        free(gtargs);
+    }
+    return ret_t;
 }
 
 /* Phase 7 forward declarations */
@@ -662,9 +693,7 @@ static Type *sema_call(SS *ss, AstNode *expr) {
      * causes spurious "if condition must be scalar" errors. */
     if (expr->u.call.callee->kind == AST_IDENT) {
         const char *bname = expr->u.call.callee->u.ident.name;
-        if (strncmp(bname, "__builtin_", 10) == 0 ||
-            strncmp(bname, "__atomic_",   9) == 0 ||
-            strncmp(bname, "__sync_",     7) == 0) {
+        if (is_gcc_builtin_name(bname)) {
             return ty_int(ts);
         }
         /* POSIX/GNU extension functions not declared without
@@ -850,9 +879,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                 t = ty_int(ts);
                 break;
             }
-            if (strncmp(name, "__builtin_", 10) == 0 ||
-                strncmp(name, "__atomic_",   9) == 0 ||
-                strncmp(name, "__sync_",     7) == 0) {
+            if (is_gcc_builtin_name(name)) {
                 /* __builtin_convertvector returns a vector type.
                  * The captured text is "__builtin_convertvector(expr, TypeName)".
                  * Try to resolve the TypeName to a TY_VECTOR for proper type
@@ -1778,34 +1805,7 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
                      * for self-referential generic types. */
                     Scope *mscope = fn->sem_scope ? fn->sem_scope : ss->scope;
                     Type *ret_t = ty_from_ast(ts, fn->u.func_def.ret_type, mscope, NULL);
-                    if (recv_node && recv_node->kind == AST_CAST &&
-                        recv_node->u.cast.operand == NULL &&
-                        recv_node->u.cast.type &&
-                        recv_node->u.cast.type->kind == AST_TYPE_GENERIC) {
-                        /* Build a synthetic concrete TY_STRUCT for the generic
-                         * receiver (e.g. Stack<int>) so sema_subst_for_struct
-                         * can map T→int in the return type.
-                         * We resolve each type arg independently (they are simple
-                         * types like int/float, not self-referential). */
-                        const AstNode *gt = recv_node->u.cast.type;
-                        const char *gname = gt->u.type_generic.name;
-                        size_t ngt = gt->u.type_generic.args.len;
-                        Type **gtargs = ngt ? malloc(ngt * sizeof *gtargs) : NULL;
-                        if (gtargs || ngt == 0) {
-                            for (size_t gi = 0; gi < ngt; gi++)
-                                gtargs[gi] = ty_from_ast(ts,
-                                    gt->u.type_generic.args.data[gi], ss->scope, NULL);
-                            Symbol *gsym = scope_lookup_type(ss->scope, gname);
-                            AstNode *gdecl = (gsym && gsym->decl &&
-                                              gsym->decl->kind == AST_STRUCT_DEF)
-                                             ? gsym->decl : NULL;
-                            Type *concrete = ty_struct_type(ts, gname,
-                                                            gtargs, ngt, gdecl);
-                            if (concrete && !ty_is_error(concrete))
-                                ret_t = sema_subst_for_struct(ts, concrete, ret_t);
-                            free(gtargs);
-                        }
-                    }
+                    ret_t = sema_subst_generic_receiver(ss, recv_node, ret_t);
                     return ret_t;
                 }
             }
@@ -1818,31 +1818,7 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
                     AstNode *efn = esym->decl;
                     Scope *mscope = efn->sem_scope ? efn->sem_scope : ss->scope;
                     Type *ret_t = ty_from_ast(ts, efn->u.func_def.ret_type, mscope, NULL);
-                    /* For generic receivers (e.g. Wrapper<int>.of(255)),
-                     * substitute T→int in return type. */
-                    if (recv_node && recv_node->kind == AST_CAST &&
-                        recv_node->u.cast.operand == NULL &&
-                        recv_node->u.cast.type &&
-                        recv_node->u.cast.type->kind == AST_TYPE_GENERIC) {
-                        const AstNode *gt = recv_node->u.cast.type;
-                        const char *gname = gt->u.type_generic.name;
-                        size_t ngt = gt->u.type_generic.args.len;
-                        Type **gtargs = ngt ? malloc(ngt * sizeof *gtargs) : NULL;
-                        if (gtargs || ngt == 0) {
-                            for (size_t gi = 0; gi < ngt; gi++)
-                                gtargs[gi] = ty_from_ast(ts,
-                                    gt->u.type_generic.args.data[gi], ss->scope, NULL);
-                            Symbol *gsym = scope_lookup_type(ss->scope, gname);
-                            AstNode *gdecl = (gsym && gsym->decl &&
-                                              gsym->decl->kind == AST_STRUCT_DEF)
-                                             ? gsym->decl : NULL;
-                            Type *concrete = ty_struct_type(ts, gname,
-                                                            gtargs, ngt, gdecl);
-                            if (concrete && !ty_is_error(concrete))
-                                ret_t = sema_subst_for_struct(ts, concrete, ret_t);
-                            free(gtargs);
-                        }
-                    }
+                    ret_t = sema_subst_generic_receiver(ss, recv_node, ret_t);
                     return ret_t;
                 }
             }
@@ -2291,6 +2267,23 @@ static const char *op_tok_to_sym(SharpTokKind k) {
     }
 }
 
+typedef struct { Scope *scope; Type *type; int status; } StructArgResult;
+
+static StructArgResult resolve_struct_type_arg(SS *ss, const AstNode *ty_arg) {
+    StructArgResult r = {NULL, NULL, 0};
+    Type *t = resolve_intrinsic_type_arg(ss, ty_arg);
+    if (!t || ty_is_error(t)) return r;
+    if (ty_contains_param(t)) { r.status = -1; return r; }
+    t = ty_strip_cvq(ss->ctx->ts, t);
+    if (!t || t->kind != TY_STRUCT) return r;
+    AstNode *sd = t->u.struct_.decl;
+    if (!sd || !sd->sem_scope) return r;
+    r.scope = (Scope*)sd->sem_scope;
+    r.type = t;
+    r.status = 1;
+    return r;
+}
+
 /* Evaluate @has_operator(TypeName, op_symbol) in current scope.
  * Returns 1 if the named struct has the operator, 0 otherwise.
  *
@@ -2307,15 +2300,10 @@ static int eval_has_operator(SS *ss, const AstNode *expr) {
     /* v0.13: use the unified type resolver so substitution applies.
      * This lets @has_operator(T, +) in a generic template body re-eval
      * to the concrete struct at instantiation time. */
-    Type *t = resolve_intrinsic_type_arg(ss, type_arg);
-    if (!t || ty_is_error(t)) return 0;
-    /* Defer to instantiation when T still has TY_PARAM. */
-    if (ty_contains_param(t)) return -1;
-    t = ty_strip_cvq(ss->ctx->ts, t);
-    if (!t || t->kind != TY_STRUCT) return 0;
-    AstNode *sd = t->u.struct_.decl;
-    if (!sd || !sd->sem_scope) return 0;
-    Scope *ss_s = (Scope*)sd->sem_scope;
+    StructArgResult sr = resolve_struct_type_arg(ss, type_arg);
+    if (sr.status == -1) return -1;
+    if (!sr.scope) return 0;
+    Scope *ss_s = sr.scope;
 
     /* Extract the operator symbol string from the parsed op_arg node. */
     char opname[64] = {0};
@@ -2346,13 +2334,13 @@ static int eval_has_operator(SS *ss, const AstNode *expr) {
 
     /* Extension method fallback: search file scope for operator defined
      * as top-level `RetType StructName.operator+(params) { ... }`. */
-    if (ss->ctx && ss->ctx->file_scope && t->u.struct_.name) {
+    if (ss->ctx && ss->ctx->file_scope && sr.type->u.struct_.name) {
         /* Walk up to SCOPE_FILE — during specialization re-eval,
          * ctx->file_scope may be a function-local scope. */
         Scope *fs = ss->ctx->file_scope;
         while (fs && fs->kind != SCOPE_FILE) fs = fs->parent;
         if (fs) {
-            Symbol *es = find_extension_method(fs, t->u.struct_.name, opname);
+            Symbol *es = find_extension_method(fs, sr.type->u.struct_.name, opname);
             if (es && es->decl && es->decl->kind == AST_FUNC_DEF &&
                 es->decl->u.func_def.is_operator)
                 return 1;
@@ -2426,15 +2414,10 @@ static int eval_has_method(SS *ss, const AstNode *expr) {
     AstNode *nm_arg = expr->u.at_intrinsic.args.data[1];
     if (nm_arg->kind != AST_IDENT) return -1;
 
-    Type *t = resolve_intrinsic_type_arg(ss, ty_arg);
-    if (!t || ty_is_error(t)) return 0;
-    /* v0.13: defer to instantiation time when T still has TY_PARAM. */
-    if (ty_contains_param(t)) return -1;
-    t = ty_strip_cvq(ss->ctx->ts, t);
-    if (!t || t->kind != TY_STRUCT) return 0;
-    AstNode *sd = t->u.struct_.decl;
-    if (!sd || !sd->sem_scope) return 0;
-    Scope *st_scope = (Scope*)sd->sem_scope;
+    StructArgResult sr = resolve_struct_type_arg(ss, ty_arg);
+    if (sr.status == -1) return -1;
+    if (!sr.scope) return 0;
+    Scope *st_scope = sr.scope;
 
     const char *name = nm_arg->u.ident.name;
     if (!name) return 0;
@@ -2446,14 +2429,14 @@ static int eval_has_method(SS *ss, const AstNode *expr) {
 
     /* Extension method fallback: search file scope for SYM_FUNC with
      * matching struct_name (non-operator, non-static methods). */
-    if (!sym && ss->ctx && ss->ctx->file_scope && t->u.struct_.name) {
+    if (!sym && ss->ctx && ss->ctx->file_scope && sr.type->u.struct_.name) {
         /* Walk up to the SCOPE_FILE scope — during generic
          * specialization, ss->ctx->file_scope may be a function-local
          * scope rather than the actual file scope. */
         Scope *fs = ss->ctx->file_scope;
         while (fs && fs->kind != SCOPE_FILE) fs = fs->parent;
         if (fs) {
-            Symbol *es = find_extension_method(fs, t->u.struct_.name, name);
+            Symbol *es = find_extension_method(fs, sr.type->u.struct_.name, name);
             if (es && es->decl && es->decl->kind == AST_FUNC_DEF)
                 return es->decl->u.func_def.has_receiver ? 1 : 0;
         }
@@ -2468,14 +2451,10 @@ static int eval_has_field(SS *ss, const AstNode *expr) {
     AstNode *nm_arg = expr->u.at_intrinsic.args.data[1];
     if (nm_arg->kind != AST_IDENT) return -1;
 
-    Type *t = resolve_intrinsic_type_arg(ss, ty_arg);
-    if (!t || ty_is_error(t)) return 0;
-    if (ty_contains_param(t)) return -1;
-    t = ty_strip_cvq(ss->ctx->ts, t);
-    if (!t || t->kind != TY_STRUCT) return 0;
-    AstNode *sd = t->u.struct_.decl;
-    if (!sd || !sd->sem_scope) return 0;
-    Scope *st_scope = (Scope*)sd->sem_scope;
+    StructArgResult sr = resolve_struct_type_arg(ss, ty_arg);
+    if (sr.status == -1) return -1;
+    if (!sr.scope) return 0;
+    Scope *st_scope = sr.scope;
 
     const char *name = nm_arg->u.ident.name;
     if (!name) return 0;

@@ -2719,12 +2719,8 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
         if (sn) {
             const char *effective_sn = sn;
             /* For generic struct instances, mangle the struct name. */
-            Type *base_recv = recv_t;
-            base_recv = ty_unconst(ctx->ts, base_recv);
-            if (base_recv && base_recv->kind == TY_PTR)   base_recv = base_recv->u.ptr.base;
-            base_recv = ty_unconst(ctx->ts, base_recv);
-            char *mangled_sn = (base_recv && base_recv->kind == TY_STRUCT &&
-                                base_recv->u.struct_.nargs > 0)
+            Type *base_recv = ty_peel_to_struct(recv_t);
+            char *mangled_sn = (base_recv && base_recv->u.struct_.nargs > 0)
                 ? cg_mangle_inst(effective_sn, base_recv->u.struct_.args, base_recv->u.struct_.nargs)
                 : NULL;
             cg_method_name(ctx, mangled_sn ? mangled_sn : effective_sn,
@@ -5245,11 +5241,8 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
          * e.g. s.push(42) where s: Stack<int> → instantiate Stack.push<T=int> */
         Type *recv_t = expr->u.method_call.recv->sem_type;
         if (recv_t) {
-            Type *st = recv_t;
-            st = ty_unconst(ctx->ts, st);
-            if (st && st->kind == TY_PTR)   st = st->u.ptr.base;
-            st = ty_unconst(ctx->ts, st);
-            if (st && st->kind == TY_STRUCT && st->u.struct_.name) {
+            Type *st = ty_peel_to_struct(recv_t);
+            if (st && st->u.struct_.name) {
                 const char *sname = st->u.struct_.name;
                 const char *mname = expr->u.method_call.method;
                 if (ctx->file_scope) {
