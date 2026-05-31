@@ -39,6 +39,23 @@ typedef struct MacroDef {
     struct MacroDef *next;       /* hash-chain                               */
 } MacroDef;
 
+static void macro_def_free(MacroDef *m) {
+    if (!m) return;
+    for (int i = 0; i < m->nparams; i++) free(m->param_names[i]);
+    free(m->param_names);
+    tl_free(&m->body);
+    free(m);
+}
+
+static int find_param_idx(const MacroDef *def, const char *name) {
+    for (int i = 0; i < def->nparams; i++)
+        if (strcmp(def->param_names[i], name) == 0)
+            return i;
+    if (def->is_variadic && strcmp(name, "__VA_ARGS__") == 0)
+        return def->nparams;
+    return -1;
+}
+
 /* =========================================================================
  * MacroTable
  * ====================================================================== */
@@ -192,10 +209,7 @@ void macro_define(MacroTable *t, MacroDef *def, CppDiagArr *diags, CppLoc loc) {
         CppDiag d = { CPP_DIAG_ERROR, loc, cpp_xstrdup(msg) };
         da_push(diags, d);
         /* Don't install — free it. */
-        for (int i = 0; i < def->nparams; i++) free(def->param_names[i]);
-        free(def->param_names);
-        tl_free(&def->body);
-        free(def);
+        macro_def_free(def);
         return;
     }
 
@@ -212,10 +226,7 @@ void macro_define(MacroTable *t, MacroDef *def, CppDiagArr *diags, CppLoc loc) {
             def->next = old->next;
             *pp = def;
             /* Free old */
-            for (int i = 0; i < old->nparams; i++) free(old->param_names[i]);
-            free(old->param_names);
-            tl_free(&old->body);
-            free(old);
+            macro_def_free(old);
             return;
         }
     }
@@ -229,10 +240,7 @@ void macro_undef(MacroTable *t, const char *name) {
         if (strcmp((*pp)->name, name) == 0) {
             MacroDef *m = *pp;
             *pp = m->next;
-            for (int i = 0; i < m->nparams; i++) free(m->param_names[i]);
-            free(m->param_names);
-            tl_free(&m->body);
-            free(m);
+            macro_def_free(m);
             return;
         }
     }
@@ -243,10 +251,7 @@ void macro_table_free(MacroTable *t) {
         MacroDef *m = t->buckets[i];
         while (m) {
             MacroDef *nx = m->next;
-            for (int j = 0; j < m->nparams; j++) free(m->param_names[j]);
-            free(m->param_names);
-            tl_free(&m->body);
-            free(m);
+            macro_def_free(m);
             m = nx;
         }
     }
@@ -382,10 +387,7 @@ MacroDef *macro_parse_define(const TokList *line_toks,
         if (n->tok.kind == CPPT_NEWLINE) break;
 
         /* Deep-copy the token into the body list. */
-        PPTok copy = n->tok;
-        copy.spell = (StrBuf){0};
-        sb_push_cstr(&copy.spell, pptok_spell(&n->tok));
-        tl_append(&def->body, copy);
+        tl_append_copy(&def->body, &n->tok);
 
         if (n == last_real) break;
     }
@@ -658,9 +660,7 @@ static PPTok token_paste(const PPTok *lhs, const PPTok *rhs,
             diag_push(diags, d);
         }
         /* Return LHS unchanged, signal caller to also append RHS. */
-        PPTok result = *lhs;
-        result.spell = (StrBuf){0};
-        sb_push_cstr(&result.spell, pptok_spell(lhs));
+        PPTok result = pptok_copy(lhs);
         if (out_keep_rhs) *out_keep_rhs = true;
         return result;
     }
@@ -704,9 +704,7 @@ static PPTok token_paste(const PPTok *lhs, const PPTok *rhs,
             diag_push(diags, d);
         }
         pptok_free(&result);
-        result = *lhs;
-        result.spell = (StrBuf){0};
-        sb_push_cstr(&result.spell, pptok_spell(lhs));
+        result = pptok_copy(lhs);
     }
     pptok_free(&check);
     reader_free(rd);
@@ -761,10 +759,7 @@ static TokList collect_arg(TokNode **cur_p, bool *ended_with_comma) {
             }
         }
         /* Copy token into arg */
-        PPTok copy = n->tok;
-        copy.spell = (StrBuf){0};
-        sb_push_cstr(&copy.spell, pptok_spell(&n->tok));
-        tl_append(&arg, copy);
+        tl_append_copy(&arg, &n->tok);
     }
     /* Ran off the end without hitting `,` or `)`.  Leave *cur_p
      * pointing at the last consumed token rather than NULL — this
@@ -798,14 +793,7 @@ static TokList substitute(const MacroDef *def,
             TokNode *nx = n->next;
             while (nx && nx->tok.kind == CPPT_SPACE) nx = nx->next;
             if (nx && nx->tok.kind == CPPT_IDENT) {
-                /* Find parameter index */
-                int idx = -1;
-                for (int i = 0; i < def->nparams; i++)
-                    if (strcmp(def->param_names[i], pptok_spell(&nx->tok)) == 0)
-                        { idx = i; break; }
-                if (idx < 0 && def->is_variadic &&
-                    strcmp(pptok_spell(&nx->tok), "__VA_ARGS__") == 0)
-                    idx = def->nparams;
+                int idx = find_param_idx(def, pptok_spell(&nx->tok));
 
                 int max_idx = def->nparams + (def->is_variadic ? 1 : 0);
                 if (idx >= 0 && idx < max_idx) {
@@ -819,11 +807,7 @@ static TokList substitute(const MacroDef *def,
 
         /* --- Parameter reference --- */
         if (t->kind == CPPT_IDENT && def->is_func) {
-            int idx = -1;
-            for (int i = 0; i < def->nparams; i++)
-                if (strcmp(def->param_names[i], sp) == 0) { idx = i; break; }
-            if (idx < 0 && def->is_variadic && strcmp(sp, "__VA_ARGS__") == 0)
-                idx = def->nparams;
+            int idx = find_param_idx(def, sp);
 
             int max_idx = def->nparams + (def->is_variadic ? 1 : 0);
             if (idx >= 0 && idx < max_idx) {
@@ -847,9 +831,7 @@ static TokList substitute(const MacroDef *def,
                     /* Paste the unexpanded argument */
                     bool first_arg = true;
                     for (TokNode *an = args[idx].head; an; an = an->next) {
-                        PPTok copy = an->tok;
-                        copy.spell = (StrBuf){0};
-                        sb_push_cstr(&copy.spell, pptok_spell(&an->tok));
+                        PPTok copy = pptok_copy(&an->tok);
                         if (first_arg) {
                             copy.leading_ws = (t->leading_ws && t->leading_ws[0])
                                 ? t->leading_ws : NULL;
@@ -862,10 +844,7 @@ static TokList substitute(const MacroDef *def,
                     TokList expanded = {0};
                     TokList arg_copy = {0};
                     for (TokNode *an = args[idx].head; an; an = an->next) {
-                        PPTok copy = an->tok;
-                        copy.spell = (StrBuf){0};
-                        sb_push_cstr(&copy.spell, pptok_spell(&an->tok));
-                        tl_append(&arg_copy, copy);
+                        tl_append_copy(&arg_copy, &an->tok);
                     }
                     expand_list(&arg_copy, mt, interns, diags, &expanded);
                     tl_free(&arg_copy);
@@ -923,9 +902,7 @@ static TokList substitute(const MacroDef *def,
                      * and produced "[ 1]".  The fix overrides instead. */
                     bool first_arg = true;
                     for (TokNode *en = expanded.head; en; en = en->next) {
-                        PPTok copy = en->tok;
-                        copy.spell = (StrBuf){0};
-                        sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
+                        PPTok copy = pptok_copy(&en->tok);
                         if (first_arg) {
                             copy.leading_ws = (t->leading_ws && t->leading_ws[0])
                                 ? t->leading_ws : NULL;
@@ -1023,10 +1000,7 @@ static TokList substitute(const MacroDef *def,
                     /* Just append the VA arg tokens; lhs (comma) is
                      * already in result.tail.                         */
                     for (TokNode *an = args[param_idx].head; an; an = an->next) {
-                        PPTok copy = an->tok;
-                        copy.spell = (StrBuf){0};
-                        sb_push_cstr(&copy.spell, pptok_spell(&an->tok));
-                        tl_append(&result, copy);
+                        tl_append_copy(&result, &an->tok);
                     }
                     n = nx->next;
                     continue;
@@ -1067,9 +1041,7 @@ static TokList substitute(const MacroDef *def,
                         continue;
                     }
                     PPTok first = first_node->tok;
-                    PPTok rhs_first = first;
-                    rhs_first.spell = (StrBuf){0};
-                    sb_push_cstr(&rhs_first.spell, pptok_spell(&first));
+                    PPTok rhs_first = pptok_copy(&first);
 
                     bool keep_rhs = false;
                     PPTok pasted = token_paste(&lhs, &rhs_first, NULL,
@@ -1079,20 +1051,14 @@ static TokList substitute(const MacroDef *def,
                     /* Phase 5: if Sharp's @-token guard fired, also append
                      * the RHS verbatim so it survives to the output stream. */
                     if (keep_rhs) {
-                        PPTok rhs_copy = rhs_first;
-                        rhs_copy.spell = (StrBuf){0};
-                        sb_push_cstr(&rhs_copy.spell, pptok_spell(&rhs_first));
-                        tl_append(&result, rhs_copy);
+                        tl_append_copy(&result, &rhs_first);
                     }
                     pptok_free(&rhs_first);
 
                     /* Append remaining argument tokens (skip past the
                      * first non-whitespace one we used).               */
                     for (TokNode *an = first_node->next; an; an = an->next) {
-                        PPTok copy = an->tok;
-                        copy.spell = (StrBuf){0};
-                        sb_push_cstr(&copy.spell, pptok_spell(&an->tok));
-                        tl_append(&result, copy);
+                        tl_append_copy(&result, &an->tok);
                     }
                     n = nx->next;
                     continue;
@@ -1102,9 +1068,7 @@ static TokList substitute(const MacroDef *def,
                     continue;
                 } else {
                     /* RHS is not a parameter — paste tokens literally */
-                    PPTok rhs = nx->tok;
-                    rhs.spell = (StrBuf){0};
-                    sb_push_cstr(&rhs.spell, pptok_spell(&nx->tok));
+                    PPTok rhs = pptok_copy(&nx->tok);
 
                     bool keep_rhs = false;
                     PPTok pasted = token_paste(&lhs, &rhs, NULL,
@@ -1112,10 +1076,7 @@ static TokList substitute(const MacroDef *def,
                     pptok_free(&result.tail->tok);
                     result.tail->tok = pasted;
                     if (keep_rhs) {
-                        PPTok rhs_copy = rhs;
-                        rhs_copy.spell = (StrBuf){0};
-                        sb_push_cstr(&rhs_copy.spell, pptok_spell(&rhs));
-                        tl_append(&result, rhs_copy);
+                        tl_append_copy(&result, &rhs);
                     }
                     pptok_free(&rhs);
 
@@ -1178,10 +1139,7 @@ static TokList substitute(const MacroDef *def,
         }
 
         /* --- Regular token: copy through --- */
-        PPTok copy = *t;
-        copy.spell = (StrBuf){0};
-        sb_push_cstr(&copy.spell, sp);
-        tl_append(&result, copy);
+        tl_append_copy(&result, t);
         n = n->next;
     }
 
@@ -1287,6 +1245,53 @@ static void expand_count_token(MacroTable *mt) {
     mt->expand_tokens++;
 }
 
+static bool needs_combined_rescan_fn(TokList *expanded, TokNode *n,
+                                      MacroTable *mt) {
+    TokNode *last_non_ws = NULL;
+    for (TokNode *en = expanded->head; en; en = en->next)
+        if (en->tok.kind != CPPT_SPACE && en->tok.kind != CPPT_NEWLINE)
+            last_non_ws = en;
+
+    TokNode *next_non_ws = n->next;
+    while (next_non_ws &&
+           (next_non_ws->tok.kind == CPPT_SPACE ||
+            next_non_ws->tok.kind == CPPT_NEWLINE))
+        next_non_ws = next_non_ws->next;
+
+    bool result =
+        last_non_ws &&
+        last_non_ws->tok.kind == CPPT_IDENT &&
+        !last_non_ws->tok.hide &&
+        macro_def_is_func(macro_lookup(mt, pptok_spell(&last_non_ws->tok))) &&
+        next_non_ws &&
+        next_non_ws->tok.kind == CPPT_PUNCT &&
+        strcmp(pptok_spell(&next_non_ws->tok), "(") == 0;
+
+    if (!result) {
+        int depth = 0;
+        for (TokNode *en = expanded->head; en; en = en->next) {
+            if (en->tok.kind == CPPT_PUNCT) {
+                const char *spx = pptok_spell(&en->tok);
+                if (strcmp(spx, "(") == 0) depth++;
+                else if (strcmp(spx, ")") == 0 && depth > 0) depth--;
+            }
+        }
+        if (depth > 0) result = true;
+    }
+    return result;
+}
+
+static void emit_expanded_with_limits(TokList *expanded, MacroTable *mt,
+                                       CppDiagArr *diags, CppLoc expand_loc,
+                                       TokList *output) {
+    for (TokNode *en = expanded->head; en; en = en->next) {
+        if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
+        expand_count_token(mt);
+        tl_append_copy(output, &en->tok);
+    }
+    tl_free(expanded);
+}
+
 /* Expand a token list recursively. */
 static void expand_list(TokList *input, MacroTable *mt,
                         InternTable *interns, CppDiagArr *diags,
@@ -1296,10 +1301,7 @@ static void expand_list(TokList *input, MacroTable *mt,
 
         /* Non-identifier tokens pass through unchanged. */
         if (t->kind != CPPT_IDENT) {
-            PPTok copy = *t;
-            copy.spell = (StrBuf){0};
-            sb_push_cstr(&copy.spell, pptok_spell(t));
-            tl_append(output, copy);
+            tl_append_copy(output, t);
             continue;
         }
 
@@ -1307,19 +1309,13 @@ static void expand_list(TokList *input, MacroTable *mt,
 
         /* Limits breached? Skip ALL further expansion, pass through as-is. */
         if (mt->limits_breached) {
-            PPTok copy = *t;
-            copy.spell = (StrBuf){0};
-            sb_push_cstr(&copy.spell, pptok_spell(t));
-            tl_append(output, copy);
+            tl_append_copy(output, t);
             continue;
         }
 
         /* Blue-painted? Don't expand. */
         if (t->hide) {
-            PPTok copy = *t;
-            copy.spell = (StrBuf){0};
-            sb_push_cstr(&copy.spell, pptok_spell(t));
-            tl_append(output, copy);
+            tl_append_copy(output, t);
             continue;
         }
 
@@ -1331,9 +1327,7 @@ static void expand_list(TokList *input, MacroTable *mt,
          * pushes 'B' and rescans body 'A' — at this point A is in the
          * active set and we passthrough rather than re-recursing.       */
         if (active_contains(mt, name)) {
-            PPTok copy = *t;
-            copy.spell = (StrBuf){0};
-            sb_push_cstr(&copy.spell, pptok_spell(t));
+            PPTok copy = pptok_copy(t);
             copy.hide = true;  /* persist past this rescan window */
             tl_append(output, copy);
             continue;
@@ -1352,10 +1346,7 @@ static void expand_list(TokList *input, MacroTable *mt,
         if (def && (strcmp(name, "_Nullable") == 0 ||
                     strcmp(name, "_Nonnull") == 0 ||
                     strcmp(name, "_Null_unspecified") == 0)) {
-            PPTok copy = *t;
-            copy.spell = (StrBuf){0};
-            sb_push_cstr(&copy.spell, pptok_spell(t));
-            tl_append(output, copy);
+            tl_append_copy(output, t);
             continue;
         }
 
@@ -1381,10 +1372,7 @@ static void expand_list(TokList *input, MacroTable *mt,
             /* Not a macro — pass through.
              * (Note: `_Pragma(...)` operator is handled in directive.c
              * process_buf before tokens reach macro_expand here.)      */
-            PPTok copy = *t;
-            copy.spell = (StrBuf){0};
-            sb_push_cstr(&copy.spell, pptok_spell(t));
-            tl_append(output, copy);
+            tl_append_copy(output, t);
             continue;
         }
 
@@ -1397,10 +1385,7 @@ static void expand_list(TokList *input, MacroTable *mt,
             if (!nx || nx->tok.kind != CPPT_PUNCT ||
                 strcmp(pptok_spell(&nx->tok), "(") != 0) {
                 /* No argument list — pass through as-is. */
-                PPTok copy = *t;
-                copy.spell = (StrBuf){0};
-                sb_push_cstr(&copy.spell, pptok_spell(t));
-                tl_append(output, copy);
+                tl_append_copy(output, t);
                 continue;
             }
             nx = nx->next; /* skip '(' */
@@ -1451,10 +1436,7 @@ static void expand_list(TokList *input, MacroTable *mt,
                                 depth--;
                             }
                         }
-                        PPTok copy = nx->tok;
-                        copy.spell = (StrBuf){0};
-                        sb_push_cstr(&copy.spell, pptok_spell(&nx->tok));
-                        tl_append(&va_arg, copy);
+                        tl_append_copy(&va_arg, &nx->tok);
                         nx = nx->next;
                     }
                     args[nargs++] = va_arg;
@@ -1563,9 +1545,7 @@ static void expand_list(TokList *input, MacroTable *mt,
             if (!expand_limits_check_depth(mt, diags, name, expand_loc)) {
                 /* Depth limit reached — pass macro name through unexpanded */
                 tl_free(&subst);
-                PPTok passthrough = *t;
-                passthrough.spell = (StrBuf){0};
-                sb_push_cstr(&passthrough.spell, name);
+                PPTok passthrough = pptok_copy(t);
                 tl_append(output, passthrough);
                 for (int i = 0; i < nargs; i++) tl_free(&args[i]);
                 free(args);
@@ -1584,84 +1564,24 @@ static void expand_list(TokList *input, MacroTable *mt,
             active_pop(mt, name);
             tl_free(&subst);
 
-            /* Determine whether the expansion ends with a function-like
-             * macro name that would consume the immediately-following '('
-             * from the remaining input (e.g.
-             *   #define DISPATCH(...) GET_MACRO(...)(__VA_ARGS__)
-             * After GET_MACRO expands to TARGET, the trailing (__VA_ARGS__)
-             * must combine with TARGET to form a function-like call, not
-             * be passed through as separate tokens).  Only in that case do
-             * we append the remaining input tokens and rescan everything
-             * together.  This mirrors the object-like macro rescan logic
-             * below (C99 6.10.3.4 "rescan and further replacement").    */
-            TokNode *last_non_ws = NULL;
-            for (TokNode *en = expanded.head; en; en = en->next)
-                if (en->tok.kind != CPPT_SPACE && en->tok.kind != CPPT_NEWLINE)
-                    last_non_ws = en;
-
-            TokNode *next_non_ws = n->next;
-            while (next_non_ws &&
-                   (next_non_ws->tok.kind == CPPT_SPACE ||
-                    next_non_ws->tok.kind == CPPT_NEWLINE))
-                next_non_ws = next_non_ws->next;
-
-            bool needs_combined_rescan =
-                last_non_ws &&
-                last_non_ws->tok.kind == CPPT_IDENT &&
-                !last_non_ws->tok.hide &&
-                macro_def_is_func(macro_lookup(mt, pptok_spell(&last_non_ws->tok))) &&
-                next_non_ws &&
-                next_non_ws->tok.kind == CPPT_PUNCT &&
-                strcmp(pptok_spell(&next_non_ws->tok), "(") == 0;
-
-            if (!needs_combined_rescan) {
-                int depth = 0;
-                for (TokNode *en = expanded.head; en; en = en->next) {
-                    if (en->tok.kind == CPPT_PUNCT) {
-                        const char *spx = pptok_spell(&en->tok);
-                        if (strcmp(spx, "(") == 0) depth++;
-                        else if (strcmp(spx, ")") == 0 && depth > 0) depth--;
-                    }
-                }
-                if (depth > 0) needs_combined_rescan = true;
-            }
+            bool needs_combined_rescan = needs_combined_rescan_fn(&expanded, n, mt);
 
             if (needs_combined_rescan) {
                 TokNode *rest = n->next;
                 while (rest) {
-                    PPTok rc = rest->tok;
-                    rc.spell = (StrBuf){0};
-                    sb_push_cstr(&rc.spell, pptok_spell(&rest->tok));
-                    tl_append(&expanded, rc);
+                    tl_append_copy(&expanded, &rest->tok);
                     rest = rest->next;
                 }
                 TokList rescanned = {0};
                 expand_list(&expanded, mt, interns, diags, &rescanned);
                 tl_free(&expanded);
-                for (TokNode *en = rescanned.head; en; en = en->next) {
-                    if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
-                    expand_count_token(mt);
-                    PPTok copy = en->tok;
-                    copy.spell = (StrBuf){0};
-                    sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
-                    tl_append(output, copy);
-                }
-                tl_free(&rescanned);
+                emit_expanded_with_limits(&rescanned, mt, diags, expand_loc, output);
                 for (int i = 0; i < nargs; i++) tl_free(&args[i]);
                 free(args);
                 break;
             }
 
-            /* Phase C2: Enforce token limit for expanded output */
-            for (TokNode *en = expanded.head; en; en = en->next) {
-                if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
-                expand_count_token(mt);
-                PPTok copy = en->tok;
-                copy.spell = (StrBuf){0};
-                sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
-                tl_append(output, copy);
-            }
-            tl_free(&expanded);
+            emit_expanded_with_limits(&expanded, mt, diags, expand_loc, output);
 
             for (int i = 0; i < nargs; i++) tl_free(&args[i]);
             free(args);
@@ -1694,9 +1614,7 @@ static void expand_list(TokList *input, MacroTable *mt,
             if (!expand_limits_check_depth(mt, diags, name, expand_loc)) {
                 /* Depth limit reached — pass macro name through unexpanded */
                 tl_free(&body_copy);
-                PPTok passthrough = *t;
-                passthrough.spell = (StrBuf){0};
-                sb_push_cstr(&passthrough.spell, name);
+                PPTok passthrough = pptok_copy(t);
                 tl_append(output, passthrough);
                 continue;
             }
@@ -1707,100 +1625,23 @@ static void expand_list(TokList *input, MacroTable *mt,
             tl_free(&body_copy);
             active_pop(mt, name);
 
-            /* Determine whether the expansion ends with a function-like macro
-             * name that would consume the immediately-following '(' from the
-             * remaining input (e.g. #define A B / #define B(x) ... / A(foo)).
-             * Only in that case do we need to append the remaining input tokens
-             * and rescan everything together.  For all other cases (e.g.
-             * #define X "" — the expansion is a string literal, not a macro
-             * call) we rescan only the expansion and let the outer loop
-             * continue naturally with the remaining input tokens.           */
-            TokNode *last_non_ws = NULL;
-            for (TokNode *en = expanded.head; en; en = en->next)
-                if (en->tok.kind != CPPT_SPACE && en->tok.kind != CPPT_NEWLINE)
-                    last_non_ws = en;
-
-            TokNode *next_non_ws = n->next;
-            while (next_non_ws &&
-                   (next_non_ws->tok.kind == CPPT_SPACE ||
-                    next_non_ws->tok.kind == CPPT_NEWLINE))
-                next_non_ws = next_non_ws->next;
-
-            bool needs_combined_rescan =
-                last_non_ws &&
-                last_non_ws->tok.kind == CPPT_IDENT &&
-                !last_non_ws->tok.hide &&
-                /* Phase R18: use macro_def_is_func to avoid second hash lookup */
-                macro_def_is_func(macro_lookup(mt, pptok_spell(&last_non_ws->tok))) &&
-                next_non_ws &&
-                next_non_ws->tok.kind == CPPT_PUNCT &&
-                strcmp(pptok_spell(&next_non_ws->tok), "(") == 0;
-
-            /* Phase R4: also need combined rescan when expansion contains
-             * an unbalanced '(' — meaning a function-like macro call was
-             * started but not finished within the expansion itself.  This
-             * is the n_27.c case:
-             *     #define sub( x, y)  (x - y)
-             *     #define head        sub(
-             *     head a, b );
-             * `head` expands to `sub(`, which has `(` open but no `)`.
-             * Without combined rescan, sub's args wouldn't be visible
-             * (they're in the source after `head`) and we'd report
-             * "unterminated argument list" wrongly.                       */
-            if (!needs_combined_rescan) {
-                int depth = 0;
-                for (TokNode *en = expanded.head; en; en = en->next) {
-                    if (en->tok.kind == CPPT_PUNCT) {
-                        const char *spx = pptok_spell(&en->tok);
-                        if (strcmp(spx, "(") == 0) depth++;
-                        else if (strcmp(spx, ")") == 0 && depth > 0) depth--;
-                    }
-                }
-                if (depth > 0) needs_combined_rescan = true;
-            }
+            bool needs_combined_rescan = needs_combined_rescan_fn(&expanded, n, mt);
 
             if (needs_combined_rescan) {
                 /* Append remaining input so the function-like macro at the end
                  * of the expansion can consume its argument list. */
                 TokNode *rest = n->next;
                 while (rest) {
-                    PPTok rc = rest->tok;
-                    rc.spell = (StrBuf){0};
-                    sb_push_cstr(&rc.spell, pptok_spell(&rest->tok));
-                    tl_append(&expanded, rc);
+                    tl_append_copy(&expanded, &rest->tok);
                     rest = rest->next;
                 }
                 TokList rescanned = {0};
                 expand_list(&expanded, mt, interns, diags, &rescanned);
                 tl_free(&expanded);
-                for (TokNode *en = rescanned.head; en; en = en->next) {
-                    if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
-                    expand_count_token(mt);
-                    PPTok copy = en->tok;
-                    copy.spell = (StrBuf){0};
-                    sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
-                    tl_append(output, copy);
-                }
-                tl_free(&rescanned);
+                emit_expanded_with_limits(&rescanned, mt, diags, expand_loc, output);
                 break; /* all remaining input was consumed and rescanned */
             } else {
-                /* Expansion result does not begin a new function-like macro
-                 * call — `expanded` is already the fully-rescanned terminal
-                 * form (expand_list is recursive). A second expand_list pass
-                 * here is redundant: in well-formed cases it's a no-op, and
-                 * in the presence of any hide-set propagation gap it can
-                 * incorrectly re-expand tokens (or double-count token
-                 * budget). Just transfer `expanded` directly to `output`.   */
-                for (TokNode *en = expanded.head; en; en = en->next) {
-                    if (!expand_limits_check_tokens(mt, diags, expand_loc)) break;
-                    expand_count_token(mt);
-                    PPTok copy = en->tok;
-                    copy.spell = (StrBuf){0};
-                    sb_push_cstr(&copy.spell, pptok_spell(&en->tok));
-                    tl_append(output, copy);
-                }
-                tl_free(&expanded);
-                /* continue — outer for-loop advances to n->next */
+                emit_expanded_with_limits(&expanded, mt, diags, expand_loc, output);
             }
         }
     }
