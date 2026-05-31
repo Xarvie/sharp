@@ -447,10 +447,12 @@ static int collect_balanced_call_body(PS *ps, char *buf, int buf_size) {
             }
             ps_advance(ps);
         } else {
-            if (blen > 0 && blen + (int)tk.len + 2 < buf_size) {
-                char last = buf[blen - 1];
-                if (last != '(' && last != ',')
-                    buf[blen++] = ' ';
+            if (blen + (int)tk.len + 2 < buf_size) {
+                if (blen > 0) {
+                    char last = buf[blen - 1];
+                    if (last != '(' && last != ',')
+                        buf[blen++] = ' ';
+                }
                 memcpy(buf + blen, tk.text, tk.len);
                 blen += tk.len;
             }
