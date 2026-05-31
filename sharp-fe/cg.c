@@ -26,21 +26,26 @@ static void cgb_puts(CgSB *sb, const char *s) {
     for (; *s; s++) cgb_push(sb, *s);
 }
 
-static void cgb_printf(CgSB *sb, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vsnprintf(NULL, 0, fmt, ap);
-    va_end(ap);
+static void cgb_vprintf(CgSB *sb, const char *fmt, va_list ap) {
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf(NULL, 0, fmt, ap2);
+    va_end(ap2);
     if (n <= 0) return;
     while (sb->len + (size_t)n + 1 >= sb->cap) {
         sb->cap = sb->cap ? sb->cap * 2 : 256;
         sb->buf = realloc(sb->buf, sb->cap);
         if (!sb->buf) abort();
     }
-    va_start(ap, fmt);
     vsnprintf(sb->buf + sb->len, (size_t)(n + 1), fmt, ap);
-    va_end(ap);
     sb->len += (size_t)n;
+}
+
+static void cgb_printf(CgSB *sb, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    cgb_vprintf(sb, fmt, ap);
+    va_end(ap);
 }
 
 static char *cgb_take(CgSB *sb) {
@@ -128,6 +133,12 @@ struct CgCtx {
  * ====================================================================== */
 
 static bool decl_is_user(const CgCtx *ctx, const AstNode *d) {
+    /* Currently always returns true: the code generator must emit all
+     * declarations (including those from system headers) because the
+     * generated C code may reference types that are not fully covered
+     * by the emitted #include directives alone.  The root_file check
+     * is kept for potential future use when include emission is
+     * complete enough to allow skipping system-header decls. */
     if (!ctx->root_file || !d) return true;
     const char *f = d->loc.file;
     if (!f || f[0] == '\0') return false;
@@ -146,10 +157,6 @@ static void cg_printf(CgCtx *ctx, const char *fmt, ...)
 ;
 static void cg_const_expr(CgCtx *ctx, const AstNode *e); /* forward */
 
-static const char *cg_resolve_name(const CgCtx *ctx, const char *name) {
-    (void)ctx;
-    return name;
-}
 
 /* Phase 11 forward declarations */
 static char *cg_mangle_inst(const char *sname, Type **args, size_t nargs);
@@ -280,15 +287,6 @@ static bool cg_emit_linemarker(CgCtx *ctx, CppLoc loc) {
     return true;
 }
 
-/**
- * Emit a #line directive before a declaration/statement if the source
- * location differs from the previously emitted location.  Used as a
- * no-op guard: if the location is unchanged, nothing is emitted.
- */
-static void cg_set_loc(CgCtx *ctx, CppLoc loc) {
-    cg_emit_linemarker(ctx, loc);
-}
-
 /* -------------------------------------------------------------------------
  * Method-chaining temporary helpers
  * When a struct-returning call is used as a receiver (method chaining),
@@ -309,19 +307,23 @@ static bool cg_is_rvalue_struct(const AstNode *expr) {
     /* If it's not an lvalue, C forbids & on it. */
     return !is_lvalue(expr);
 }
-static void cg_printf(CgCtx *ctx, const char *fmt, ...) {
-    va_list ap; va_start(ap, fmt);
-    int n = vsnprintf(NULL, 0, fmt, ap); va_end(ap);
-    if (n <= 0) return;
-    while (ctx->out.len + (size_t)n + 1 >= ctx->out.cap) {
-        ctx->out.cap = ctx->out.cap ? ctx->out.cap * 2 : 256;
-        ctx->out.buf = realloc(ctx->out.buf, ctx->out.cap);
-        if (!ctx->out.buf) abort();
+
+static const AstNode *cg_find_struct_def(const CgCtx *ctx, const char *name) {
+    if (!ctx->file_ast || !name) return NULL;
+    for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
+        const AstNode *d = ctx->file_ast->u.file.decls.data[k];
+        if (d && d->kind == AST_STRUCT_DEF && d->u.struct_def.name &&
+            strcmp(d->u.struct_def.name, name) == 0)
+            return d;
     }
+    return NULL;
+}
+
+static void cg_printf(CgCtx *ctx, const char *fmt, ...) {
+    va_list ap;
     va_start(ap, fmt);
-    vsnprintf(ctx->out.buf + ctx->out.len, (size_t)(n+1), fmt, ap);
+    cgb_vprintf(&ctx->out, fmt, ap);
     va_end(ap);
-    ctx->out.len += (size_t)n;
 }
 
 /* =========================================================================
@@ -476,33 +478,9 @@ static bool cg_decl_ast(CgCtx *ctx, const AstNode *ty_ast, const char *name) {
             const AstNode *rr_fn = ret_ast->u.type_ptr.base;
             cg_type_from_ast(ctx, rr_fn->u.type_func.ret);
             cg_printf(ctx, " (*(*%s)(", name ? name : "");
-            bool _f = true;
-            for (size_t pi = 0; pi < fn_ast->u.type_func.params.len; pi++) {
-                AstNode *p = fn_ast->u.type_func.params.data[pi];
-                if (!p || (p->kind == AST_PARAM_DECL && p->u.param_decl.is_vararg)) { if (!p || !(p->kind == AST_PARAM_DECL)) continue; cg_puts(ctx, _f ? "" : ", "); cg_puts(ctx, "..."); _f = false; continue; }
-                if (!_f) { cg_puts(ctx, ", "); } _f = false;
-                const AstNode *pty2 = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.type : p;
-                const char *pnm2 = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.name : NULL;
-                if (!pty2 || !cg_decl_ast(ctx, pty2, pnm2)) {
-                    Type *pt2 = ty_from_ast(ctx->ts, (AstNode*)pty2, cg_type_scope(ctx), NULL);
-                    if (pt2) cg_decl(ctx, pt2, pnm2);
-                }
-            }
-            if (!fn_ast->u.type_func.params_unspecified && _f) cg_puts(ctx, "void");
+            cg_emit_func_params_ast(ctx, fn_ast);
             cg_puts(ctx, "))(");
-            _f = true;
-            for (size_t pi = 0; pi < rr_fn->u.type_func.params.len; pi++) {
-                AstNode *p = rr_fn->u.type_func.params.data[pi];
-                if (!p || (p->kind == AST_PARAM_DECL && p->u.param_decl.is_vararg)) { if (!p || !(p->kind == AST_PARAM_DECL)) continue; cg_puts(ctx, _f ? "" : ", "); cg_puts(ctx, "..."); _f = false; continue; }
-                if (!_f) { cg_puts(ctx, ", "); } _f = false;
-                const AstNode *pty2 = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.type : p;
-                const char *pnm2 = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.name : NULL;
-                if (!pty2 || !cg_decl_ast(ctx, pty2, pnm2)) {
-                    Type *pt2 = ty_from_ast(ctx->ts, (AstNode*)pty2, cg_type_scope(ctx), NULL);
-                    if (pt2) cg_decl(ctx, pt2, pnm2);
-                }
-            }
-            if (!rr_fn->u.type_func.params_unspecified && _f) cg_puts(ctx, "void");
+            cg_emit_func_params_ast(ctx, rr_fn);
             cg_puts(ctx, ")");
         } else if (ret_ast && ret_ast->kind == AST_TYPE_PTR &&
                    ret_ast->u.type_ptr.base &&
@@ -511,19 +489,7 @@ static bool cg_decl_ast(CgCtx *ctx, const AstNode *ty_ast, const char *name) {
             const AstNode *ret_arr = ret_ast->u.type_ptr.base;
             cg_type_from_ast(ctx, ret_arr->u.type_array.base);
             cg_printf(ctx, " (*(*%s)(", name ? name : "");
-            bool _f = true;
-            for (size_t pi = 0; pi < fn_ast->u.type_func.params.len; pi++) {
-                AstNode *p = fn_ast->u.type_func.params.data[pi];
-                if (!p || (p->kind == AST_PARAM_DECL && p->u.param_decl.is_vararg)) { if (!p || !(p->kind == AST_PARAM_DECL)) continue; cg_puts(ctx, _f ? "" : ", "); cg_puts(ctx, "..."); _f = false; continue; }
-                if (!_f) { cg_puts(ctx, ", "); } _f = false;
-                const AstNode *pty2 = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.type : p;
-                const char *pnm2 = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.name : NULL;
-                if (!pty2 || !cg_decl_ast(ctx, pty2, pnm2)) {
-                    Type *pt2 = ty_from_ast(ctx->ts, (AstNode*)pty2, cg_type_scope(ctx), NULL);
-                    if (pt2) cg_decl(ctx, pt2, pnm2);
-                }
-            }
-            if (!fn_ast->u.type_func.params_unspecified && _f) cg_puts(ctx, "void");
+            cg_emit_func_params_ast(ctx, fn_ast);
             cg_puts(ctx, "))[");
             if (ret_arr->u.type_array.size)
                 cg_const_expr(ctx, ret_arr->u.type_array.size);
@@ -540,19 +506,7 @@ static bool cg_decl_ast(CgCtx *ctx, const AstNode *ty_ast, const char *name) {
                 cg_printf(ctx, " (* volatile %s)(", name ? name : "");
             else
                 cg_printf(ctx, " (*%s)(", name ? name : "");
-            bool _f = true;
-            for (size_t pi = 0; pi < fn_ast->u.type_func.params.len; pi++) {
-                AstNode *p = fn_ast->u.type_func.params.data[pi];
-                if (!p || (p->kind == AST_PARAM_DECL && p->u.param_decl.is_vararg)) { if (!p || !(p->kind == AST_PARAM_DECL)) continue; cg_puts(ctx, _f ? "" : ", "); cg_puts(ctx, "..."); _f = false; continue; }
-                if (!_f) { cg_puts(ctx, ", "); } _f = false;
-                const AstNode *pty2 = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.type : p;
-                const char *pnm2 = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.name : NULL;
-                if (!pty2 || !cg_decl_ast(ctx, pty2, pnm2)) {
-                    Type *pt2 = ty_from_ast(ctx->ts, (AstNode*)pty2, cg_type_scope(ctx), NULL);
-                    if (pt2) cg_decl(ctx, pt2, pnm2);
-                }
-            }
-            if (!fn_ast->u.type_func.params_unspecified && _f) cg_puts(ctx, "void");
+            cg_emit_func_params_ast(ctx, fn_ast);
             cg_puts(ctx, ")");
         }
         return true;
@@ -1473,6 +1427,18 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr);
 static void cg_block(CgCtx *ctx, const AstNode *block);
 static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
                     const AstNode **defers, size_t ndefers);
+
+static void cg_emit_rvalue_struct_addr(CgCtx *ctx, Type *type,
+                                         const AstNode *expr) {
+    char tmp[32];
+    snprintf(tmp, sizeof tmp, "__sharp_rv%d", ctx->chain_tmp_seq++);
+    cg_puts(ctx, "(__extension__(({ ");
+    cg_type(ctx, type);
+    cg_printf(ctx, " %s = (", tmp);
+    cg_expr(ctx, expr);
+    cg_printf(ctx, "); &%s; })))", tmp);
+}
+
 /* fwd: comma-continuation declarator emitter (defined near cg_var_c) */
 static void cg_emit_comma_cont_declarator(CgCtx *ctx,
                                           const AstNode *ty,
@@ -1688,16 +1654,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
         fd->u.field_decl.type->kind == AST_TYPE_NAME &&
         ctx->file_ast) {
         const char *inner_name = fd->u.field_decl.type->u.type_name.name;
-        /* Find the AST_STRUCT_DEF for the anonymous aggregate. */
-        const AstNode *inner_sd = NULL;
-        for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
-            const AstNode *d = ctx->file_ast->u.file.decls.data[k];
-            if (d && d->kind == AST_STRUCT_DEF && d->u.struct_def.name &&
-                strcmp(d->u.struct_def.name, inner_name) == 0) {
-                inner_sd = d;
-                break;
-            }
-        }
+        const AstNode *inner_sd = cg_find_struct_def(ctx, inner_name);
         if (inner_sd && inner_sd->u.struct_def.fields.len > 0) {
             /* Emit inline body: `union {\n  fields...\n};` */
             const char *kw = inner_sd->u.struct_def.is_union ? "union" : "struct";
@@ -1724,13 +1681,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
             fty_inner->u.type_name.name &&
             strncmp(fty_inner->u.type_name.name, "__anon_", 7) == 0 && ctx->file_ast) {
             const char *inner_name = fty_inner->u.type_name.name;
-            const AstNode *inner_sd = NULL;
-            /* Search file.decls first, then local block stmts */
-            for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
-                const AstNode *d2 = ctx->file_ast->u.file.decls.data[k];
-                if (d2 && d2->kind == AST_STRUCT_DEF && d2->u.struct_def.name &&
-                    strcmp(d2->u.struct_def.name, inner_name) == 0) { inner_sd = d2; break; }
-            }
+            const AstNode *inner_sd = cg_find_struct_def(ctx, inner_name);
             if (!inner_sd && ctx->local_block_stmts) {
                 for (size_t k = 0; k < ctx->local_block_stmts->len; k++) {
                     const AstNode *d2 = ctx->local_block_stmts->data[k];
@@ -1910,46 +1861,15 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                 const AstNode *ret_fn = ret_ast->u.type_ptr.base; /* ret's FUNC */
                 cg_type_from_ast(ctx, ret_fn->u.type_func.ret); /* deepest ret */
                 cg_printf(ctx, " (*(*%s)(", fname);
-                bool first_p = true;
-                for (size_t pi = 0; pi < fn_ast->u.type_func.params.len; pi++) {
-                    AstNode *p = fn_ast->u.type_func.params.data[pi];
-                    if (!p || (p->kind == AST_PARAM_DECL && p->u.param_decl.is_vararg)) { if (!p || !(p->kind == AST_PARAM_DECL)) continue; if (!first_p) cg_puts(ctx, ", "); cg_puts(ctx, "..."); first_p = false; continue; }
-                    if (!first_p) { cg_puts(ctx, ", "); } first_p = false;
-                    const AstNode *pty = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.type : p;
-                    const char   *pnm = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.name : NULL;
-                    bool _ok = pty && cg_decl_ast(ctx, (AstNode*)pty, pnm);
-                    if (!_ok) { Type *pt = ty_from_ast(ctx->ts, (AstNode*)pty, cg_type_scope(ctx), NULL); if (pt) cg_decl(ctx, pt, pnm); }
-                }
-                if (!fn_ast->u.type_func.params_unspecified && first_p) cg_puts(ctx, "void");
+                cg_emit_func_params_ast(ctx, fn_ast);
                 cg_puts(ctx, "))(");
-                /* emit ret_fn params */
-                first_p = true;
-                for (size_t pi = 0; pi < ret_fn->u.type_func.params.len; pi++) {
-                    AstNode *p = ret_fn->u.type_func.params.data[pi];
-                    if (!p || (p->kind == AST_PARAM_DECL && p->u.param_decl.is_vararg)) { if (!p || !(p->kind == AST_PARAM_DECL)) continue; if (!first_p) cg_puts(ctx, ", "); cg_puts(ctx, "..."); first_p = false; continue; }
-                    if (!first_p) { cg_puts(ctx, ", "); } first_p = false;
-                    const AstNode *pty = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.type : p;
-                    const char   *pnm = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.name : NULL;
-                    bool _ok = pty && cg_decl_ast(ctx, (AstNode*)pty, pnm);
-                    if (!_ok) { Type *pt = ty_from_ast(ctx->ts, (AstNode*)pty, cg_type_scope(ctx), NULL); if (pt) cg_decl(ctx, pt, pnm); }
-                }
-                if (!ret_fn->u.type_func.params_unspecified && first_p) cg_puts(ctx, "void");
+                cg_emit_func_params_ast(ctx, ret_fn);
                 cg_puts(ctx, ")");
             } else {
                 /* Case A: normal `ret (*name)(params)` */
                 cg_type_from_ast(ctx, ret_ast);
                 cg_printf(ctx, " (*%s)(", fname);
-                bool first_p = true;
-                for (size_t pi = 0; pi < fn_ast->u.type_func.params.len; pi++) {
-                    AstNode *p = fn_ast->u.type_func.params.data[pi];
-                    if (!p || (p->kind == AST_PARAM_DECL && p->u.param_decl.is_vararg)) { if (!p || !(p->kind == AST_PARAM_DECL)) continue; if (!first_p) cg_puts(ctx, ", "); cg_puts(ctx, "..."); first_p = false; continue; }
-                    if (!first_p) { cg_puts(ctx, ", "); } first_p = false;
-                    const AstNode *pty = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.type : p;
-                    const char   *pnm = (p->kind == AST_PARAM_DECL) ? p->u.param_decl.name : NULL;
-                    bool _ok = pty && cg_decl_ast(ctx, (AstNode*)pty, pnm);
-                    if (!_ok) { Type *pt = ty_from_ast(ctx->ts, (AstNode*)pty, cg_type_scope(ctx), NULL); if (pt) cg_decl(ctx, pt, pnm); }
-                }
-                if (!fn_ast->u.type_func.params_unspecified && first_p) cg_puts(ctx, "void");
+                cg_emit_func_params_ast(ctx, fn_ast);
                 cg_puts(ctx, ")");
             }
         } else {
@@ -2317,7 +2237,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
             }
             if (matched) break;
         }
-        cg_puts(ctx, cg_resolve_name(ctx, expr->u.ident.name));
+        cg_puts(ctx, expr->u.ident.name);
         break;
 
     /* Phase S5: GCC labels-as-values -- emit `&&label` verbatim.  cc
@@ -2465,14 +2385,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                     cg_puts(ctx, "&");
                     cg_expr(ctx, expr->u.binop.lhs);
                 } else {
-                    char tmp_name[32];
-                    snprintf(tmp_name, sizeof tmp_name,
-                             "__sharp_bop%d", ctx->chain_tmp_seq++);
-                    cg_puts(ctx, "(__extension__(({ ");
-                    cg_type(ctx, lt_unconst);
-                    cg_printf(ctx, " %s = (", tmp_name);
-                    cg_expr(ctx, expr->u.binop.lhs);
-                    cg_printf(ctx, "); &%s; })))", tmp_name);
+                    cg_emit_rvalue_struct_addr(ctx, lt_unconst, expr->u.binop.lhs);
                 }
             } else {
                 cg_expr(ctx, expr->u.binop.lhs);
@@ -2563,15 +2476,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                                 cg_puts(ctx, "&");
                                 cg_expr(ctx, expr->u.unary.operand);
                             } else {
-                                /* Rvalue: materialise via statement expression */
-                                char tmp_name[32];
-                                snprintf(tmp_name, sizeof tmp_name,
-                                         "__sharp_uop%d", ctx->chain_tmp_seq++);
-                                cg_puts(ctx, "(__extension__(({ ");
-                                cg_type(ctx, ut);
-                                cg_printf(ctx, " %s = (", tmp_name);
-                                cg_expr(ctx, expr->u.unary.operand);
-                                cg_printf(ctx, "); &%s; })))", tmp_name);
+                                cg_emit_rvalue_struct_addr(ctx, ut, expr->u.unary.operand);
                             }
                         } else {
                             cg_expr(ctx, expr->u.unary.operand);
@@ -2597,14 +2502,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                                     cg_puts(ctx, "&");
                                     cg_expr(ctx, expr->u.unary.operand);
                                 } else {
-                                    char tmp_name[32];
-                                    snprintf(tmp_name, sizeof tmp_name,
-                                             "__sharp_uop%d", ctx->chain_tmp_seq++);
-                                    cg_puts(ctx, "(__extension__(({ ");
-                                    cg_type(ctx, ut);
-                                    cg_printf(ctx, " %s = (", tmp_name);
-                                    cg_expr(ctx, expr->u.unary.operand);
-                                    cg_printf(ctx, "); &%s; })))", tmp_name);
+                                    cg_emit_rvalue_struct_addr(ctx, ut, expr->u.unary.operand);
                                 }
                             } else {
                                 cg_expr(ctx, expr->u.unary.operand);
@@ -2855,22 +2753,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
              * a named temporary and pass &tmp instead. */
             if (!arrow && recv_t && recv_t->kind == TY_STRUCT) {
                 if (cg_is_rvalue_struct(expr->u.method_call.recv)) {
-                    /* Receiver is an rvalue struct (e.g. another method call).
-                     * C does not allow & on rvalues.  Use a GNU statement
-                     * expression to materialise a named temporary:
-                     *   &(__extension__({ TypeName __sc_N = recv; __sc_N; }))
-                     * gcc and clang both support this in C mode. */
-                    char tmp_name[32];
-                    snprintf(tmp_name, sizeof tmp_name,
-                             "__sharp_chain%d", ctx->chain_tmp_seq++);
-                    /* Emit: (__extension__({ TypeName __sc_N = (recv); &__sc_N; }))
-                     * The statement-expression returns a pointer to the temp,
-                     * which is a valid lvalue -- gcc/clang both accept this. */
-                    cg_puts(ctx, "(__extension__(({ ");
-                    cg_type(ctx, recv_t);
-                    cg_printf(ctx, " %s = (", tmp_name);
-                    cg_expr(ctx, expr->u.method_call.recv);
-                    cg_printf(ctx, "); &%s; })))", tmp_name);
+                    cg_emit_rvalue_struct_addr(ctx, recv_t, expr->u.method_call.recv);
                 } else {
                     cg_puts(ctx, "&");
                     cg_expr(ctx, expr->u.method_call.recv);
@@ -3489,7 +3372,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
 static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
                     const AstNode **defers, size_t ndefers) {
     if (!stmt) return;
-    cg_set_loc(ctx, stmt->loc);
+    cg_emit_linemarker(ctx, stmt->loc);
     switch (stmt->kind) {
 
     case AST_GCC_VERBATIM:
@@ -4505,7 +4388,7 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
         }
     }
 
-    cg_set_loc(ctx, fn->loc);
+    cg_emit_linemarker(ctx, fn->loc);
     StorageClass sc = fn->u.func_def.storage;
     /* p43/p45: leading attributes and keywords before storage class */
     if (fn->u.func_def.gcc_attrs && fn->u.func_def.fmt & FMTF_ATTRS_LEADING) {
@@ -4731,7 +4614,7 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
         /* C8: if the source had a parenthesized name `(func)`, preserve it. */
         if (fn->u.func_def.name_paren && !sname)
             cg_puts(ctx, "(");
-        cg_puts(ctx, cg_resolve_name(ctx, fn->u.func_def.name));
+        cg_puts(ctx, fn->u.func_def.name);
         if (fn->u.func_def.name_paren && !sname)
             cg_puts(ctx, ")");
     }
@@ -4864,29 +4747,9 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
                 const AstNode *rr_fn = fp_ret->u.type_ptr.base;
                 cg_type_from_ast(ctx, rr_fn->u.type_func.ret);
                 cg_printf(ctx, " (*(*%s)(", p->u.param_decl.name ? p->u.param_decl.name : "");
-                bool _f = true;
-                for (size_t _pi = 0; _pi < fp_fn->u.type_func.params.len; _pi++) {
-                    AstNode *_pp = fp_fn->u.type_func.params.data[_pi];
-                    if (!_pp || (_pp->kind == AST_PARAM_DECL && _pp->u.param_decl.is_vararg)) continue;
-                    if (!_f) { cg_puts(ctx, ", "); } _f = false;
-                    const AstNode *_pt2 = (_pp->kind == AST_PARAM_DECL) ? _pp->u.param_decl.type : _pp;
-                    const char *_pn = (_pp->kind == AST_PARAM_DECL) ? _pp->u.param_decl.name : NULL;
-                    bool _ok = _pt2 && cg_decl_ast(ctx, (AstNode*)_pt2, _pn);
-                    if (!_ok) { Type *_t = ty_from_ast(ctx->ts, (AstNode*)_pt2, cg_type_scope(ctx), NULL); if (_t) cg_decl(ctx, _t, _pn); }
-                }
-                if (!fp_fn->u.type_func.params_unspecified && _f) cg_puts(ctx, "void");
+                cg_emit_func_params_ast(ctx, fp_fn);
                 cg_puts(ctx, "))(");
-                _f = true;
-                for (size_t _pi = 0; _pi < rr_fn->u.type_func.params.len; _pi++) {
-                    AstNode *_pp = rr_fn->u.type_func.params.data[_pi];
-                    if (!_pp || (_pp->kind == AST_PARAM_DECL && _pp->u.param_decl.is_vararg)) continue;
-                    if (!_f) { cg_puts(ctx, ", "); } _f = false;
-                    const AstNode *_pt2 = (_pp->kind == AST_PARAM_DECL) ? _pp->u.param_decl.type : _pp;
-                    const char *_pn = (_pp->kind == AST_PARAM_DECL) ? _pp->u.param_decl.name : NULL;
-                    bool _ok = _pt2 && cg_decl_ast(ctx, (AstNode*)_pt2, _pn);
-                    if (!_ok) { Type *_t = ty_from_ast(ctx->ts, (AstNode*)_pt2, cg_type_scope(ctx), NULL); if (_t) cg_decl(ctx, _t, _pn); }
-                }
-                if (!rr_fn->u.type_func.params_unspecified && _f) cg_puts(ctx, "void");
+                cg_emit_func_params_ast(ctx, rr_fn);
                 cg_puts(ctx, ")");
             } else {
                 /* ret (*name)(params) */
@@ -5012,7 +4875,7 @@ static void cg_struct(CgCtx *ctx, const AstNode *sd) {
      * cg_emit_specialization when first encountered via cg_collect_expr. */
     if (sd->u.struct_def.generic_params.len > 0) return;
 
-    cg_set_loc(ctx, sd->loc);
+    cg_emit_linemarker(ctx, sd->loc);
     const char *sname = sd->u.struct_def.name;
     /* S2: same emitter handles structs and unions; the keyword is the
      * only thing that differs.  No `typedef union` forward decl is
@@ -5055,7 +4918,7 @@ static void cg_struct(CgCtx *ctx, const AstNode *sd) {
     }
 
     /* Struct/class body */
-    const char *emit_name = cg_resolve_name(ctx, sname);
+    const char *emit_name = sname;
     /* class: emit typedef so bare name works inside the function body */
     if (sd->u.struct_def.is_class && emit_name)
         cg_printf(ctx, "typedef %s %s %s;\n", kw, emit_name, emit_name);
@@ -5199,13 +5062,12 @@ static Type *subst_type(TyStore *ts, Type *t,
 }
 
 /* Phase M: forward declaration -- defined in the file-level section. */
-static AstNode *cg_unwrap_decl(AstNode *d);
 
 static const AstNode *find_generic_struct(CgCtx *ctx, const char *name) {
     const AstNode *file = ctx->file_ast;
     if (file) {
         for (size_t i = 0; i < file->u.file.decls.len; i++) {
-            const AstNode *d = cg_unwrap_decl(file->u.file.decls.data[i]);
+            const AstNode *d = file->u.file.decls.data[i];
             if (d && d->kind == AST_STRUCT_DEF &&
                 strcmp(d->u.struct_def.name, name) == 0 &&
                 d->u.struct_def.generic_params.len > 0)
@@ -5232,16 +5094,12 @@ static bool cg_inst_seen(CgCtx *ctx, const char *mn) {
     return false;
 }
 
-static void cg_emit_spec_method(CgCtx *ctx, const AstNode *fn,
-                                  const char *msname,
-                                  const char **pnames, Type **pvals, size_t np,
-                                  bool fwd_only);
 static void cg_emit_spec_method_impl(CgCtx *ctx, const AstNode *fn,
                                   const char *msname,
                                   const char **pnames, Type **pvals, size_t np,
                                   bool fwd_only) {
     if (!fn || fn->kind != AST_FUNC_DEF) return;
-    cg_set_loc(ctx, fn->loc);
+    cg_emit_linemarker(ctx, fn->loc);
 
     /* Install gp context so cg_type_from_ast resolves T in body (sizeof(T) etc.) */
     const char **saved_pnames = ctx->gp_names;
@@ -5320,14 +5178,6 @@ static void cg_emit_spec_method_impl(CgCtx *ctx, const AstNode *fn,
     ctx->spec_scope = saved_spec_scope;
 }
 
-/* Public wrapper: keeps existing single-pass callers happy. */
-static void cg_emit_spec_method(CgCtx *ctx, const AstNode *fn,
-                                  const char *msname,
-                                  const char **pnames, Type **pvals, size_t np,
-                                  bool fwd_only) {
-    cg_emit_spec_method_impl(ctx, fn, msname, pnames, pvals, np, fwd_only);
-}
-
 static void cg_expr_p(CgCtx *ctx, const AstNode *expr, int min_prec) {
     /* Wrap expr in parens if its own operator precedence < min_prec. */
     bool need_parens = false;
@@ -5361,7 +5211,7 @@ static void cg_emit_specialization(CgCtx *ctx, Type *t) {
         cg_printf(ctx, "typedef struct %s %s;\n", mn, mn);
         free(mn); return;
     }
-    cg_set_loc(ctx, sd->loc);
+    cg_emit_linemarker(ctx, sd->loc);
     size_t np = sd->u.struct_def.generic_params.len;
     if (np != t->u.struct_.nargs) { free(mn); return; }
 
@@ -5448,14 +5298,14 @@ static void cg_emit_specialization(CgCtx *ctx, Type *t) {
      * calls _grow_if_needed() which is defined later).  Pass 2 emits the
      * actual bodies. */
     for (size_t i = 0; i < sd->u.struct_def.methods.len; i++) {
-        cg_emit_spec_method(ctx, sd->u.struct_def.methods.data[i],
+        cg_emit_spec_method_impl(ctx, sd->u.struct_def.methods.data[i],
                              mn,
                              pnames, (Type **)t->u.struct_.args, np,
                              /*fwd_only=*/true);
     }
     cg_nl(ctx);
     for (size_t i = 0; i < sd->u.struct_def.methods.len; i++) {
-        cg_emit_spec_method(ctx, sd->u.struct_def.methods.data[i],
+        cg_emit_spec_method_impl(ctx, sd->u.struct_def.methods.data[i],
                              mn,
                              pnames, (Type **)t->u.struct_.args, np,
                              /*fwd_only=*/false);
@@ -6082,7 +5932,7 @@ static void cg_emit_spec_func(CgCtx *ctx, const AstNode *fn,
                                const char *mname,
                                const char **pnames, Type **pvals, size_t np) {
     if (!fn || fn->kind != AST_FUNC_DEF || !fn->u.func_def.body) return;
-    cg_set_loc(ctx, fn->loc);
+    cg_emit_linemarker(ctx, fn->loc);
     Scope *fscope = fn->sem_scope ? fn->sem_scope : ctx->file_scope;
 
     /* v0.13: populate type_ref annotations on the template body so cg's
@@ -6282,7 +6132,7 @@ static void cg_emit_gfunc_fwd_decls(CgCtx *ctx) {
         /* Extension methods use struct's generic params, not their own. */
         if (np == 0) { np = gi->ntargs; if (!targs || np == 0) continue; }
         if (!targs) continue;
-        cg_set_loc(ctx, fn->loc);
+        cg_emit_linemarker(ctx, fn->loc);
         Scope *fscope = fn->sem_scope ? fn->sem_scope : ctx->file_scope;
 
         const char **pnames = malloc(np * sizeof *pnames);
@@ -6426,14 +6276,6 @@ static const char *cg_gfunc_mangle_for_call(CgCtx *ctx, const char *fname,
     return mn;
 }
 /* =========================================================================
- * cg_unwrap_decl: resolve decl wrapper nodes.
- * ======================================================================== */
-static AstNode *cg_unwrap_decl(AstNode *d) {
-    if (!d) return NULL;
-    return d;
-}
-
-/* =========================================================================
  * File-level code generation
  * ====================================================================== */
 /* =========================================================================
@@ -6530,11 +6372,11 @@ static bool cg_emit_field_maybe_inline(CgCtx *ctx,
  * Handles: typedef struct { ... } Alias;  typedef OldType Alias;  etc. */
 static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
     if (!d || d->kind != AST_TYPEDEF_DECL) return;
-    cg_set_loc(ctx, d->loc);
+    cg_emit_linemarker(ctx, d->loc);
     const AstNode *target = d->u.typedef_decl.target;
     const char    *alias  = d->u.typedef_decl.alias;
     if (!alias) return;
-    const char    *cname  = cg_resolve_name(ctx, alias);
+    const char    *cname  = alias;
     /* Emit __extension__ prefix if present in source */
     if (d->u.typedef_decl.has_extension)
         cg_puts(ctx, "__extension__ ");
@@ -6753,14 +6595,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
              *   typedef struct { ... } __attribute__((packed)) Name;
              * Inline the body with the attribute. */
             const char *anon_name = tgt_anon_base->u.type_name.name;
-            const AstNode *anon_sd = NULL;
-            for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
-                const AstNode *dd = ctx->file_ast->u.file.decls.data[k];
-                if (dd && dd->kind == AST_STRUCT_DEF && dd->u.struct_def.name &&
-                    strcmp(dd->u.struct_def.name, anon_name) == 0) {
-                    anon_sd = dd; break;
-                }
-            }
+            const AstNode *anon_sd = cg_find_struct_def(ctx, anon_name);
             if (anon_sd) {
                 const char *kw = anon_sd->u.struct_def.is_union ? "union" : "struct";
                 if (anon_sd->u.struct_def.fields.len > 0) {
@@ -6792,14 +6627,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
         } else if (tgt_is_anon) {
             /* Find the __anon_struct_N def in file_ast and emit inline. */
             const char *anon_name = target->u.type_name.name;
-            const AstNode *anon_sd = NULL;
-            for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
-                const AstNode *dd = ctx->file_ast->u.file.decls.data[k];
-                if (dd && dd->kind == AST_STRUCT_DEF && dd->u.struct_def.name &&
-                    strcmp(dd->u.struct_def.name, anon_name) == 0) {
-                    anon_sd = dd; break;
-                }
-            }
+            const AstNode *anon_sd = cg_find_struct_def(ctx, anon_name);
             if (anon_sd) {
                 const char *kw = anon_sd->u.struct_def.is_union ? "union" : "struct";
                 if (anon_sd->u.struct_def.fields.len > 0) {
@@ -6937,26 +6765,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                     cg_puts(ctx, "typedef ");
                     cg_type_from_ast(ctx, fn->u.type_func.ret);
                     cg_printf(ctx, " (*%s)(", cname);
-                    bool fp = true;
-                    for (size_t i = 0; i < fn->u.type_func.params.len; i++) {
-                        AstNode *par = fn->u.type_func.params.data[i];
-                        if (!par) continue;
-                        if (par->kind == AST_PARAM_DECL && par->u.param_decl.is_vararg) {
-                            if (!fp) cg_puts(ctx, ", ");
-                            cg_puts(ctx, "..."); fp = false; continue;
-                        }
-                        if (!fp) { cg_puts(ctx, ", "); } fp = false;
-                        const AstNode *pty = par->kind == AST_PARAM_DECL
-                                            ? par->u.param_decl.type : par;
-                        Type *pt = ty_from_ast(ctx->ts, (AstNode*)pty, cg_type_scope(ctx), NULL);
-                        const char *pname = (par->kind == AST_PARAM_DECL) ? par->u.param_decl.name : NULL;
-                        bool emit_ok = pty &&
-                            cg_decl_ast(ctx, (AstNode*)pty, pname);
-                        if (!emit_ok && pt)
-                            cg_decl(ctx, pt, pname);
-                    }
-                    if (!fn->u.type_func.params_unspecified && fp)
-                        cg_puts(ctx, "void");
+                    cg_emit_func_params_ast(ctx, fn);
                     cg_puts(ctx, ");\n");
                     goto typedef_done;  /* done */
                 }
@@ -7262,7 +7071,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
      * (non-comma-cont) declaration node via the comma group logic
      * below (see file-scope comma-continuation emission). */
     if (d->u.var_decl.is_comma_cont) return;
-    cg_set_loc(ctx, d->loc);
+    cg_emit_linemarker(ctx, d->loc);
     StorageClass sc = d->u.var_decl.storage;
     /* p43: leading attribute must come BEFORE storage class */
     if (d->u.var_decl.gcc_attrs && d->u.var_decl.fmt & FMTF_ATTRS_LEADING) {
@@ -7311,12 +7120,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
             vty_inner->kind == AST_TYPE_NAME && vty_inner->u.type_name.name &&
             strncmp(vty_inner->u.type_name.name, "__anon_", 7) == 0) {
             const char *anon_nm = vty_inner->u.type_name.name;
-            const AstNode *inner_sd = NULL;
-            for (size_t _k = 0; _k < ctx->file_ast->u.file.decls.len; _k++) {
-                const AstNode *_dd = ctx->file_ast->u.file.decls.data[_k];
-                if (_dd && _dd->kind == AST_STRUCT_DEF && _dd->u.struct_def.name &&
-                    strcmp(_dd->u.struct_def.name, anon_nm) == 0) { inner_sd = _dd; break; }
-            }
+            const AstNode *inner_sd = cg_find_struct_def(ctx, anon_nm);
             if (inner_sd && inner_sd->u.struct_def.fields.len > 0) {
                 const char *kw = inner_sd->u.struct_def.is_union ? "union" : "struct";
                 if (vty_is_const) cg_puts(ctx, "const ");
@@ -7409,7 +7213,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
                 cg_puts(ctx, "}");
                 /* Pointer stars (for `static struct X { } *p = 0`) */
                 for (int _pi = 0; _pi < vty2_nptr; _pi++) cg_puts(ctx, " *");
-                cg_printf(ctx, " %s", cg_resolve_name(ctx, d->u.var_decl.name ? d->u.var_decl.name : ""));
+                cg_printf(ctx, " %s", d->u.var_decl.name ? d->u.var_decl.name : "");
                 /* Emit array suffixes */
                 const AstNode *arr2 = ty_ast;
                 while (arr2 && arr2->kind == AST_TYPE_ARRAY) {
@@ -7429,12 +7233,12 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
          ty_ast->kind == AST_TYPE_ATOMIC);
     if (has_qual && d->u.var_decl.name) {
         cg_type_from_ast(ctx, ty_ast);
-        cg_printf(ctx, " %s", cg_resolve_name(ctx, d->u.var_decl.name));
+        cg_printf(ctx, " %s", d->u.var_decl.name);
     } else {
         /* Emit from AST to preserve qualifiers, typedef aliases, and array forms. */
         bool emitted = ty_ast &&
-                       cg_decl_ast(ctx, ty_ast, cg_resolve_name(ctx, d->u.var_decl.name));
-        if (!emitted && t) cg_decl(ctx, t, cg_resolve_name(ctx, d->u.var_decl.name));
+                       cg_decl_ast(ctx, ty_ast, d->u.var_decl.name);
+        if (!emitted && t) cg_decl(ctx, t, d->u.var_decl.name);
     }
     var_decl_emitted:;
     if (d->u.var_decl.init) {
@@ -7475,7 +7279,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
  * Zero items = forward declaration: emit "enum Name;" (GCC extension). */
 static void cg_enum_c(CgCtx *ctx, const AstNode *d) {
     if (!d || d->kind != AST_ENUM_DEF) return;
-    cg_set_loc(ctx, d->loc);
+    cg_emit_linemarker(ctx, d->loc);
     const char *name = d->u.enum_def.name;
     if (d->u.enum_def.items.len == 0) {
         /* Forward declaration: enum Name; */
@@ -7708,7 +7512,7 @@ static void collect_struct_names(const AstNode *file,
     const char **names = malloc(cap * sizeof *names);
     if (!names) abort();
     for (size_t i = 0; i < file->u.file.decls.len; i++) {
-        const AstNode *d = cg_unwrap_decl(file->u.file.decls.data[i]);
+        const AstNode *d = file->u.file.decls.data[i];
         if (!d) continue;
         const char *nm = NULL;
         if (d->kind == AST_STRUCT_DEF) {
@@ -7983,11 +7787,11 @@ static bool cg_block_uses_name(const AstNode *block, const char *name) {
 
 static void cg_emit_methods(CgCtx *ctx, const AstNode *sd) {
     if (!sd || sd->kind != AST_STRUCT_DEF) return;
-    const char *sname = cg_resolve_name(ctx, sd->u.struct_def.name);
+    const char *sname = sd->u.struct_def.name;
     for (size_t m = 0; m < sd->u.struct_def.methods.len; m++) {
         AstNode *fn = sd->u.struct_def.methods.data[m];
         if (!fn || fn->u.func_def.generic_params.len > 0) continue;
-        cg_set_loc(ctx, fn->loc);
+        cg_emit_linemarker(ctx, fn->loc);
         cg_func(ctx, fn, sname);
         cg_nl(ctx);
     }
@@ -7997,9 +7801,8 @@ static void cg_emit_methods(CgCtx *ctx, const AstNode *sd) {
 static void cg_emit_decl_sharp(CgCtx *ctx, AstNode *d) {
     if (!d) return;
     CppLoc saved_loc = d->loc;
-    d = cg_unwrap_decl(d);
     if (!d) return;
-    cg_set_loc(ctx, saved_loc);
+    cg_emit_linemarker(ctx, saved_loc);
 
     switch (d->kind) {
     case AST_STRUCT_DEF: {
@@ -8017,7 +7820,7 @@ static void cg_emit_decl_sharp(CgCtx *ctx, AstNode *d) {
             strncmp(d->u.struct_def.name, "__anon_", 7) == 0) return;
         const char *kw = d->u.struct_def.is_union ? "union" : "struct";
         const char *nm = d->u.struct_def.name;
-        const char *enm = cg_resolve_name(ctx, nm);
+        const char *enm = nm;
         bool has_body = d->u.struct_def.has_body ||
                         d->u.struct_def.methods.len > 0;
 
@@ -8200,7 +8003,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
         /* Find position of definition */
         size_t def_pos = file->u.file.decls.len;
         for (size_t i = 0; i < file->u.file.decls.len; i++) {
-            const AstNode *d = cg_unwrap_decl(file->u.file.decls.data[i]);
+            const AstNode *d = file->u.file.decls.data[i];
             if (!d) continue;
             const char *dn = NULL;
             if (d->kind == AST_STRUCT_DEF) dn = d->u.struct_def.name;
@@ -8216,7 +8019,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
         /* Check if any decl before def_pos uses this struct */
         bool needs_fwd = false;
         for (size_t i = 0; i < def_pos && !needs_fwd; i++) {
-            const AstNode *d = cg_unwrap_decl(file->u.file.decls.data[i]);
+            const AstNode *d = file->u.file.decls.data[i];
             if (decl_uses_struct(d, name)) needs_fwd = true;
         }
         /* Also check if any earlier fwd_decl_emitted already covers this name */
@@ -8227,7 +8030,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                 already_emitted = true;
         }
         if (needs_fwd && !already_emitted) {
-            const char *enm = cg_resolve_name(ctx, name);
+            const char *enm = name;
             /* Determine struct vs union */
             const char *kw = "struct";
             bool is_class = false;
@@ -8256,7 +8059,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
         TdPos *tds = NULL;
         size_t ntds = 0, tds_cap = 0;
         for (size_t i = 0; i < file->u.file.decls.len; i++) {
-            const AstNode *d = cg_unwrap_decl(file->u.file.decls.data[i]);
+            const AstNode *d = file->u.file.decls.data[i];
             if (!d) continue;
             if (d->kind == AST_TYPEDEF_DECL && d->u.typedef_decl.alias) {
                 if (ntds == tds_cap) {
@@ -8301,7 +8104,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
         size_t nfns = 0, fns_cap = 0;
 
         for (size_t i = 0; i < file->u.file.decls.len; i++) {
-            const AstNode *d = cg_unwrap_decl(file->u.file.decls.data[i]);
+            const AstNode *d = file->u.file.decls.data[i];
             if (!d) continue;
             if (d->kind == AST_FUNC_DEF && d->u.func_def.generic_params.len == 0 &&
                 d->u.func_def.body && d->u.func_def.name) {
@@ -8316,12 +8119,12 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                 /* Extension methods: pass struct_name so cg_func_decl can
                  * mangle the name correctly in the forward declaration. */
                 fns[nfns].sname = d->u.func_def.struct_name
-                    ? cg_resolve_name(ctx, d->u.func_def.struct_name) : NULL;
+                    ? d->u.func_def.struct_name : NULL;
                 nfns++;
             }
             /* Also collect struct methods */
             if (d->kind == AST_STRUCT_DEF) {
-                const char *sn = cg_resolve_name(ctx, d->u.struct_def.name);
+                const char *sn = d->u.struct_def.name;
                 for (size_t m = 0; m < d->u.struct_def.methods.len; m++) {
                     AstNode *fn = d->u.struct_def.methods.data[m];
                     if (fn && fn->u.func_def.generic_params.len == 0 &&
@@ -8349,7 +8152,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
 
             bool referenced_before_def = false;
             for (size_t i = 0; i < def_pos && !referenced_before_def; i++) {
-                const AstNode *d = cg_unwrap_decl(file->u.file.decls.data[i]);
+                const AstNode *d = file->u.file.decls.data[i];
                 if (!d) continue;
                 if (d->kind == AST_FUNC_DEF && d->u.func_def.body) {
                     if (cg_block_uses_name(d->u.func_def.body, fname)) {
@@ -8377,7 +8180,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
              * Sharp mode emits globals in Phase 3a, function bodies in 3b,
              * so any var init referencing this function needs a fwd decl. */
             for (size_t i = def_pos + 1; i < file->u.file.decls.len && !referenced_before_def; i++) {
-                const AstNode *d = cg_unwrap_decl(file->u.file.decls.data[i]);
+                const AstNode *d = file->u.file.decls.data[i];
                 if (!d) continue;
                 if (d->kind == AST_VAR_DECL && d->u.var_decl.init) {
                     if (cg_expr_uses_name(d->u.var_decl.init, fname)) {
@@ -8392,7 +8195,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                  * will emit it — no need to inject a duplicate here. */
                 bool has_source_proto = false;
                 for (size_t i = 0; i < def_pos && !has_source_proto; i++) {
-                    const AstNode *d = cg_unwrap_decl(file->u.file.decls.data[i]);
+                    const AstNode *d = file->u.file.decls.data[i];
                     if (!d || d->kind != AST_FUNC_DEF || d->u.func_def.body) continue;
                     if (d->u.func_def.name &&
                         strcmp(d->u.func_def.name, fname) == 0)
@@ -8430,7 +8233,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                                 if (fwd_decl_emitted[_ei] && defined[_ei] && strcmp(defined[_ei], defined[si]) == 0)
                                     { already_e = true; break; }
                             if (!already_e) {
-                                const char *enm = cg_resolve_name(ctx, defined[si]);
+                                const char *enm = defined[si];
                                 const char *kw = "struct";
                                 if (ctx->file_scope) {
                                     Symbol *sym = scope_lookup_struct_tag(ctx->file_scope, defined[si]);
@@ -8462,7 +8265,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                                     if (fwd_decl_emitted[_ei] && defined[_ei] && strcmp(defined[_ei], defined[si]) == 0)
                                         { already_e = true; break; }
                                 if (!already_e) {
-                                    const char *enm = cg_resolve_name(ctx, defined[si]);
+                                    const char *enm = defined[si];
                                     const char *kw = "struct";
                                     if (ctx->file_scope) {
                                         Symbol *sym = scope_lookup_struct_tag(ctx->file_scope, defined[si]);
@@ -8526,7 +8329,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
     ctx->out = spec_buf;
     for (size_t i = 0; i < file->u.file.decls.len; i++) {
         AstNode *raw_d = file->u.file.decls.data[i];
-        const AstNode *d = cg_unwrap_decl(raw_d);
+        const AstNode *d = raw_d;
         if (!d) continue;
         if (d->kind == AST_FUNC_DEF && d->u.func_def.generic_params.len == 0)
             cg_collect_block(ctx, d->u.func_def.body);
@@ -8675,7 +8478,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
              * entirely to avoid redefinition conflicts. */
             continue;
         }
-        AstNode *uw = cg_unwrap_decl(d);
+        AstNode *uw = d;
         if (!uw) continue;
         if (uw->kind == AST_FUNC_DEF) {
             /* Skip generic templates entirely. */
@@ -8700,8 +8503,8 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                     ss->decl->kind == AST_STRUCT_DEF &&
                     ss->decl->u.struct_def.generic_params.len > 0)
                     continue;
-                const char *snm = cg_resolve_name(ctx,
-                    uw->u.func_def.struct_name);
+                const char *snm =
+                    uw->u.func_def.struct_name;
                 cg_func_decl(ctx, uw, snm);
                 continue;
             }
@@ -8717,7 +8520,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
              * the method bodies to Phase 3b (after specs).  Methods on
              * non-generic structs may reference specialised types. */
             const char *sname = uw->u.struct_def.name;
-            const char *enm = cg_resolve_name(ctx, sname);
+            const char *enm = sname;
             const char *kw = uw->u.struct_def.is_union ? "union" : "struct";
             /* class: emit typedef first so bare name works */
             if (uw->u.struct_def.is_class && uw->u.struct_def.has_body && enm) {
@@ -8825,7 +8628,7 @@ skip_td:;
         AstNode *d = file->u.file.decls.data[i];
         if (!d) continue;
         if (!decl_is_user(ctx, d)) continue;
-        AstNode *uw = cg_unwrap_decl(d);
+        AstNode *uw = d;
         if (uw && uw->kind == AST_FUNC_DEF) {
             /* Skip extension methods of generic structs --
              * Phase 11 handles their specializations. */
@@ -8856,7 +8659,7 @@ skip_td:;
             if (uw->u.struct_def.generic_params.len > 0) continue;
             if (uw->u.struct_def.is_synthetic) continue;
             const char *sname = uw->u.struct_def.name;
-            const char *enm = cg_resolve_name(ctx, sname);
+            const char *enm = sname;
             ctx->cur_struct = enm;
             ctx->cur_struct_def = uw;
             for (size_t mi = 0; mi < uw->u.struct_def.methods.len; mi++) {

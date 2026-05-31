@@ -402,6 +402,26 @@ static void ps_sync(PS *ps) {
     }
 }
 
+static void rollback_diags(PS *ps, size_t save_len) {
+    if (ps->diags && ps->diags->len > save_len) {
+        for (size_t i = save_len; i < ps->diags->len; i++)
+            free(ps->diags->data[i].msg);
+        ps->diags->len = save_len;
+    }
+}
+
+static void skip_balanced_parens(PS *ps) {
+    int depth = 0;
+    while (!ps_at(ps, STOK_EOF)) {
+        SharpTokKind k = ps_peek(ps).kind;
+        if (k == STOK_LPAREN) { depth++; ps_advance(ps); }
+        else if (k == STOK_RPAREN) {
+            if (depth == 0) { ps_advance(ps); break; }
+            depth--; ps_advance(ps);
+        } else { ps_advance(ps); }
+    }
+}
+
 /* Check if a name is a known type (typedef or struct/union tag).
  * Needed because is_type_start must distinguish `Vec<int> vi;` (declaration)
  * from `swap<int>(&x, &y)` (generic function call). */
@@ -692,15 +712,8 @@ static bool eat_attribute_specifiers(PS *ps, char **out_attrs) {
                 if (out_attrs) attrs_append_tokens(out_attrs, ps, start, ps->pos);
                 ate_any = true; continue;
             }
-            int depth = 0;
-            while (!ps_at(ps, STOK_EOF)) {
-                SharpTokKind k = ps_peek(ps).kind;
-                if (k == STOK_LPAREN) { depth++; ps_advance(ps); }
-                else if (k == STOK_RPAREN) {
-                    if (depth == 0) { ps_advance(ps); ps_match(ps, STOK_RPAREN); break; }
-                    depth--; ps_advance(ps);
-                } else { ps_advance(ps); }
-            }
+            skip_balanced_parens(ps);
+            ps_match(ps, STOK_RPAREN);
             if (out_attrs) attrs_append_tokens(out_attrs, ps, start, ps->pos);
             ate_any = true; continue;
         }
@@ -708,15 +721,7 @@ static bool eat_attribute_specifiers(PS *ps, char **out_attrs) {
             size_t asm_start = ps->pos;
             ps_advance(ps);
             if (!ps_match(ps, STOK_LPAREN)) { ate_any = true; continue; }
-            int depth = 0;
-            while (!ps_at(ps, STOK_EOF)) {
-                SharpTokKind k = ps_peek(ps).kind;
-                if (k == STOK_LPAREN) { depth++; ps_advance(ps); }
-                else if (k == STOK_RPAREN) {
-                    if (depth == 0) { ps_advance(ps); break; }
-                    depth--; ps_advance(ps);
-                } else { ps_advance(ps); }
-            }
+            skip_balanced_parens(ps);
             /* p46: preserve asm rename text verbatim */
             if (out_attrs) attrs_append_tokens(out_attrs, ps, asm_start, ps->pos);
             ate_any = true; continue;
@@ -725,15 +730,7 @@ static bool eat_attribute_specifiers(PS *ps, char **out_attrs) {
             size_t decl_start = ps->pos;
             ps_advance(ps);
             if (!ps_match(ps, STOK_LPAREN)) { ate_any = true; continue; }
-            int depth = 0;
-            while (!ps_at(ps, STOK_EOF)) {
-                SharpTokKind k = ps_peek(ps).kind;
-                if (k == STOK_LPAREN) { depth++; ps_advance(ps); }
-                else if (k == STOK_RPAREN) {
-                    if (depth == 0) { ps_advance(ps); break; }
-                    depth--; ps_advance(ps);
-                } else { ps_advance(ps); }
-            }
+            skip_balanced_parens(ps);
             if (out_attrs) attrs_append_tokens(out_attrs, ps, decl_start, ps->pos);
             ate_any = true; continue;
         }
@@ -807,11 +804,7 @@ static bool parse_generic_args(PS *ps, AstVec *args) {
     astvec_free(args);
     *args = (AstVec){0};
     /* Roll back any diagnostics emitted during the failed trial parse. */
-    if (ps->diags && ps->diags->len > save_diag_len) {
-        for (size_t i = save_diag_len; i < ps->diags->len; i++)
-            free(ps->diags->data[i].msg);
-        ps->diags->len = save_diag_len;
-    }
+    rollback_diags(ps, save_diag_len);
     return false;
 }
 
@@ -3368,16 +3361,7 @@ static AstNode *parse_top_decl(PS *ps) {
         size_t start_pos = ps->pos;
         ps_advance(ps);
         if (ps_match(ps, STOK_LPAREN)) {
-            int depth = 0;
-            while (!ps_at(ps, STOK_EOF)) {
-                SharpTokKind k = ps_peek(ps).kind;
-                if (k == STOK_LPAREN)       { depth++; ps_advance(ps); }
-                else if (k == STOK_RPAREN)  {
-                    ps_advance(ps);
-                    if (depth == 0) break;
-                    depth--;
-                } else { ps_advance(ps); }
-            }
+            skip_balanced_parens(ps);
         }
         size_t end_pos = ps->pos;
         ps_match(ps, STOK_SEMI);
@@ -3733,11 +3717,7 @@ static AstNode *parse_top_decl(PS *ps) {
                         }
                     }
                     ps->pos = save2;
-                    if (ps->diags && ps->diags->len > save_diag2) {
-                        for (size_t i = save_diag2; i < ps->diags->len; i++)
-                            free(ps->diags->data[i].msg);
-                        ps->diags->len = save_diag2;
-                    }
+                    rollback_diags(ps, save_diag2);
                 }
                 /* Clean up the typedefs we just added for probing */
                 for (size_t gi = 0; gi < tmp_params.len; gi++) {
@@ -3783,11 +3763,7 @@ static AstNode *parse_top_decl(PS *ps) {
                 /* Rollback */
                 ps->pos = save_pos;
                 ps->pending_close = save_pending;
-                if (ps->diags && ps->diags->len > save_diag_len) {
-                    for (size_t i = save_diag_len; i < ps->diags->len; i++)
-                        free(ps->diags->data[i].msg);
-                    ps->diags->len = save_diag_len;
-                }
+                rollback_diags(ps, save_diag_len);
                 for (size_t gi = 0; gi < tmp_params.len; gi++) {
                     AstNode *gp = tmp_params.data[gi];
                     if (gp && gp->kind == AST_GENERIC_PARAM && gp->u.generic_param.name)
@@ -3797,11 +3773,7 @@ static AstNode *parse_top_decl(PS *ps) {
             } else {
                 ps->pos = save_pos;
                 ps->pending_close = save_pending;
-                if (ps->diags && ps->diags->len > save_diag_len) {
-                    for (size_t i = save_diag_len; i < ps->diags->len; i++)
-                        free(ps->diags->data[i].msg);
-                    ps->diags->len = save_diag_len;
-                }
+                rollback_diags(ps, save_diag_len);
                 astvec_free(&tmp_params);
             }
         }
@@ -4036,11 +4008,7 @@ static AstNode *parse_top_decl(PS *ps) {
             if (cname_tok > save_pos) {
                 /* Restore position and rebuild return type */
                 ps->pos = save_pos;
-                if (ps->diags && ps->diags->len > save_diag) {
-                    for (size_t i = save_diag; i < ps->diags->len; i++)
-                        free(ps->diags->data[i].msg);
-                    ps->diags->len = save_diag;
-                }
+                rollback_diags(ps, save_diag);
 
                 AstNode *ret_ty = NULL;
                 while (ps->pos < cname_tok && !ps_at(ps, STOK_EOF)) {
@@ -4065,11 +4033,7 @@ static AstNode *parse_top_decl(PS *ps) {
 
             /* Restore on failure */
             ps->pos = save_pos;
-            if (ps->diags && ps->diags->len > save_diag) {
-                for (size_t i = save_diag; i < ps->diags->len; i++)
-                    free(ps->diags->data[i].msg);
-                ps->diags->len = save_diag;
-            }
+            rollback_diags(ps, save_diag);
         }
     }
 
@@ -4134,11 +4098,7 @@ static AstNode *parse_top_decl(PS *ps) {
             free(ds.gcc_attrs);
             memset(&ds, 0, sizeof ds);
             ps->pos = ds_save_pos;
-            if (ps->diags && ps->diags->len > ds_save_diag) {
-                for (size_t i = ds_save_diag; i < ps->diags->len; i++)
-                    free(ps->diags->data[i].msg);
-                ps->diags->len = ds_save_diag;
-            }
+            rollback_diags(ps, ds_save_diag);
             goto try_ext_method;
         }
 
@@ -5500,11 +5460,7 @@ static AstNode *parse_primary(PS *ps) {
             }
             /* parse_generic_args failed — roll back */
             ps->pos = save2;
-            if (ps->diags && ps->diags->len > save_diag) {
-                for (size_t i = save_diag; i < ps->diags->len; i++)
-                    free(ps->diags->data[i].msg);
-                ps->diags->len = save_diag;
-            }
+            rollback_diags(ps, save_diag);
         }
 
         return parse_postfix(ps, id);
@@ -5714,16 +5670,7 @@ static AstNode *parse_stmt(PS *ps) {
         }
         eat_attribute_specifiers(ps, NULL);
         if (ps_match(ps, STOK_LPAREN)) {
-            int depth = 0;
-            while (!ps_at(ps, STOK_EOF)) {
-                SharpTokKind k = ps_peek(ps).kind;
-                if (k == STOK_LPAREN)      { depth++; ps_advance(ps); }
-                else if (k == STOK_RPAREN) {
-                    ps_advance(ps);
-                    if (depth == 0) break;
-                    depth--;
-                } else { ps_advance(ps); }
-            }
+            skip_balanced_parens(ps);
         }
         size_t end_pos = ps->pos;
         ps_match(ps, STOK_SEMI);
@@ -5740,16 +5687,7 @@ static AstNode *parse_stmt(PS *ps) {
         size_t start_pos = ps->pos;
         ps_advance(ps);
         if (ps_match(ps, STOK_LPAREN)) {
-            int depth = 0;
-            while (!ps_at(ps, STOK_EOF)) {
-                SharpTokKind k = ps_peek(ps).kind;
-                if (k == STOK_LPAREN)       { depth++; ps_advance(ps); }
-                else if (k == STOK_RPAREN) {
-                    ps_advance(ps);
-                    if (depth == 0) break;
-                    depth--;
-                } else { ps_advance(ps); }
-            }
+            skip_balanced_parens(ps);
         }
         size_t end_pos = ps->pos;
         ps_match(ps, STOK_SEMI);
@@ -6057,8 +5995,9 @@ void file_add_include(AstNode *file, const char *inc_str) {
         cpp_xstrdup(inc_str);
 }
 
-AstNode *parse_file(const SharpTok *tokens, size_t ntokens,
-                    const char *filename, FeDiagArr *diags) {
+static AstNode *parse_file_impl(const SharpTok *tokens, size_t ntokens,
+                                const char *filename, FeDiagArr *diags,
+                                const char **extra_typedefs) {
     PS ps = { tokens, ntokens, 0, filename, diags,
               /*in_defer=*/false, /*pending_close=*/0,
               /*pending_decls=*/{0}, /*typedefs=*/{0}, /*tag_names=*/{0},
@@ -6069,6 +6008,12 @@ AstNode *parse_file(const SharpTok *tokens, size_t ntokens,
 
     /* Phase G: build generic_names before parsing any declarations. */
     prescan_generic_defs(&ps);
+
+    /* Pre-populate typedef set if extra names were provided */
+    if (extra_typedefs) {
+        for (size_t i = 0; extra_typedefs[i]; i++)
+            td_add(&ps.typedefs, extra_typedefs[i]);
+    }
 
     AstNode *file = ast_node_new(AST_FILE, ps_peek(&ps).loc);
     file->u.file.path = cpp_xstrndup(filename, strlen(filename));
@@ -6123,59 +6068,13 @@ AstNode *parse_file(const SharpTok *tokens, size_t ntokens,
     return file;
 }
 
+AstNode *parse_file(const SharpTok *tokens, size_t ntokens,
+                    const char *filename, FeDiagArr *diags) {
+    return parse_file_impl(tokens, ntokens, filename, diags, NULL);
+}
+
 AstNode *parse_file_with_typedefs(const SharpTok *tokens, size_t ntokens,
-                                  const char *filename, FeDiagArr *diags,
-                                  const char **extra_typedefs) {
-    PS ps = { tokens, ntokens, 0, filename, diags,
-              /*in_defer=*/false, /*pending_close=*/0,
-              /*pending_decls=*/{0}, /*typedefs=*/{0}, /*tag_names=*/{0},
-              /*typedef_aliases=*/{0}, /*generic_names=*/{0},
-              /*anon_struct_counter=*/0, /*struct_body_depth=*/0,
-              /*last_decl_attr=*/NULL,
-              /*last_params_unspecified=*/false, /*last_name_paren=*/false };
-
-    /* Phase G: build generic_names before parsing any declarations. */
-    prescan_generic_defs(&ps);
-
-    /* Pre-populate typedef set if extra names were provided */
-    if (extra_typedefs) {
-        for (size_t i = 0; extra_typedefs[i]; i++)
-            td_add(&ps.typedefs, extra_typedefs[i]);
-    }
-
-    AstNode *file = ast_node_new(AST_FILE, ps_peek(&ps).loc);
-    file->u.file.path = cpp_xstrndup(filename, strlen(filename));
-
-    while (!ps_at(&ps, STOK_EOF)) {
-        AstNode *decl = parse_top_decl(&ps);
-        for (size_t i = 0; i < ps.pending_decls.len; i++) {
-            AstNode *pd = ps.pending_decls.data[i];
-            if (pd && (pd->kind == AST_STRUCT_DEF || pd->kind == AST_ENUM_DEF)) {
-                astvec_push(&file->u.file.decls, pd);
-                if (pd->u.struct_def.name) {
-                    td_add(&ps.typedefs, pd->u.struct_def.name);
-                    td_add(&ps.tag_names, pd->u.struct_def.name);
-                }
-            }
-        }
-        if (decl) {
-            astvec_push(&file->u.file.decls, decl);
-            if (decl->kind == AST_STRUCT_DEF && decl->u.struct_def.name) {
-                td_add(&ps.typedefs, decl->u.struct_def.name);
-                td_add(&ps.tag_names, decl->u.struct_def.name);
-            }
-        }
-        for (size_t i = 0; i < ps.pending_decls.len; i++) {
-            AstNode *pd = ps.pending_decls.data[i];
-            if (pd && pd->kind != AST_STRUCT_DEF && pd->kind != AST_ENUM_DEF)
-                astvec_push(&file->u.file.decls, pd);
-        }
-        ps.pending_decls.len = 0;
-    }
-    astvec_free(&ps.pending_decls);
-    td_free(&ps.typedefs);
-    td_free(&ps.tag_names);
-    td_free(&ps.typedef_aliases);
-    td_free(&ps.generic_names);   /* Phase G */
-    return file;
+                                   const char *filename, FeDiagArr *diags,
+                                   const char **extra_typedefs) {
+    return parse_file_impl(tokens, ntokens, filename, diags, extra_typedefs);
 }

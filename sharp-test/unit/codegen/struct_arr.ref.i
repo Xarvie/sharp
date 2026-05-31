@@ -129,7 +129,7 @@ int main() {
         return 9;
 
 #line 60 "sharp-test/unit/codegen/struct_arr.ce"
-    Point p4 = Point__add((__extension__(({ Point __sharp_chain0 = (make_point(1, 2)); &__sharp_chain0; }))), make_point(3, 4));
+    Point p4 = Point__add((__extension__(({ Point __sharp_rv0 = (make_point(1, 2)); &__sharp_rv0; }))), make_point(3, 4));
 
 #line 61 "sharp-test/unit/codegen/struct_arr.ce"
     if (p4.x != 4) 

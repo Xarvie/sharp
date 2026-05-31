@@ -7,6 +7,34 @@
 #include <stdio.h>
 #include <stdarg.h>
 
+static Type *ty_peel_to_struct(Type *t) {
+    while (t) {
+        if (t->kind == TY_STRUCT) return t;
+        if (t->kind == TY_CONST)  { t = t->u.const_.base; continue; }
+        if (t->kind == TY_PTR)    { t = t->u.ptr.base; continue; }
+        if (t->kind == TY_ARRAY)  { t = t->u.array.base; continue; }
+        break;
+    }
+    return NULL;
+}
+
+static Symbol *find_extension_method(Scope *file_scope,
+                                      const char *struct_name,
+                                      const char *method_name) {
+    if (!file_scope || !struct_name || !method_name) return NULL;
+    for (size_t i = 0; i < file_scope->nbuckets; i++) {
+        for (Symbol *s = file_scope->buckets[i]; s && s != (Symbol*)1; s = s->next) {
+            if (s->kind != SYM_FUNC || !s->decl) continue;
+            if (s->decl->kind != AST_FUNC_DEF) continue;
+            if (!s->decl->u.func_def.struct_name) continue;
+            if (strcmp(s->decl->u.func_def.struct_name, struct_name) != 0) continue;
+            if (s->decl->u.func_def.name && strcmp(s->decl->u.func_def.name, method_name) == 0)
+                return s;
+        }
+    }
+    return NULL;
+}
+
 /* =========================================================================
  * Internal state
  * ====================================================================== */
@@ -80,36 +108,32 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr);
 /* =========================================================================
  * Diagnostic helpers
  * ====================================================================== */
-static void sema_err(SS *ss, CppLoc loc, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
+static void sema_diag(SS *ss, CppLoc loc, int level, const char *fmt, va_list ap) {
+    va_list ap2;
+    va_copy(ap2, ap);
     int n = vsnprintf(NULL, 0, fmt, ap);
     va_end(ap);
-    if (n < 0) n = 0; /* encoding error — fall back to empty message */
+    if (n < 0) n = 0;
     char *msg = malloc((size_t)(n + 1));
     if (!msg) abort();
-    va_start(ap, fmt);
-    vsnprintf(msg, (size_t)(n + 1), fmt, ap);
-    va_end(ap);
-    CppDiag d = { CPP_DIAG_ERROR, loc, msg };
+    vsnprintf(msg, (size_t)(n + 1), fmt, ap2);
+    va_end(ap2);
+    CppDiag d = { level, loc, msg };
     fe_diag_push(ss->ctx->diags, d);
 }
 
-/* warning-level diagnostic — does not set had_error.
- * Used for cases where code generation can still proceed correctly
- * (e.g. undefined names that are macro-renamed library functions). */
+static void sema_err(SS *ss, CppLoc loc, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    sema_diag(ss, loc, CPP_DIAG_ERROR, fmt, ap);
+    va_end(ap);
+}
+
 static void sema_warn(SS *ss, CppLoc loc, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    int n = vsnprintf(NULL, 0, fmt, ap);
+    sema_diag(ss, loc, CPP_DIAG_WARNING, fmt, ap);
     va_end(ap);
-    char *msg = malloc((size_t)(n + 1));
-    if (!msg) abort();
-    va_start(ap, fmt);
-    vsnprintf(msg, (size_t)(n + 1), fmt, ap);
-    va_end(ap);
-    CppDiag d = { CPP_DIAG_WARNING, loc, msg };
-    fe_diag_push(ss->ctx->diags, d);
 }
 
 /* =========================================================================
@@ -180,7 +204,7 @@ static bool assign_compat(TyStore *ts, Type *lhs, Type *rhs) {
         if (lhs->u.vector.count == rhs->u.vector.count &&
             ty_eq(ty_unconst(ts, lhs->u.vector.elem),
                   ty_unconst(ts, rhs->u.vector.elem))) return true;
-        return true;
+        return false;
     }
     if (ty_is_vector(lhs) && ty_is_arithmetic(rhs)) return true;
     if (ty_is_arithmetic(lhs) && ty_is_vector(rhs)) return true;
@@ -448,56 +472,44 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
                  * extension operators (struct_name != NULL). */
                 if (lt_unconst && lt_unconst->kind == TY_STRUCT &&
                     lt_unconst->u.struct_.name) {
-                    Scope *fs = ss->ctx->file_scope;
                     const char *sname = lt_unconst->u.struct_.name;
-                    for (size_t b = 0; b < fs->nbuckets; b++) {
-                        Symbol *es = fs->buckets[b];
-                        for (; es && es != (Symbol*)1; es = es->next) {
-                            if (es->kind != SYM_FUNC || !es->decl) continue;
-                            if (es->decl->kind != AST_FUNC_DEF) continue;
-                            if (!es->decl->u.func_def.is_operator) continue;
-                            if (!es->decl->u.func_def.struct_name) continue;
-                            if (strcmp(es->decl->u.func_def.name, op_nm) != 0) continue;
-                            if (strcmp(es->decl->u.func_def.struct_name, sname) != 0) continue;
-                            /* Match LHS param: `this` (ptr to struct) or direct struct */
-                            if (es->decl->u.func_def.params.len < 1) continue;
-                            AstNode *p0 = es->decl->u.func_def.params.data[0];
-                            if (!p0 || !p0->u.param_decl.type) continue;
+                    Symbol *es = find_extension_method(ss->ctx->file_scope, sname, op_nm);
+                    if (es && es->decl && es->decl->kind == AST_FUNC_DEF &&
+                        es->decl->u.func_def.is_operator &&
+                        es->decl->u.func_def.params.len >= 1) {
+                        AstNode *p0 = es->decl->u.func_def.params.data[0];
+                        if (p0 && p0->u.param_decl.type) {
                             Scope *mscope = es->decl->sem_scope
                                           ? es->decl->sem_scope : ss->scope;
                             Type *p0t = ty_from_ast(ts, p0->u.param_decl.type,
                                                     mscope, NULL);
-                            Type *p0u = p0t;
-                            if (p0u && p0u->kind == TY_CONST)
-                                p0u = p0u->u.const_.base;
-                            /* Extension methods have `this` as StructType* */
-                            if (p0u && p0u->kind == TY_PTR)
-                                p0u = p0u->u.ptr.base;
-                            if (p0u && p0u->kind == TY_CONST)
-                                p0u = p0u->u.const_.base;
-                            if (!p0u || p0u->kind != TY_STRUCT) continue;
-                            if (strcmp(p0u->u.struct_.name, sname) != 0) continue;
-                            /* RHS match check for binary operators */
-                            if (es->decl->u.func_def.params.len >= 2 &&
-                                rt_unc && rt_unc->kind == TY_STRUCT) {
-                                AstNode *p1 = es->decl->u.func_def.params.data[1];
-                                if (p1 && p1->u.param_decl.type) {
-                                    Type *p1t = ty_from_ast(ts,
-                                        p1->u.param_decl.type, mscope, NULL);
-                                    Type *p1u = p1t;
-                                    if (p1u && p1u->kind == TY_CONST)
-                                        p1u = p1u->u.const_.base;
-                                    if (p1u && p1u->kind == TY_STRUCT &&
-                                        strcmp(p1u->u.struct_.name,
-                                               rt_unc->u.struct_.name) != 0)
-                                        continue;
+                            Type *p0u = ty_peel_to_struct(p0t);
+                            if (p0u && strcmp(p0u->u.struct_.name, sname) == 0) {
+                                /* RHS match check for binary operators */
+                                bool rhs_ok = true;
+                                if (es->decl->u.func_def.params.len >= 2 &&
+                                    rt_unc && rt_unc->kind == TY_STRUCT) {
+                                    AstNode *p1 = es->decl->u.func_def.params.data[1];
+                                    if (p1 && p1->u.param_decl.type) {
+                                        Type *p1t = ty_from_ast(ts,
+                                            p1->u.param_decl.type, mscope, NULL);
+                                        Type *p1u = p1t;
+                                        if (p1u && p1u->kind == TY_CONST)
+                                            p1u = p1u->u.const_.base;
+                                        if (p1u && p1u->kind == TY_STRUCT &&
+                                            strcmp(p1u->u.struct_.name,
+                                                   rt_unc->u.struct_.name) != 0)
+                                            rhs_ok = false;
+                                    }
+                                }
+                                if (rhs_ok) {
+                                    Type *ret = ty_from_ast(ts,
+                                        es->decl->u.func_def.ret_type, mscope, NULL);
+                                    if (ret && !ty_is_error(ret) && lt_unconst)
+                                        ret = sema_subst_for_struct(ts, lt_unconst, ret);
+                                    return ret ? ret : ty_int(ts);
                                 }
                             }
-                            Type *ret = ty_from_ast(ts,
-                                es->decl->u.func_def.ret_type, mscope, NULL);
-                            if (ret && !ty_is_error(ret) && lt_unconst)
-                                ret = sema_subst_for_struct(ts, lt_unconst, ret);
-                            return ret ? ret : ty_int(ts);
                         }
                     }
                 }
@@ -651,22 +663,14 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
                 /* (3) extension method operator in file scope
                  *     (e.g. `Vec2 Vec2.operator-(this) { ... }`). */
                 const char *sname = ot_unc->u.struct_.name;
-                Scope *fs = ss->ctx->file_scope;
-                for (size_t b = 0; b < fs->nbuckets; b++) {
-                    for (Symbol *es = fs->buckets[b];
-                         es && es != (Symbol*)1; es = es->next) {
-                        if (es->kind != SYM_FUNC || !es->decl) continue;
-                        if (es->decl->kind != AST_FUNC_DEF) continue;
-                        if (!es->decl->u.func_def.is_operator) continue;
-                        if (!es->decl->u.func_def.struct_name) continue;
-                        if (strcmp(es->decl->u.func_def.name, op_nm) != 0) continue;
-                        if (strcmp(es->decl->u.func_def.struct_name, sname) != 0) continue;
-                        Scope *mscope = es->decl->sem_scope
-                                      ? es->decl->sem_scope : ss->scope;
-                        Type *ret = ty_from_ast(ts,
-                            es->decl->u.func_def.ret_type, mscope, NULL);
-                        return sema_subst_for_struct(ts, ot_unc, ret);
-                    }
+                Symbol *es = find_extension_method(ss->ctx->file_scope, sname, op_nm);
+                if (es && es->decl && es->decl->kind == AST_FUNC_DEF &&
+                    es->decl->u.func_def.is_operator) {
+                    Scope *mscope = es->decl->sem_scope
+                                  ? es->decl->sem_scope : ss->scope;
+                    Type *ret = ty_from_ast(ts,
+                        es->decl->u.func_def.ret_type, mscope, NULL);
+                    return sema_subst_for_struct(ts, ot_unc, ret);
                 }
             }
         }
@@ -1212,31 +1216,13 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                  * `RetType StructName.operator[](this, ...) { }`. */
                 Symbol *eosym = NULL;
                 {
-                    Type *peel = base_t;
-                    while (peel) {
-                        if (peel->kind == TY_CONST) { peel = peel->u.const_.base; continue; }
-                        if (peel->kind == TY_PTR)   { peel = peel->u.ptr.base; continue; }
-                        if (peel->kind == TY_ARRAY)  { peel = peel->u.array.base; continue; }
-                        if (peel->kind == TY_STRUCT) break;
-                        break;
-                    }
-                    if (peel && peel->kind == TY_STRUCT && ss->ctx->file_scope) {
-                        Scope *fs = ss->ctx->file_scope;
-                        const char *sname = peel->u.struct_.name;
-                        for (size_t b = 0; b < fs->nbuckets; b++) {
-                            Symbol *es = fs->buckets[b];
-                            for (; es && es != (Symbol*)1; es = es->next) {
-                                if (es->kind != SYM_FUNC || !es->decl) continue;
-                                if (es->decl->kind != AST_FUNC_DEF) continue;
-                                if (!es->decl->u.func_def.is_operator) continue;
-                                if (!es->decl->u.func_def.struct_name) continue;
-                                if (strcmp(es->decl->u.func_def.name, "operator[]") != 0) continue;
-                                if (strcmp(es->decl->u.func_def.struct_name, sname) != 0) continue;
-                                eosym = es;
-                                break;
-                            }
-                            if (eosym) break;
-                        }
+                    Type *peel = ty_peel_to_struct(base_t);
+                    if (peel && ss->ctx->file_scope) {
+                        Symbol *es = find_extension_method(ss->ctx->file_scope,
+                            peel->u.struct_.name, "operator[]");
+                        if (es && es->decl && es->decl->kind == AST_FUNC_DEF &&
+                            es->decl->u.func_def.is_operator)
+                            eosym = es;
                     }
                 }
                 if (eosym && eosym->decl && eosym->decl->kind == AST_FUNC_DEF) {
@@ -1679,30 +1665,14 @@ static void sema_func(SemaCtx *ctx, Scope *parent_scope, AstNode *fn) {
  * its Scope*.  arrow=true means we expect a pointer receiver. */
 static Scope *struct_scope_of(TyStore *ts, Type *t, Scope *file_scope) {
     (void)ts;
-    if (!t) return NULL;
-    /* strip top-level const */
-    if (t->kind == TY_CONST) t = t->u.const_.base;
-    /* strip pointer (for arrow access or pointer receiver) */
-    if (t->kind == TY_PTR) {
-        t = t->u.ptr.base;
-        if (t && t->kind == TY_CONST) t = t->u.const_.base;
-    }
-    /* TY_ARRAY decays to pointer-to-element when used as
-     * the operand of `.` or `->`.  Without this strip, `pair p[1];
-     * p->x;` reports "no member 'x' in struct" — cJSON 1.7.18's
-     * `printbuffer buffer[1]; buffer->buffer = …` hits this exactly.
-     * Strip element-then-const to mirror the TY_PTR branch above. */
-    if (t && t->kind == TY_ARRAY) {
-        t = t->u.array.base;
-        if (t && t->kind == TY_CONST) t = t->u.const_.base;
-    }
-    if (!t || t->kind != TY_STRUCT) return NULL;
+    Type *st = ty_peel_to_struct(t);
+    if (!st) return NULL;
     /* prefer decl-attached scope from Phase 4 */
-    if (t->u.struct_.decl && t->u.struct_.decl->sem_scope)
-        return (Scope *)t->u.struct_.decl->sem_scope;
+    if (st->u.struct_.decl && st->u.struct_.decl->sem_scope)
+        return (Scope *)st->u.struct_.decl->sem_scope;
     /* fallback: look up by name in file scope */
     if (file_scope) {
-        Symbol *sym = scope_lookup_type(file_scope, t->u.struct_.name);
+        Symbol *sym = scope_lookup_type(file_scope, st->u.struct_.name);
         if (sym && sym->decl && sym->decl->sem_scope)
             return (Scope *)sym->decl->sem_scope;
     }
@@ -1742,28 +1712,12 @@ static Symbol *struct_member(TyStore *ts, Type *recv_type, const char *name,
     /* Extension method fallback: search file scope for SYM_FUNC with
      * matching struct_name (recv_type is pointer to struct/class). */
     if (file_scope) {
-        /* Extract underlying struct/class name from recv_type */
-        Type *peel = recv_type;
-        while (peel) {
-            if (peel->kind == TY_CONST)     { peel = peel->u.const_.base; continue; }
-            if (peel->kind == TY_PTR)       { peel = peel->u.ptr.base; continue; }
-            if (peel->kind == TY_STRUCT)    break;
-            break;
-        }
-        if (peel && peel->kind == TY_STRUCT) {
+        Type *peel = ty_peel_to_struct(recv_type);
+        if (peel) {
             const char *sname = peel->u.struct_.name;
-            for (size_t i = 0; i < file_scope->nbuckets; i++) {
-                for (Symbol *esym = file_scope->buckets[i];
-                     esym && esym != (Symbol*)1; esym = esym->next) {
-                if (esym->kind != SYM_FUNC || !esym->decl) continue;
-                if (esym->decl->kind != AST_FUNC_DEF) continue;
-                if (!esym->decl->u.func_def.struct_name) continue;
-                if (strcmp(esym->decl->u.func_def.name, name) != 0) continue;
-                if (strcmp(esym->decl->u.func_def.struct_name, sname) != 0) continue;
-                return esym;
-            }
+            Symbol *esym = find_extension_method(file_scope, sname, name);
+            if (esym) return esym;
         }
-    }
     }
     return NULL;
 }
@@ -1833,12 +1787,7 @@ static Type *sema_field_access_expr(SS *ss, AstNode *expr) {
                                field_scope ? field_scope : ss->scope,
                                NULL /* suppress "unknown 'T'" for generic params */);
         /* Substitute generic params if the receiver is a concrete instantiation. */
-        Type *base_t2 = recv_t;
-        if (base_t2 && base_t2->kind == TY_CONST)  base_t2 = base_t2->u.const_.base;
-        if (base_t2 && base_t2->kind == TY_PTR)    base_t2 = base_t2->u.ptr.base;
-        /* array decays to ptr-to-element for `.`/`->`. */
-        if (base_t2 && base_t2->kind == TY_ARRAY)  base_t2 = base_t2->u.array.base;
-        if (base_t2 && base_t2->kind == TY_CONST)  base_t2 = base_t2->u.const_.base;
+        Type *base_t2 = ty_peel_to_struct(recv_t);
         ft = sema_subst_for_struct(ts, base_t2, ft);
         return ft;
     }
@@ -1933,46 +1882,38 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
             /* Extension method fallback: look up SYM_FUNC at file scope
              * whose decl has matching struct_name. */
             if (ss->ctx && ss->ctx->file_scope) {
-                Scope *fs = ss->ctx->file_scope;
-                for (size_t i = 0; i < fs->nbuckets; i++) {
-                    for (Symbol *esym = fs->buckets[i];
-                         esym && esym != (Symbol*)1; esym = esym->next) {
-                        if (esym->kind != SYM_FUNC || !esym->decl) continue;
-                        if (esym->decl->kind != AST_FUNC_DEF) continue;
-                        if (!esym->decl->u.func_def.struct_name) continue;
-                        if (strcmp(esym->decl->u.func_def.name, method) != 0) continue;
-                        if (strcmp(esym->decl->u.func_def.struct_name, assoc_struct_name) != 0) continue;
-                        /* Found matching extension method */
-                        AstNode *efn = esym->decl;
-                        Scope *mscope = efn->sem_scope ? efn->sem_scope : ss->scope;
-                        Type *ret_t = ty_from_ast(ts, efn->u.func_def.ret_type, mscope, NULL);
-                        /* For generic receivers (e.g. Wrapper<int>.of(255)),
-                         * substitute T→int in return type. */
-                        if (recv_node && recv_node->kind == AST_CAST &&
-                            recv_node->u.cast.operand == NULL &&
-                            recv_node->u.cast.type &&
-                            recv_node->u.cast.type->kind == AST_TYPE_GENERIC) {
-                            const AstNode *gt = recv_node->u.cast.type;
-                            const char *gname = gt->u.type_generic.name;
-                            size_t ngt = gt->u.type_generic.args.len;
-                            Type **gtargs = ngt ? malloc(ngt * sizeof *gtargs) : NULL;
-                            if (gtargs || ngt == 0) {
-                                for (size_t gi = 0; gi < ngt; gi++)
-                                    gtargs[gi] = ty_from_ast(ts,
-                                        gt->u.type_generic.args.data[gi], ss->scope, NULL);
-                                Symbol *gsym = scope_lookup_type(ss->scope, gname);
-                                AstNode *gdecl = (gsym && gsym->decl &&
-                                                  gsym->decl->kind == AST_STRUCT_DEF)
-                                                 ? gsym->decl : NULL;
-                                Type *concrete = ty_struct_type(ts, gname,
-                                                                gtargs, ngt, gdecl);
-                                if (concrete && !ty_is_error(concrete))
-                                    ret_t = sema_subst_for_struct(ts, concrete, ret_t);
-                                free(gtargs);
-                            }
+                Symbol *esym = find_extension_method(ss->ctx->file_scope,
+                    assoc_struct_name, method);
+                if (esym && esym->decl && esym->decl->kind == AST_FUNC_DEF) {
+                    AstNode *efn = esym->decl;
+                    Scope *mscope = efn->sem_scope ? efn->sem_scope : ss->scope;
+                    Type *ret_t = ty_from_ast(ts, efn->u.func_def.ret_type, mscope, NULL);
+                    /* For generic receivers (e.g. Wrapper<int>.of(255)),
+                     * substitute T→int in return type. */
+                    if (recv_node && recv_node->kind == AST_CAST &&
+                        recv_node->u.cast.operand == NULL &&
+                        recv_node->u.cast.type &&
+                        recv_node->u.cast.type->kind == AST_TYPE_GENERIC) {
+                        const AstNode *gt = recv_node->u.cast.type;
+                        const char *gname = gt->u.type_generic.name;
+                        size_t ngt = gt->u.type_generic.args.len;
+                        Type **gtargs = ngt ? malloc(ngt * sizeof *gtargs) : NULL;
+                        if (gtargs || ngt == 0) {
+                            for (size_t gi = 0; gi < ngt; gi++)
+                                gtargs[gi] = ty_from_ast(ts,
+                                    gt->u.type_generic.args.data[gi], ss->scope, NULL);
+                            Symbol *gsym = scope_lookup_type(ss->scope, gname);
+                            AstNode *gdecl = (gsym && gsym->decl &&
+                                              gsym->decl->kind == AST_STRUCT_DEF)
+                                             ? gsym->decl : NULL;
+                            Type *concrete = ty_struct_type(ts, gname,
+                                                            gtargs, ngt, gdecl);
+                            if (concrete && !ty_is_error(concrete))
+                                ret_t = sema_subst_for_struct(ts, concrete, ret_t);
+                            free(gtargs);
                         }
-                        return ret_t;
                     }
+                    return ret_t;
                 }
             }
             sema_err(ss, expr->loc,
@@ -2060,10 +2001,7 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
     Scope *mscope = fn->sem_scope ? fn->sem_scope : ss->scope;
     Type *ret_t = ty_from_ast(ts, fn->u.func_def.ret_type, mscope, NULL);
     /* Substitute generic params if receiver is a concrete instantiation. */
-    Type *base_t3 = recv_t;
-    if (base_t3 && base_t3->kind == TY_CONST) base_t3 = base_t3->u.const_.base;
-    if (base_t3 && base_t3->kind == TY_PTR)   base_t3 = base_t3->u.ptr.base;
-    if (base_t3 && base_t3->kind == TY_CONST) base_t3 = base_t3->u.const_.base;
+    Type *base_t3 = ty_peel_to_struct(recv_t);
     return sema_subst_for_struct(ts, base_t3, ret_t);
 }
 
@@ -2484,19 +2422,11 @@ static int eval_has_operator(SS *ss, const AstNode *expr) {
          * ctx->file_scope may be a function-local scope. */
         Scope *fs = ss->ctx->file_scope;
         while (fs && fs->kind != SCOPE_FILE) fs = fs->parent;
-        if (!fs) return 0;
-        const char *sname = t->u.struct_.name;
-        for (size_t b = 0; b < fs->nbuckets; b++) {
-            Symbol *es = fs->buckets[b];
-            for (; es && es != (Symbol*)1; es = es->next) {
-                if (es->kind != SYM_FUNC || !es->decl) continue;
-                if (es->decl->kind != AST_FUNC_DEF) continue;
-                if (!es->decl->u.func_def.is_operator) continue;
-                if (!es->decl->u.func_def.struct_name) continue;
-                if (strcmp(es->decl->u.func_def.name, opname) != 0) continue;
-                if (strcmp(es->decl->u.func_def.struct_name, sname) != 0) continue;
+        if (fs) {
+            Symbol *es = find_extension_method(fs, t->u.struct_.name, opname);
+            if (es && es->decl && es->decl->kind == AST_FUNC_DEF &&
+                es->decl->u.func_def.is_operator)
                 return 1;
-            }
         }
     }
     return 0;
@@ -2593,18 +2523,10 @@ static int eval_has_method(SS *ss, const AstNode *expr) {
          * scope rather than the actual file scope. */
         Scope *fs = ss->ctx->file_scope;
         while (fs && fs->kind != SCOPE_FILE) fs = fs->parent;
-        if (!fs) return 0;
-        const char *sname = t->u.struct_.name;
-        for (size_t b = 0; b < fs->nbuckets; b++) {
-            Symbol *es = fs->buckets[b];
-            for (; es && es != (Symbol*)1; es = es->next) {
-                if (es->kind != SYM_FUNC || !es->decl) continue;
-                if (es->decl->kind != AST_FUNC_DEF) continue;
-                if (!es->decl->u.func_def.struct_name) continue;
-                if (strcmp(es->decl->u.func_def.name, name) != 0) continue;
-                if (strcmp(es->decl->u.func_def.struct_name, sname) != 0) continue;
+        if (fs) {
+            Symbol *es = find_extension_method(fs, t->u.struct_.name, name);
+            if (es && es->decl && es->decl->kind == AST_FUNC_DEF)
                 return es->decl->u.func_def.has_receiver ? 1 : 0;
-            }
         }
     }
     return 0;
