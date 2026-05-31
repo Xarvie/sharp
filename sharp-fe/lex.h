@@ -204,6 +204,11 @@ const char *lex_tok_kind_name(SharpTokKind k);
 /** Return true if kind is a C or Sharp keyword (STOK_AUTO .. STOK_EXTERN_STRUCT). */
 bool lex_is_keyword(SharpTokKind k);
 
+/** Return the operator symbol string for an operator token kind, or NULL.
+ *  Covers: arithmetic, comparison, logical, bitwise, shift, assignment,
+ *  subscript, and comma operators. */
+const char *fe_op_sym(SharpTokKind k);
+
 #ifdef __cplusplus
 }
 #endif

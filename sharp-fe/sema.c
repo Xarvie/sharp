@@ -1638,25 +1638,11 @@ static Scope *struct_scope_of(TyStore *ts, Type *t, Scope *file_scope) {
 
 /* Map a binary operator token to its overload name, e.g. STOK_PLUS → "operator+". */
 static const char *op_overload_name(SharpTokKind k) {
-    switch (k) {
-    case STOK_PLUS:     return "operator+";
-    case STOK_MINUS:    return "operator-";
-    case STOK_STAR:     return "operator*";
-    case STOK_SLASH:    return "operator/";
-    case STOK_PERCENT:  return "operator%";
-    case STOK_EQEQ:     return "operator==";
-    case STOK_BANGEQ:   return "operator!=";
-    case STOK_LT:       return "operator<";
-    case STOK_GT:       return "operator>";
-    case STOK_LTEQ:     return "operator<=";
-    case STOK_GTEQ:     return "operator>=";
-    case STOK_AMP:      return "operator&";
-    case STOK_PIPE:     return "operator|";
-    case STOK_CARET:    return "operator^";
-    case STOK_LTLT:     return "operator<<";
-    case STOK_GTGT:     return "operator>>";
-    default:            return NULL;
-    }
+    const char *sym = fe_op_sym(k);
+    if (!sym) return NULL;
+    static char buf[64];
+    snprintf(buf, sizeof buf, "operator%s", sym);
+    return buf;
 }
 
 /* Lookup a method/field symbol in the struct scope of recv_type. */
@@ -2250,23 +2236,6 @@ static EvalResult constexpr_eval(SS *ss, const AstNode *expr) {
     }
 }
 
-/* Map a SharpTokKind (binary operator) to its symbol string for "operator<sym>". */
-static const char *op_tok_to_sym(SharpTokKind k) {
-    switch (k) {
-    case STOK_PLUS:   return "+";  case STOK_MINUS:  return "-";
-    case STOK_STAR:   return "*";  case STOK_SLASH:  return "/";
-    case STOK_PERCENT:return "%";  case STOK_EQEQ:   return "==";
-    case STOK_BANGEQ: return "!="; case STOK_LT:     return "<";
-    case STOK_GT:     return ">";  case STOK_LTEQ:   return "<=";
-    case STOK_GTEQ:   return ">="; case STOK_AMPAMP: return "&&";
-    case STOK_PIPEPIPE:return "||";case STOK_AMP:    return "&";
-    case STOK_PIPE:   return "|";  case STOK_CARET:  return "^";
-    case STOK_LTLT:   return "<<"; case STOK_GTGT:   return ">>";
-    case STOK_LBRACKET:return "[]";
-    default: return NULL;
-    }
-}
-
 typedef struct { Scope *scope; Type *type; int status; } StructArgResult;
 
 static StructArgResult resolve_struct_type_arg(SS *ss, const AstNode *ty_arg) {
@@ -2311,10 +2280,10 @@ static int eval_has_operator(SS *ss, const AstNode *expr) {
 
     if (op_arg->kind == AST_UNARY) {
         /* "+" parsed as UNARY(PLUS, dummy) */
-        sym_str = op_tok_to_sym(op_arg->u.unary.op);
+        sym_str = fe_op_sym(op_arg->u.unary.op);
     } else if (op_arg->kind == AST_BINOP) {
         /* "==" parsed as BINOP(dummy, EQEQ, dummy) */
-        sym_str = op_tok_to_sym(op_arg->u.binop.op);
+        sym_str = fe_op_sym(op_arg->u.binop.op);
     } else if (op_arg->kind == AST_IDENT) {
         /* Plain identifier — maybe "[]" or a named operator */
         sym_str = op_arg->u.ident.name;

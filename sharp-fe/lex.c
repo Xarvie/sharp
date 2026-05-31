@@ -629,3 +629,40 @@ const char *lex_tok_kind_name(SharpTokKind k) {
     if ((size_t)k >= sizeof names / sizeof names[0]) return "?";
     return names[k];
 }
+
+const char *fe_op_sym(SharpTokKind k) {
+    switch (k) {
+    case STOK_PLUS:       return "+";
+    case STOK_MINUS:      return "-";
+    case STOK_STAR:       return "*";
+    case STOK_SLASH:      return "/";
+    case STOK_PERCENT:    return "%";
+    case STOK_EQEQ:      return "==";
+    case STOK_BANGEQ:     return "!=";
+    case STOK_LT:        return "<";
+    case STOK_GT:        return ">";
+    case STOK_LTEQ:      return "<=";
+    case STOK_GTEQ:      return ">=";
+    case STOK_AMPAMP:    return "&&";
+    case STOK_PIPEPIPE:  return "||";
+    case STOK_AMP:       return "&";
+    case STOK_PIPE:      return "|";
+    case STOK_CARET:     return "^";
+    case STOK_LTLT:      return "<<";
+    case STOK_GTGT:      return ">>";
+    case STOK_LBRACKET:  return "[]";
+    case STOK_EQ:        return "=";
+    case STOK_PLUSEQ:    return "+=";
+    case STOK_MINUSEQ:   return "-=";
+    case STOK_STAREQ:    return "*=";
+    case STOK_SLASHEQ:   return "/=";
+    case STOK_PERCENTEQ: return "%=";
+    case STOK_AMPEQ:     return "&=";
+    case STOK_PIPEEQ:    return "|=";
+    case STOK_CARETEQ:   return "^=";
+    case STOK_LTLTEQ:    return "<<=";
+    case STOK_GTGTEQ:    return ">>=";
+    case STOK_COMMA:     return ",";
+    default:             return NULL;
+    }
+}

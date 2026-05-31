@@ -1526,6 +1526,26 @@ static void cg_emit_rvalue_struct_addr(CgCtx *ctx, Type *type,
     cg_printf(ctx, "); &%s; })))", tmp);
 }
 
+static Scope *cg_struct_scope(CgCtx *ctx, const char *name) {
+    Symbol *sym = scope_lookup_type(ctx->file_scope, name);
+    return (sym && sym->decl && sym->decl->sem_scope)
+           ? (Scope *)sym->decl->sem_scope : NULL;
+}
+
+static void cg_emit_struct_receiver_arg(CgCtx *ctx, Type *type,
+                                          AstNode *expr) {
+    if (type && type->kind == TY_STRUCT) {
+        if (is_lvalue(expr)) {
+            cg_puts(ctx, "&");
+            cg_expr(ctx, expr);
+        } else {
+            cg_emit_rvalue_struct_addr(ctx, type, expr);
+        }
+    } else {
+        cg_expr(ctx, expr);
+    }
+}
+
 /* fwd: comma-continuation declarator emitter (defined near cg_var_c) */
 static void cg_emit_comma_cont_declarator(CgCtx *ctx,
                                           const AstNode *ty,
@@ -2064,24 +2084,8 @@ static void cg_emit_defers(CgCtx *ctx, const AstNode **defers, size_t n) {
 
 /* Determine the C output for a binary operator token. */
 static const char *binop_str(SharpTokKind op) {
-    switch (op) {
-    case STOK_PLUS: return "+";    case STOK_MINUS:    return "-";
-    case STOK_STAR: return "*";    case STOK_SLASH:    return "/";
-    case STOK_PERCENT: return "%"; case STOK_AMP:      return "&";
-    case STOK_PIPE:  return "|";   case STOK_CARET:    return "^";
-    case STOK_LTLT:  return "<<";  case STOK_GTGT:     return ">>";
-    case STOK_EQEQ:  return "==";  case STOK_BANGEQ:   return "!=";
-    case STOK_LT:    return "<";   case STOK_GT:       return ">";
-    case STOK_LTEQ:  return "<=";  case STOK_GTEQ:     return ">=";
-    case STOK_AMPAMP:return "&&";  case STOK_PIPEPIPE: return "||";
-    case STOK_EQ:    return "=";   case STOK_PLUSEQ:   return "+=";
-    case STOK_MINUSEQ: return "-="; case STOK_STAREQ:  return "*=";
-    case STOK_SLASHEQ:return "/="; case STOK_PERCENTEQ:return "%=";
-    case STOK_AMPEQ:  return "&="; case STOK_PIPEEQ:   return "|=";
-    case STOK_CARETEQ:return "^="; case STOK_LTLTEQ:   return "<<=";
-    case STOK_GTGTEQ: return ">>=";case STOK_COMMA:    return ",";
-    default: return "/*?op*/";
-    }
+    const char *s = fe_op_sym(op);
+    return s ? s : "/*?op*/";
 }
 
 /* Get the struct name from a type (TY_STRUCT), stripping const/ptr. */
@@ -2303,12 +2307,8 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
             /* Look up the operator symbol in the struct's own scope.
              * Use the original (unmangled) name for scope lookup, since
              * mangled names are only used for C code generation. */
-            Scope *ss_s = NULL;
-            if (ctx->file_scope && scope_sn) {
-                Symbol *sym = scope_lookup_type(ctx->file_scope, scope_sn);
-                if (sym && sym->decl && sym->decl->sem_scope)
-                    ss_s = (Scope *)sym->decl->sem_scope;
-            }
+            Scope *ss_s = (ctx->file_scope && scope_sn)
+                          ? cg_struct_scope(ctx, scope_sn) : NULL;
             Symbol *osym = ss_s ? scope_lookup_local(ss_s, opname) : NULL;
             if (!osym) effective_sn = NULL;   /* operator not defined -- try free-function */
         }
@@ -2390,16 +2390,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
              * If lhs is an rvalue (e.g. a function call), materialise a
              * temporary via GNU statement expression as done for method
              * chaining.  C forbids taking the address of an rvalue. */
-            if (lt_unconst && lt_unconst->kind == TY_STRUCT) {
-                if (is_lvalue(expr->u.binop.lhs)) {
-                    cg_puts(ctx, "&");
-                    cg_expr(ctx, expr->u.binop.lhs);
-                } else {
-                    cg_emit_rvalue_struct_addr(ctx, lt_unconst, expr->u.binop.lhs);
-                }
-            } else {
-                cg_expr(ctx, expr->u.binop.lhs);
-            }
+            cg_emit_struct_receiver_arg(ctx, lt_unconst, expr->u.binop.lhs);
             cg_puts(ctx, ", ");
             cg_expr(ctx, expr->u.binop.rhs);
             cg_puts(ctx, ")");
@@ -2460,23 +2451,13 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                 /* (1) struct method */
                 bool found_method = false;
                 if (ctx->file_scope) {
-                    Symbol *tsym = scope_lookup_type(ctx->file_scope, sn);
-                    Scope *ss_s = (tsym && tsym->decl && tsym->decl->sem_scope)
-                                  ? tsym->decl->sem_scope : NULL;
+                    Scope *ss_s = ctx->file_scope
+                                  ? cg_struct_scope(ctx, sn) : NULL;
                     Symbol *osym = ss_s ? scope_lookup_local(ss_s, op_sym) : NULL;
                     if (osym) {
                         cg_method_name(ctx, eff_sn, op_sym);
                         cg_puts(ctx, "(");
-                        if (ut->kind == TY_STRUCT) {
-                            if (is_lvalue(expr->u.unary.operand)) {
-                                cg_puts(ctx, "&");
-                                cg_expr(ctx, expr->u.unary.operand);
-                            } else {
-                                cg_emit_rvalue_struct_addr(ctx, ut, expr->u.unary.operand);
-                            }
-                        } else {
-                            cg_expr(ctx, expr->u.unary.operand);
-                        }
+                        cg_emit_struct_receiver_arg(ctx, ut, expr->u.unary.operand);
                         cg_puts(ctx, ")");
                         found_method = true;
                     }
@@ -2493,16 +2474,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                             emsym->decl->u.func_def.is_operator) {
                             cg_method_name(ctx, eff_sn, op_sym);
                             cg_puts(ctx, "(");
-                            if (ut->kind == TY_STRUCT) {
-                                if (is_lvalue(expr->u.unary.operand)) {
-                                    cg_puts(ctx, "&");
-                                    cg_expr(ctx, expr->u.unary.operand);
-                                } else {
-                                    cg_emit_rvalue_struct_addr(ctx, ut, expr->u.unary.operand);
-                                }
-                            } else {
-                                cg_expr(ctx, expr->u.unary.operand);
-                            }
+                            cg_emit_struct_receiver_arg(ctx, ut, expr->u.unary.operand);
                             cg_puts(ctx, ")");
                             found_method = true;
                         }
@@ -2785,9 +2757,8 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
         }
         if (idx_sn_raw && ctx->file_scope) {
             /* Look up operator[] in the struct's scope using ORIGINAL name. */
-            Symbol *sym = scope_lookup_type(ctx->file_scope, idx_sn_raw);
-            Scope *ss_s = (sym && sym->decl && sym->decl->sem_scope)
-                          ? (Scope *)sym->decl->sem_scope : NULL;
+            Scope *ss_s = (idx_sn_raw && ctx->file_scope)
+                          ? cg_struct_scope(ctx, idx_sn_raw) : NULL;
             Symbol *osym = ss_s ? scope_lookup_local(ss_s, "operator[]") : NULL;
             if (!osym) idx_sn = NULL;   /* no operator[] in struct scope */
         } else {
@@ -5145,9 +5116,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
 
             /* Check if the operator is defined inside the struct body
              * (not an extension method). */
-            Symbol *sym = scope_lookup_type(ctx->file_scope, sn_raw);
-            Scope *ss_s = (sym && sym->decl && sym->decl->sem_scope)
-                          ? (Scope *)sym->decl->sem_scope : NULL;
+            Scope *ss_s = cg_struct_scope(ctx, sn_raw);
             char opname[64];
             snprintf(opname, sizeof opname, "operator%s",
                      binop_str(expr->u.binop.op));
@@ -5437,9 +5406,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
 
         /* Check if operator[] is defined inside the struct body
          * (not an extension method).  If so, nothing to collect. */
-        Symbol *sym = scope_lookup_type(ctx->file_scope, sn_raw);
-        Scope *ss_s = (sym && sym->decl && sym->decl->sem_scope)
-                      ? (Scope *)sym->decl->sem_scope : NULL;
+        Scope *ss_s = cg_struct_scope(ctx, sn_raw);
         Symbol *osym = ss_s ? scope_lookup_local(ss_s, "operator[]") : NULL;
         if (osym) break;   /* inline operator[] — nothing to collect */
 
