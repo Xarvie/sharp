@@ -395,9 +395,20 @@ static void install_builtins(CppState *st) {
     /* __DATE__ / __TIME__ — dynamic at compile time, not target-dependent. */
     time_t now = time(NULL);
     struct tm *tm_now = localtime(&now);
+    if (!tm_now) {
+        time_t epoch = 0;
+        tm_now = gmtime(&epoch);
+    }
     char date_buf[32], time_buf[32];
-    strftime(date_buf, sizeof date_buf, "\"%b %e %Y\"", tm_now);
-    strftime(time_buf, sizeof time_buf, "\"%H:%M:%S\"", tm_now);
+    if (tm_now) {
+        strftime(date_buf, sizeof date_buf, "\"%b %e %Y\"", tm_now);
+        strftime(time_buf, sizeof time_buf, "\"%H:%M:%S\"", tm_now);
+    } else {
+        memcpy(date_buf, "\"Jan  1 1970\"", 14);
+        date_buf[14] = '\0';
+        memcpy(time_buf, "\"00:00:00\"", 10);
+        time_buf[10] = '\0';
+    }
     install_builtin_str(mt, it, "__DATE__", date_buf);
     install_builtin_str(mt, it, "__TIME__", time_buf);
 
@@ -1667,10 +1678,12 @@ static PPTok make_timestamp_tok(CppState *st, CppLoc loc) {
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
     if (!tm) {
-        /* localtime can return NULL if time_t is out of range (Y2038 on
-         * 32-bit systems).  Fall back to the epoch.                      */
         time_t epoch = 0;
         tm = gmtime(&epoch);
+    }
+    if (!tm) {
+        static const struct tm fallback = {0,0,0,1,0,70,4,0,0};
+        tm = (struct tm *)&fallback;
     }
     const char *days[] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
     const char *mons[] = { "Jan","Feb","Mar","Apr","May","Jun",
@@ -1765,6 +1778,8 @@ static void emit_pragma_text(CppState *st, const char *raw_string_lit,
         tl_append(&tl, tk);
     }
     reader_free(rd);
+    for (size_t i = 0; i < dummy.len; i++)
+        free(dummy.data[i].msg);
     free(dummy.data);
 
     handle_pragma(st, &tl, loc, current_file);

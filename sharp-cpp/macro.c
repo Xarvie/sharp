@@ -1704,6 +1704,8 @@ void macro_define_object(MacroTable *t, InternTable *interns,
     tl_free(&line);
     if (def) { def->def_loc = loc; macro_define(t, def, &dummy, loc); }
 
+    for (size_t i = 0; i < dummy.len; i++)
+        free(dummy.data[i].msg);
     free(dummy.data);
 }
 

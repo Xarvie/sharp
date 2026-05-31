@@ -672,13 +672,17 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
     return ot;
 }
 
+static void sema_expr_vec(SS *ss, AstVec *vec) {
+    for (size_t i = 0; i < vec->len; i++)
+        sema_expr(ss, vec->data[i]);
+}
+
 static Type *sema_call(SS *ss, AstNode *expr) {
     TyStore *ts = ss->ctx->ts;
     /* Evaluate callee to determine function type. */
     Type *callee_t = sema_expr(ss, expr->u.call.callee);
     /* Evaluate all arguments (type-check them even if we can't verify). */
-    for (size_t i = 0; i < expr->u.call.args.len; i++)
-        sema_expr(ss, expr->u.call.args.data[i]);
+    sema_expr_vec(ss, &expr->u.call.args);
 
     /* GCC builtins (`__builtin_expect`, etc.).  These are not declared
      * in source; sema_expr's AST_IDENT path returns int for the callee
@@ -1095,8 +1099,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
      * by looking up the function symbol, getting its declared ret_type, and
      * substituting TY_PARAM occurrences with the explicit type args. */
     case AST_GENERIC_CALL: {
-        for (size_t _i = 0; _i < expr->u.generic_call.call_args.len; _i++)
-            sema_expr(ss, expr->u.generic_call.call_args.data[_i]);
+        sema_expr_vec(ss, &expr->u.generic_call.call_args);
 
         const char *fname = expr->u.generic_call.name;
         Symbol *gsym = fname ? scope_lookup(ss->scope, fname) : NULL;
@@ -1776,8 +1779,7 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
 
         if (assoc_struct_name) {
             /* Evaluate arguments */
-            for (size_t i = 0; i < expr->u.method_call.args.len; i++)
-                sema_expr(ss, expr->u.method_call.args.data[i]);
+            sema_expr_vec(ss, &expr->u.method_call.args);
             /* Look up the method in the struct's scope */
             Symbol *tsym = scope_lookup_type(ss->scope, assoc_struct_name);
             Scope *struct_scope = NULL;
@@ -1822,8 +1824,7 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
     Type *recv_t = sema_expr(ss, recv_node);
 
     /* Evaluate arguments regardless. */
-    for (size_t i = 0; i < expr->u.method_call.args.len; i++)
-        sema_expr(ss, expr->u.method_call.args.data[i]);
+    sema_expr_vec(ss, &expr->u.method_call.args);
 
     /* v0.13: defer method dispatch on TY_PARAM receivers — the method
      * cannot be resolved until specialization installs the concrete

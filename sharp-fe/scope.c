@@ -822,6 +822,16 @@ Scope *scope_build(AstNode *file, FeDiagArr *diags) {
     return scope_build_with_prelude(file, diags, NULL);
 }
 
+static void synth_forward_struct(Scope *fs, AstNode *file, CppLoc loc,
+                                  const char *name, FeDiagArr *diags) {
+    AstNode *fwd = ast_node_new(AST_STRUCT_DEF, loc);
+    fwd->u.struct_def.name         = cpp_xstrdup(name);
+    fwd->u.struct_def.is_union     = false;
+    fwd->u.struct_def.is_synthetic = true;
+    scope_define(fs, SYM_TYPE, name, fwd, diags);
+    astvec_push(&file->u.file.decls, fwd);
+}
+
 Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
                                  Scope *prelude) {
     /* Create global scope with built-in types.
@@ -887,12 +897,7 @@ Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
                     if (!has_space && !ty_is_known_name(tname) &&
                         !scope_lookup_local(fs, tname) &&
                         (tname[0] >= 'A' && tname[0] <= 'Z') /* struct tag heuristic: starts uppercase */) {
-                        AstNode *fwd = ast_node_new(AST_STRUCT_DEF, d->loc);
-                        fwd->u.struct_def.name         = cpp_xstrdup(tname);
-                        fwd->u.struct_def.is_union     = false;
-                        fwd->u.struct_def.is_synthetic = true; /* C8 */
-                        astvec_push(&file->u.file.decls, fwd);
-                        scope_define(fs, SYM_TYPE, tname, fwd, diags);
+                        synth_forward_struct(fs, file, d->loc, tname, diags);
                     }
                 }
             }
@@ -928,15 +933,7 @@ Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
             if (tag) {
                 if (tag[0] && !ty_is_known_name(tag) &&
                     !scope_lookup_local(fs, tag)) {
-                    AstNode *fwd = ast_node_new(AST_STRUCT_DEF, d->loc);
-                    fwd->u.struct_def.name         = cpp_xstrdup(tag);
-                    fwd->u.struct_def.is_union     = false;
-                    fwd->u.struct_def.is_synthetic = true; /* C8 */
-                    scope_define(fs, SYM_TYPE, tag, fwd, diags);
-                    /* push fwd into file->u.file.decls so that
-                     * ast_node_free(file) reclaims it; without this the
-                     * synthesised node and its name string leak under ASan. */
-                    astvec_push(&file->u.file.decls, fwd);
+                    synth_forward_struct(fs, file, d->loc, tag, diags);
                 }
             } /* if (tag) */
             } /* if (d->u.typedef_decl.target) */

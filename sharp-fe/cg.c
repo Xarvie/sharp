@@ -269,29 +269,25 @@ static const AstNode *cg_find_struct_def(const CgCtx *ctx, const char *name) {
     return NULL;
 }
 
-static const AstNode *cg_find_inline_struct_def(const CgCtx *ctx, const char *name) {
-    if (!name) return NULL;
-    if (ctx->local_block_stmts) {
-        for (size_t k = 0; k < ctx->local_block_stmts->len; k++) {
-            const AstNode *d = ctx->local_block_stmts->data[k];
-            if (d && d->kind == AST_STRUCT_DEF &&
-                (d->u.struct_def.from_inline_var ||
-                 (d->u.struct_def.name && strncmp(d->u.struct_def.name, "__anon_", 7) == 0)) &&
-                d->u.struct_def.name && strcmp(d->u.struct_def.name, name) == 0)
-                return d;
-        }
-    }
-    if (ctx->file_ast) {
-        for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
-            const AstNode *d = ctx->file_ast->u.file.decls.data[k];
-            if (d && d->kind == AST_STRUCT_DEF &&
-                (d->u.struct_def.from_inline_var ||
-                 (d->u.struct_def.name && strncmp(d->u.struct_def.name, "__anon_", 7) == 0)) &&
-                d->u.struct_def.name && strcmp(d->u.struct_def.name, name) == 0)
-                return d;
-        }
+static const AstNode *find_inline_struct_in_vec(const AstVec *vec, const char *name) {
+    if (!vec) return NULL;
+    for (size_t k = 0; k < vec->len; k++) {
+        const AstNode *d = vec->data[k];
+        if (d && d->kind == AST_STRUCT_DEF &&
+            (d->u.struct_def.from_inline_var ||
+             (d->u.struct_def.name && strncmp(d->u.struct_def.name, "__anon_", 7) == 0)) &&
+            d->u.struct_def.name && strcmp(d->u.struct_def.name, name) == 0)
+            return d;
     }
     return NULL;
+}
+
+static const AstNode *cg_find_inline_struct_def(const CgCtx *ctx, const char *name) {
+    if (!name) return NULL;
+    const AstNode *r = find_inline_struct_in_vec(ctx->local_block_stmts, name);
+    if (r) return r;
+    if (!ctx->file_ast) return NULL;
+    return find_inline_struct_in_vec(&ctx->file_ast->u.file.decls, name);
 }
 
 static void cg_emit_typedef_close(CgCtx *ctx, const char *cname,
@@ -5493,6 +5489,50 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
         }
         break;
     }
+    case AST_TERNARY:
+        cg_collect_expr(ctx, expr->u.ternary.cond);
+        cg_collect_expr(ctx, expr->u.ternary.then_);
+        cg_collect_expr(ctx, expr->u.ternary.else_);
+        break;
+    case AST_COMMA:
+        cg_collect_expr(ctx, expr->u.binop.lhs);
+        cg_collect_expr(ctx, expr->u.binop.rhs);
+        break;
+    case AST_FIELD_ACCESS:
+        cg_collect_expr(ctx, expr->u.field_access.recv);
+        break;
+    case AST_SIZEOF:
+        cg_collect_expr(ctx, expr->u.sizeof_.operand);
+        break;
+    case AST_STRUCT_LIT:
+        for (size_t i = 0; i < expr->u.struct_lit.field_vals.len; i++)
+            cg_collect_expr(ctx, expr->u.struct_lit.field_vals.data[i]);
+        break;
+    case AST_INIT_LIST:
+        for (size_t i = 0; i < expr->u.init_list.items.len; i++)
+            cg_collect_expr(ctx, expr->u.init_list.items.data[i]);
+        break;
+    case AST_DESIGNATED_INIT:
+        cg_collect_expr(ctx, expr->u.designated_init.value);
+        break;
+    case AST_COMPOUND_LIT:
+        cg_collect_expr(ctx, expr->u.compound_lit.init);
+        break;
+    case AST_AT_INTRINSIC:
+        for (size_t i = 0; i < expr->u.at_intrinsic.args.len; i++)
+            cg_collect_expr(ctx, expr->u.at_intrinsic.args.data[i]);
+        break;
+    case AST_STMT_EXPR:
+        cg_collect_block(ctx, expr->u.stmt_expr.block);
+        break;
+    case AST_GENERIC_EXPR:
+        cg_collect_expr(ctx, expr->u.generic_expr.controlling);
+        for (size_t i = 0; i < expr->u.generic_expr.associations.len; i++)
+            cg_collect_expr(ctx, expr->u.generic_expr.associations.data[i]);
+        break;
+    case AST_GENERIC_ASSOC:
+        cg_collect_expr(ctx, expr->u.generic_assoc.value);
+        break;
     default: break;
     }
 }
@@ -5535,6 +5575,14 @@ static void cg_collect_stmt(CgCtx *ctx, const AstNode *stmt) {
     case AST_SWITCH:
         cg_collect_expr(ctx, stmt->u.switch_.cond);
         cg_collect_stmt(ctx, stmt->u.switch_.body);
+        break;
+    case AST_COMPUTED_GOTO:
+        cg_collect_expr(ctx, stmt->u.computed_goto.target);
+        break;
+    case AST_CASE:
+        cg_collect_expr(ctx, stmt->u.case_.value);
+        break;
+    case AST_LABEL:
         break;
     default: break;
     }
@@ -7286,6 +7334,12 @@ static bool cg_stmt_uses_this(const AstNode *stmt) {
     case AST_SWITCH:
         return cg_expr_uses_this(stmt->u.switch_.cond) ||
                cg_stmt_uses_this(stmt->u.switch_.body);
+    case AST_COMPUTED_GOTO:
+        return cg_expr_uses_this(stmt->u.computed_goto.target);
+    case AST_CASE:
+        return cg_expr_uses_this(stmt->u.case_.value);
+    case AST_LABEL:
+        return false;
     default: return false;
     }
 }
@@ -7409,6 +7463,12 @@ static bool cg_stmt_uses_name(const AstNode *stmt, const char *name) {
     case AST_SWITCH:
         return cg_expr_uses_name(stmt->u.switch_.cond, name) ||
                cg_stmt_uses_name(stmt->u.switch_.body, name);
+    case AST_COMPUTED_GOTO:
+        return cg_expr_uses_name(stmt->u.computed_goto.target, name);
+    case AST_CASE:
+        return cg_expr_uses_name(stmt->u.case_.value, name);
+    case AST_LABEL:
+        return false;
     default: return false;
     }
 }

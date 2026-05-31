@@ -379,28 +379,24 @@ bool ty_is_vector(const Type *t) {
     return t && t->kind == TY_VECTOR;
 }
 
-bool ty_is_func_ptr(const Type *t) {
+static bool ty_is_ptr_to_kind(const Type *t, TyKind target) {
     if (!t) return false;
     if (t->kind == TY_PTR && t->u.ptr.base &&
-        t->u.ptr.base->kind == TY_FUNC)
+        t->u.ptr.base->kind == target)
         return true;
     if (t->kind == TY_CONST && t->u.const_.base)
-        return ty_is_func_ptr(t->u.const_.base);
+        return ty_is_ptr_to_kind(t->u.const_.base, target);
     if (t->kind == TY_ATOMIC && t->u.atomic.base)
-        return ty_is_func_ptr(t->u.atomic.base);
+        return ty_is_ptr_to_kind(t->u.atomic.base, target);
     return false;
 }
 
+bool ty_is_func_ptr(const Type *t) {
+    return ty_is_ptr_to_kind(t, TY_FUNC);
+}
+
 bool ty_is_ptr_to_array(const Type *t) {
-    if (!t) return false;
-    if (t->kind == TY_PTR && t->u.ptr.base &&
-        t->u.ptr.base->kind == TY_ARRAY)
-        return true;
-    if (t->kind == TY_CONST && t->u.const_.base)
-        return ty_is_ptr_to_array(t->u.const_.base);
-    if (t->kind == TY_ATOMIC && t->u.atomic.base)
-        return ty_is_ptr_to_array(t->u.atomic.base);
-    return false;
+    return ty_is_ptr_to_kind(t, TY_ARRAY);
 }
 
 TyPtrPeel ty_peel_ptr(Type *t) {

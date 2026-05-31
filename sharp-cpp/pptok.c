@@ -257,7 +257,10 @@ static char *convert_raw_strings_cpp(const char *src, size_t len, size_t *out_le
                 if (w >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
                 out[w++] = src[r_pos++];
             }
-            if (r_pos < len) out[w++] = src[r_pos++];
+            if (r_pos < len) {
+                if (w >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
+                out[w++] = src[r_pos++];
+            }
             continue;
         }
         if (src[r_pos] == '\'') {
@@ -268,7 +271,10 @@ static char *convert_raw_strings_cpp(const char *src, size_t len, size_t *out_le
                 if (w >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
                 out[w++] = src[r_pos++];
             }
-            if (r_pos < len) out[w++] = src[r_pos++];
+            if (r_pos < len) {
+                if (w >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
+                out[w++] = src[r_pos++];
+            }
             continue;
         }
         if (r_pos + 1 < len && src[r_pos] == '/' && src[r_pos+1] == '/') {
@@ -416,7 +422,7 @@ CppReader *reader_new_from_file(const char *filename,
             char *converted = convert_raw_strings_cpp(buf, (size_t)nr, &out_len);
             free(buf);
             buf = converted;
-            nr = (int)out_len;
+            nr = out_len;
         }
     }
 
