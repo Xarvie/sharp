@@ -912,6 +912,7 @@ static void cg_type_from_ast(CgCtx *ctx, const AstNode *n) {
         const char *gname = n->u.type_generic.name;
         size_t nargs = n->u.type_generic.args.len;
         Type **args = nargs ? malloc(nargs * sizeof *args) : NULL;
+        if (nargs && !args) abort();
         for (size_t _i = 0; _i < nargs; _i++) {
             AstNode *arg_ast = n->u.type_generic.args.data[_i];
             args[_i] = NULL;
@@ -2643,6 +2644,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                 const char *gname = recv_node->u.cast.type->u.type_generic.name;
                 size_t nargs = recv_node->u.cast.type->u.type_generic.args.len;
                 Type **targs = nargs ? malloc(nargs * sizeof *targs) : NULL;
+                if (nargs && !targs) abort();
                 for (size_t _i = 0; _i < nargs; _i++) {
                     AstNode *arg = recv_node->u.cast.type->u.type_generic.args.data[_i];
                     targs[_i] = arg ? ty_from_ast(ctx->ts, arg, ctx->file_scope, NULL) : NULL;
@@ -7860,6 +7862,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                 if (td_fwd[ti]) cnt++;
             if (cnt > 0) {
                 ctx->fwd_typedef_names = malloc((cnt + 1) * sizeof(char *));
+                if (!ctx->fwd_typedef_names) abort();
                 ctx->n_fwd_typedef_names = cnt;
                 size_t j = 0;
                 for (size_t ti = 0; ti < ntds; ti++)

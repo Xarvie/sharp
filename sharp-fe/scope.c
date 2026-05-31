@@ -133,12 +133,14 @@ Symbol *scope_lookup_local_type(Scope *s, const char *name) {
 
 Symbol *scope_find_typedef(Scope *scope, const char *name) {
     if (!scope || !name) return NULL;
-    Symbol *sym = scope_lookup(scope, name);
-    for (; sym; sym = sym->next) {
-        if (strcmp(sym->name, name) != 0) continue;
-        if (sym->kind == SYM_TYPE && sym->decl &&
-            sym->decl->kind == AST_TYPEDEF_DECL)
-            return sym;
+    for (Scope *s = scope; s; s = s->parent) {
+        unsigned h = sym_hash(name) & (s->nbuckets - 1);
+        for (Symbol *sym = s->buckets[h]; sym; sym = sym->next) {
+            if (strcmp(sym->name, name) != 0) continue;
+            if (sym->kind == SYM_TYPE && sym->decl &&
+                sym->decl->kind == AST_TYPEDEF_DECL)
+                return sym;
+        }
     }
     return NULL;
 }
@@ -915,7 +917,8 @@ Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
                 AstNode *inner = d->u.typedef_decl.target;
                 while (inner && inner->kind == AST_TYPE_PTR)
                     inner = inner->u.type_ptr.base;
-                if (inner->kind == AST_TYPE_NAME)
+                if (!inner) { /* nothing to register */ }
+                else if (inner->kind == AST_TYPE_NAME)
                     tag = inner->u.type_name.name;
                 else if (inner->kind == AST_STRUCT_DEF)
                     tag = inner->u.struct_def.name;

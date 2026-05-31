@@ -2592,10 +2592,6 @@ bool sema_check_file(SemaCtx *ctx, AstNode *file) {
         AstNode *d = file->u.file.decls.data[i];
         if (!d) continue;
         switch (d->kind) {
-        default:
-            break;
-        }
-        switch (d->kind) {
         case AST_FUNC_DEF:
             sema_func(ctx, ctx->file_scope, d);
             break;
