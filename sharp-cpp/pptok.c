@@ -532,10 +532,29 @@ static bool skip_block_comment(CppReader *rd, StrBuf *spell, bool keep) {
             if (rd->raw.pos < rd->raw.len && rd->raw.buf[rd->raw.pos] == '/') {
                 rd->raw.pos++;
                 rd->raw.col++;
-                rd->ph2_buf = -2;  /* invalidate ph2 lookahead */
+                rd->ph2_buf = -2;
                 rd->cur_line = rd->raw.line;
                 rd->cur_col  = rd->raw.col;
                 return true;
+            }
+            /* Handle backslash-newline between * and /:  *\/ → */
+            if (rd->raw.pos + 1 < rd->raw.len &&
+                rd->raw.buf[rd->raw.pos] == '\\' &&
+                (rd->raw.buf[rd->raw.pos + 1] == '\n' ||
+                 (rd->raw.pos + 2 < rd->raw.len &&
+                  rd->raw.buf[rd->raw.pos + 1] == '\r' &&
+                  rd->raw.buf[rd->raw.pos + 2] == '\n'))) {
+                size_t skip = (rd->raw.buf[rd->raw.pos + 1] == '\r') ? 3 : 2;
+                size_t after_bs = rd->raw.pos + skip;
+                if (after_bs < rd->raw.len && rd->raw.buf[after_bs] == '/') {
+                    rd->raw.line++;
+                    rd->raw.col = 1;
+                    rd->raw.pos = after_bs + 1;
+                    rd->ph2_buf = -2;
+                    rd->cur_line = rd->raw.line;
+                    rd->cur_col  = rd->raw.col;
+                    return true;
+                }
             }
             buf = rd->raw.buf + rd->raw.pos;
         }

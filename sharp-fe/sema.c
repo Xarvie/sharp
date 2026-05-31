@@ -117,6 +117,8 @@ static const char *op_overload_name(SharpTokKind k);
 static bool recv_object_is_const(Type *t);
 static Type *sema_field_access_expr(SS *ss, AstNode *expr);
 static Type *sema_method_call_expr(SS *ss, AstNode *expr);
+static Type *sema_resolve_method_ret(SS *ss, const AstNode *fn_decl,
+                                     Type *recv_type);
 
 /* =========================================================================
  * Type helpers
@@ -373,11 +375,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
             if (ss_s) {
                 Symbol *osym = scope_lookup_local(ss_s, op_nm);
                 if (osym && osym->decl && osym->decl->kind == AST_FUNC_DEF) {
-                    Scope *mscope = osym->decl->sem_scope
-                                  ? osym->decl->sem_scope : ss->scope;
-                    Type *ret = ty_from_ast(ts, osym->decl->u.func_def.ret_type,
-                                            mscope, NULL);
-                    return sema_subst_for_struct(ts, lt, ret);
+                    return sema_resolve_method_ret(ss, osym->decl, lt);
                 }
                 /* Struct method not found — fall through to free-function
                  * lookup below rather than erroring immediately. */
@@ -597,11 +595,7 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
             if (ss_s) {
                 Symbol *osym = scope_lookup_local(ss_s, op_nm);
                 if (osym && osym->decl && osym->decl->kind == AST_FUNC_DEF) {
-                    Scope *mscope = osym->decl->sem_scope
-                                  ? osym->decl->sem_scope : ss->scope;
-                    Type *ret = ty_from_ast(ts, osym->decl->u.func_def.ret_type,
-                                            mscope, NULL);
-                    return sema_subst_for_struct(ts, ot_unc, ret);
+                    return sema_resolve_method_ret(ss, osym->decl, ot_unc);
                 }
             }
             /* (2) free function in file scope */
@@ -872,9 +866,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                         size_t tag_len = tlen - kw;
                         while (tag_len && *tag == ' ') { tag++; tag_len--; }
                         if (tag_len > 0) {
-                            char tbuf[128];
-                            if (tag_len >= sizeof tbuf) tag_len = sizeof tbuf - 1;
-                            memcpy(tbuf, tag, tag_len); tbuf[tag_len] = '\0';
+                            char tbuf[128]; snprintf(tbuf, sizeof tbuf, "%.*s", (int)tag_len, tag);
                             t = ty_struct_type(ts, tbuf, NULL, 0, NULL);
                             break;
                         }
@@ -898,9 +890,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                         while (te > tn && *te == ' ') te--;
                         size_t tlen = (size_t)(te - tn + 1);
                         if (tlen > 0) {
-                            char tbuf[128];
-                            if (tlen >= sizeof tbuf) tlen = sizeof tbuf - 1;
-                            memcpy(tbuf, tn, tlen); tbuf[tlen] = '\0';
+                            char tbuf[128]; snprintf(tbuf, sizeof tbuf, "%.*s", (int)tlen, tn);
                             Symbol *vsym = scope_lookup_type(ss->scope, tbuf);
                             if (vsym && vsym->decl &&
                                 vsym->decl->kind == AST_TYPEDEF_DECL) {
@@ -1190,10 +1180,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                     }
                 }
                 if (eosym && eosym->decl && eosym->decl->kind == AST_FUNC_DEF) {
-                    Scope *mscope = eosym->decl->sem_scope ? eosym->decl->sem_scope : ss->scope;
-                    t = ty_from_ast(ts, eosym->decl->u.func_def.ret_type, mscope, NULL);
-                    if (!ty_is_error(t) && !ty_is_error(base_t))
-                        t = sema_subst_for_struct(ts, base_t, t);
+                    t = sema_resolve_method_ret(ss, eosym->decl, base_t);
                 } else {
                     if (!ty_is_error(base_t))
                         FE_ERROR(ss->ctx->diags, expr->loc, "subscript of non-pointer / non-indexable type");
@@ -1709,6 +1696,16 @@ static bool sema_require_arrow(SS *ss, const AstNode *expr, Type *recv_t) {
     return true;
 }
 
+static Type *sema_resolve_method_ret(SS *ss, const AstNode *fn_decl,
+                                     Type *recv_type) {
+    Scope *mscope = fn_decl->sem_scope ? fn_decl->sem_scope : ss->scope;
+    Type *ret = ty_from_ast(ss->ctx->ts, fn_decl->u.func_def.ret_type,
+                            mscope, NULL);
+    if (!ty_is_error(ret) && recv_type && !ty_is_error(recv_type))
+        ret = sema_subst_for_struct(ss->ctx->ts, recv_type, ret);
+    return ret;
+}
+
 /* Sema for field access: recv.field or recv->field */
 static Type *sema_field_access_expr(SS *ss, AstNode *expr) {
     TyStore *ts = ss->ctx->ts;
@@ -1904,11 +1901,8 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
     /* Use the method's own scope for return type resolution so that generic
      * type params (T) are found.  Suppress diagnostics here — unknown 'T'
      * is expected for uninstantiated generics; substitution handles it. */
-    Scope *mscope = fn->sem_scope ? fn->sem_scope : ss->scope;
-    Type *ret_t = ty_from_ast(ts, fn->u.func_def.ret_type, mscope, NULL);
-    /* Substitute generic params if receiver is a concrete instantiation. */
     Type *base_t3 = ty_peel_to_struct(recv_t);
-    return sema_subst_for_struct(ts, base_t3, ret_t);
+    return sema_resolve_method_ret(ss, fn, base_t3);
 }
 
 /* =========================================================================

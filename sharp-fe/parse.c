@@ -55,12 +55,10 @@ static unsigned td_hash(const char *s) {
 }
 
 static int td_slot(char **slots, size_t cap, const char *name) {
-    /* Returns the slot index where `name` lives, or where it would be
-     * inserted (an empty slot).  Caller distinguishes by checking
-     * slots[i] == NULL. */
     unsigned h = td_hash(name);
     size_t mask = cap - 1;
     for (size_t i = h & mask; ; i = (i + 1) & mask) {
+        if (slots[i] == (const char*)1) continue;
         if (!slots[i] || strcmp(slots[i], name) == 0) return (int)i;
     }
 }
@@ -71,7 +69,7 @@ static void td_grow(TdSet *s) {
     if (!new_slots) return;  /* OOM: silently disable further inserts */
     if (s->slots) {
         for (size_t i = 0; i < s->cap; i++) {
-            if (!s->slots[i]) continue;
+            if (!s->slots[i] || s->slots[i] == (const char*)1) continue;
             int j = td_slot(new_slots, new_cap, s->slots[i]);
             new_slots[j] = s->slots[i];
         }
@@ -85,11 +83,21 @@ static void td_add(TdSet *s, const char *name) {
     if (!name) return;
     if (!s->cap || s->len * 2 >= s->cap) td_grow(s);
     if (!s->slots) return;
-    int i = td_slot(s->slots, s->cap, name);
-    if (!s->slots[i]) {
-        s->slots[i] = cpp_xstrdup(name);
-        if (s->slots[i]) s->len++;
+    unsigned h = td_hash(name);
+    size_t mask = s->cap - 1;
+    int tomb = -1;
+    size_t i;
+    for (i = h & mask; ; i = (i + 1) & mask) {
+        if (!s->slots[i]) break;
+        if (s->slots[i] == (const char*)1) {
+            if (tomb < 0) tomb = (int)i;
+            continue;
+        }
+        if (strcmp(s->slots[i], name) == 0) return;
     }
+    size_t slot = (tomb >= 0) ? (size_t)tomb : i;
+    s->slots[slot] = cpp_xstrdup(name);
+    if (s->slots[slot]) s->len++;
 }
 
 static bool td_has(const TdSet *s, const char *name) {
@@ -101,9 +109,9 @@ static bool td_has(const TdSet *s, const char *name) {
 static void td_remove(TdSet *s, const char *name) {
     if (!s->cap || !name) return;
     int i = td_slot(s->slots, s->cap, name);
-    if (s->slots[i]) {
+    if (s->slots[i] && s->slots[i] != (const char*)1) {
         free((void*)s->slots[i]);
-        s->slots[i] = NULL;
+        s->slots[i] = (const char*)1;
         s->len--;
     }
 }
@@ -122,7 +130,7 @@ static bool td_has_n(const TdSet *s, const char *name, size_t len) {
     for (size_t i = h & mask; ; i = (i + 1) & mask) {
         char *slot = s->slots[i];
         if (!slot) return false;
-        /* Match: slot length equals `len` and bytes match. */
+        if (slot == (char*)1) continue;
         if (strncmp(slot, name, len) == 0 && slot[len] == '\0') return true;
     }
 }
@@ -2225,6 +2233,10 @@ static AstNode *splice_placeholder(AstNode *root, AstNode *ph, AstNode *replacem
         root->u.type_volatile.base =
             splice_placeholder(root->u.type_volatile.base, ph, replacement);
         break;
+    case AST_TYPE_ATOMIC:
+        root->u.type_atomic.base =
+            splice_placeholder(root->u.type_atomic.base, ph, replacement);
+        break;
     case AST_TYPE_ARRAY:
         root->u.type_array.base =
             splice_placeholder(root->u.type_array.base, ph, replacement);
@@ -3842,11 +3854,13 @@ static AstNode *parse_top_decl(PS *ps) {
             }
             /* Handle pointer '*' after return type, e.g. `T* Vec<T>.begin(this)`.
              * Wrap the return type in AST_TYPE_PTR nodes so sema/cg see T*. */
+            if (ds.base_ty) {
             while (ps_at(ps, STOK_STAR)) {
                 ps_advance(ps);
                 AstNode *ptr = ast_node_new(AST_TYPE_PTR, ds.base_ty->loc);
                 ptr->u.type_ptr.base = ds.base_ty;
                 ds.base_ty = ptr;
+            }
             }
 
             if (!ds.empty && ds.base_ty) {
@@ -3976,7 +3990,12 @@ static AstNode *parse_top_decl(PS *ps) {
     DeclSpecs ds = parse_decl_specifiers(ps);
     if (ds.empty || !ds.base_ty) {
         ps_error(ps, t.loc, "missing declaration specifier");
-        free(ds.gcc_attrs); /* avoid leak on error path */
+        free(ds.gcc_attrs);
+        free(ds.alignas_text);
+        free(ds.post_type_attr);
+        free(ds.inline_kw);
+        free(ds.const_kw);
+        free(ds.volatile_kw);
         ps_sync(ps);
         return NULL;
     }
@@ -4030,6 +4049,11 @@ static AstNode *parse_top_decl(PS *ps) {
              * return type.  The try_ext_method block re-parses everything. */
             ast_node_free(ds.base_ty);
             free(ds.gcc_attrs);
+            free(ds.alignas_text);
+            free(ds.post_type_attr);
+            free(ds.inline_kw);
+            free(ds.const_kw);
+            free(ds.volatile_kw);
             memset(&ds, 0, sizeof ds);
             ps_restore(ps, ds_sv);
             goto try_ext_method;
@@ -5679,13 +5703,23 @@ static AstNode *parse_stmt(PS *ps) {
                 AstNode *fn = build_func_def_from_decl(_fty, _fname, t.loc);
                 fn->u.func_def.storage   = ds.storage;
                 fn->u.func_def.is_inline = ds.is_inline;
+                fn->u.func_def.is_noreturn = ds.is_noreturn;
+                fn->u.func_def.is_thread_local = ds.is_thread_local;
                 fn->u.func_def.is_constexpr = ds.is_constexpr;
                 fn->u.func_def.gcc_attrs = ds.gcc_attrs;
                 ds.gcc_attrs = NULL;
+                fn->u.func_def.fmt |= (ds.fmt & FMTF_ATTRS_LEADING);
+                fn->u.func_def.inline_kw      = ds.inline_kw;
+                fn->u.func_def.fmt |= (ds.fmt & (FMTF_INLINE_LEADING));
+                fn->u.func_def.fmt |= (ds.fmt & FMTF_INLINE_AFTER_ATTRS);
+                fn->u.func_def.fmt |= (ds.fmt & FMTF_CONST_LEADING);
                 ps_advance(ps);
                 AstNode *wrap = ast_node_new(AST_DECL_STMT, t.loc);
                 wrap->u.decl_stmt.decl = fn;
-                free(ds.gcc_attrs);
+                free(ds.alignas_text);
+                free(ds.post_type_attr);
+                free(ds.const_kw);
+                free(ds.volatile_kw);
                 return wrap;
             }
             ast_node_free(_fty);
