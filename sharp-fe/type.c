@@ -379,6 +379,30 @@ bool ty_is_vector(const Type *t) {
     return t && t->kind == TY_VECTOR;
 }
 
+bool ty_is_func_ptr(const Type *t) {
+    if (!t) return false;
+    if (t->kind == TY_PTR && t->u.ptr.base &&
+        t->u.ptr.base->kind == TY_FUNC)
+        return true;
+    if (t->kind == TY_CONST && t->u.const_.base)
+        return ty_is_func_ptr(t->u.const_.base);
+    if (t->kind == TY_ATOMIC && t->u.atomic.base)
+        return ty_is_func_ptr(t->u.atomic.base);
+    return false;
+}
+
+bool ty_is_ptr_to_array(const Type *t) {
+    if (!t) return false;
+    if (t->kind == TY_PTR && t->u.ptr.base &&
+        t->u.ptr.base->kind == TY_ARRAY)
+        return true;
+    if (t->kind == TY_CONST && t->u.const_.base)
+        return ty_is_ptr_to_array(t->u.const_.base);
+    if (t->kind == TY_ATOMIC && t->u.atomic.base)
+        return ty_is_ptr_to_array(t->u.atomic.base);
+    return false;
+}
+
 /* =========================================================================
  * Modifiers
  * ====================================================================== */

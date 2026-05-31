@@ -157,6 +157,8 @@ bool ty_is_error(const Type *t);      /* TY_ERROR                         */
 bool ty_has_error(const Type *t);     /* TY_ERROR anywhere in chain (R10) */
 bool ty_is_scalar(const Type *t);     /* arithmetic or pointer            */
 bool ty_is_vector(const Type *t);     /* TY_VECTOR                        */
+bool ty_is_func_ptr(const Type *t);  /* TY_PTR(TY_FUNC) w/ const/atomic  */
+bool ty_is_ptr_to_array(const Type *t); /* TY_PTR(TY_ARRAY) w/ const/atomic */
 
 /* -------------------------------------------------------------------------
  * Modifiers

@@ -169,6 +169,12 @@ static inline Symbol *scope_lookup_struct_tag(Scope *s, const char *name) {
 /* Local type lookup — current scope only, type-namespace filter. */
 Symbol *scope_lookup_local_type(Scope *s, const char *name);
 
+/* scope_find_typedef — find a typedef symbol by name in the scope chain.
+ * Returns the first SYM_TYPE symbol whose decl is AST_TYPEDEF_DECL, or NULL.
+ * Used by cg.c to detect typedef aliases for function-pointer and
+ * ptr-to-array return types where the flat typedef form must be preserved. */
+Symbol *scope_find_typedef(Scope *scope, const char *name);
+
 /* scope_lookup_next_local — advance past a previously found symbol to the
  * next symbol with the same name in the same hash bucket chain.  Used to
  * iterate operator overloads: after scope_lookup_local() returns the first

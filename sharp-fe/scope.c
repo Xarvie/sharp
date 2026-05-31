@@ -131,6 +131,18 @@ Symbol *scope_lookup_local_type(Scope *s, const char *name) {
     return NULL;
 }
 
+Symbol *scope_find_typedef(Scope *scope, const char *name) {
+    if (!scope || !name) return NULL;
+    Symbol *sym = scope_lookup(scope, name);
+    for (; sym; sym = sym->next) {
+        if (strcmp(sym->name, name) != 0) continue;
+        if (sym->kind == SYM_TYPE && sym->decl &&
+            sym->decl->kind == AST_TYPEDEF_DECL)
+            return sym;
+    }
+    return NULL;
+}
+
 /* =========================================================================
  * scope_lookup_ex — the single unified lookup implementation.
  *

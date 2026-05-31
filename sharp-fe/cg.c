@@ -334,6 +334,20 @@ static void cg_emit_int_lit(CgCtx *ctx, const AstNode *lit) {
         cg_printf(ctx, "%lld", (long long)lit->u.int_lit.val);
 }
 
+static void cg_emit_stars(CgCtx *ctx, int n) {
+    for (int i = 0; i < n; i++) cg_puts(ctx, "*");
+}
+
+static void cg_emit_array_suffixes(CgCtx *ctx, const AstNode *cur) {
+    while (cur && cur->kind == AST_TYPE_ARRAY) {
+        cg_puts(ctx, "[");
+        if (cur->u.type_array.size)
+            cg_const_expr(ctx, cur->u.type_array.size);
+        cg_puts(ctx, "]");
+        cur = cur->u.type_array.base;
+    }
+}
+
 /* =========================================================================
  * Type generation
  * (Outputs the C declaration prefix; name is added separately)
@@ -434,12 +448,7 @@ static bool cg_decl_ast(CgCtx *ctx, const AstNode *ty_ast, const char *name) {
             cg_printf(ctx, " %s", name);
             /* Array dimensions */
             const AstNode *cur2 = ty_ast;
-            while (cur2 && cur2->kind == AST_TYPE_ARRAY) {
-                cg_puts(ctx, "[");
-                if (cur2->u.type_array.size) cg_const_expr(ctx, cur2->u.type_array.size);
-                cg_puts(ctx, "]");
-                cur2 = cur2->u.type_array.base;
-            }
+            cg_emit_array_suffixes(ctx, cur2);
             cg_puts(ctx, ")(");
             cg_emit_func_params_ast(ctx, fn_ast2);
             cg_puts(ctx, ")");
@@ -764,7 +773,7 @@ static void cg_type_from_ast(CgCtx *ctx, const AstNode *n) {
             const AstNode *ret_ast = fn_ast->u.type_func.ret;
             cg_type_from_ast(ctx, ret_ast);
             cg_puts(ctx, " (");
-            for (int _s = 0; _s < nstars; _s++) cg_puts(ctx, "*");
+            cg_emit_stars(ctx, nstars);
             cg_puts(ctx, ")(");
             bool fp = true;
             for (size_t i = 0; i < fn_ast->u.type_func.params.len; i++) {
@@ -788,7 +797,7 @@ static void cg_type_from_ast(CgCtx *ctx, const AstNode *n) {
              * Now produce `char (*)[256]` (abstract) or `char (*name)[256]`. */
             cg_type_from_ast(ctx, inner->u.type_array.base);
             cg_puts(ctx, " (");
-            for (int _s = 0; _s < nstars; _s++) cg_puts(ctx, "*");
+            cg_emit_stars(ctx, nstars);
             cg_puts(ctx, ")[");
             /* ISO C: qualifiers precede size -- [static N] not [Nstatic] */
             if (inner->u.type_array.has_static)   cg_puts(ctx, "static ");
@@ -989,9 +998,9 @@ static void cg_type(CgCtx *ctx, Type *t) {
                  * c->params = P (outer func params) */
                 cg_type(ctx, inner_c->u.func.ret);   /* R */
                 cg_puts(ctx, " (");
-                for (int i = 0; i < nstars; i++) cg_puts(ctx, "*");
+                cg_emit_stars(ctx, nstars);
                 cg_puts(ctx, "(");
-                for (int i = 0; i < inner_nstars; i++) cg_puts(ctx, "*");
+                cg_emit_stars(ctx, inner_nstars);
                 cg_puts(ctx, ")(");
                 /* outer function params P */
                 cg_func_params(ctx, c);
@@ -1004,7 +1013,7 @@ static void cg_type(CgCtx *ctx, Type *t) {
             /* Single-level pointer-to-function: ret (*)(params) */
             cg_type(ctx, c->u.func.ret);
             cg_puts(ctx, " (");
-            for (int i = 0; i < nstars; i++) cg_puts(ctx, "*");
+            cg_emit_stars(ctx, nstars);
             cg_puts(ctx, ")(");
             cg_func_params(ctx, c);
             cg_puts(ctx, ")");
@@ -1236,7 +1245,7 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
         if (peel && peel->kind == TY_FUNC) {
             cg_type(ctx, peel->u.func.ret);
             cg_puts(ctx, " (");
-            for (int i = 0; i < elem_nstars; i++) cg_puts(ctx, "*");
+            cg_emit_stars(ctx, elem_nstars);
             if (elem_const) cg_puts(ctx, " const");
             if (name && *name) {
                 if (elem_const) cg_puts(ctx, " ");
@@ -1293,7 +1302,7 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
                 /* const function-pointer: ret (* const name)(params) */
                 cg_type(ctx, c->u.func.ret);
                 cg_puts(ctx, " (");
-                for (int i = 0; i < nstars; i++) cg_puts(ctx, "*");
+                cg_emit_stars(ctx, nstars);
                 cg_puts(ctx, " const");
                 if (name && *name) cg_printf(ctx, " %s", name);
                 cg_puts(ctx, ")(");
@@ -1321,9 +1330,9 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
                 /* R (*(*name)(P))(Q) */
                 cg_type(ctx, inner_c->u.func.ret);          /* R */
                 cg_puts(ctx, " (");
-                for (int i = 0; i < nstars; i++) cg_puts(ctx, "*");
+                cg_emit_stars(ctx, nstars);
                 cg_puts(ctx, "(");
-                for (int i = 0; i < inner_ns; i++) cg_puts(ctx, "*");
+                cg_emit_stars(ctx, inner_ns);
                 if (name && *name) cg_puts(ctx, name);
                 cg_puts(ctx, ")(");                          /* outer params P */
                 cg_func_params(ctx, c);
@@ -1335,7 +1344,7 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
             /* Single-level: Return type. */
             cg_type(ctx, c->u.func.ret);
             cg_puts(ctx, " (");
-            for (int i = 0; i < nstars; i++) cg_puts(ctx, "*");
+            cg_emit_stars(ctx, nstars);
             if (name && *name) cg_puts(ctx, name);
             cg_puts(ctx, ")(");
             cg_func_params(ctx, c);
@@ -1348,8 +1357,7 @@ static void cg_decl(CgCtx *ctx, Type *t, const char *name) {
     /* TY_PTR(TY_ARRAY(T,N)) → nested declarator T (*name)[N].
      * Plain cg_type(TY_PTR(TY_ARRAY)) emits T ** (wrong pointer depth).
      * ISO C requires T (*name)[N] for pointer-to-array declarations. */
-    if (t && t->kind == TY_PTR && t->u.ptr.base &&
-        t->u.ptr.base->kind == TY_ARRAY) {
+    if (ty_is_ptr_to_array(t)) {
         Type *arr = t->u.ptr.base;
         cg_type(ctx, arr->u.array.base);
         cg_puts(ctx, " (*");
@@ -1701,12 +1709,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                     cg_printf(ctx, "} %s", fname);
                 /* Emit array suffixes if the field type is an array */
                 const AstNode *arr = fd->u.field_decl.type;
-                while (arr && arr->kind == AST_TYPE_ARRAY) {
-                    cg_puts(ctx, "[");
-                    if (arr->u.type_array.size) cg_const_expr(ctx, arr->u.type_array.size);
-                    cg_puts(ctx, "]");
-                    arr = arr->u.type_array.base;
-                }
+                cg_emit_array_suffixes(ctx, arr);
                 cg_puts(ctx, ";\n");
                 return;
             }
@@ -1765,12 +1768,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                     cg_printf(ctx, " %s", fname);
                     /* Emit array suffix(es) */
                     const AstNode *arr = fd->u.field_decl.type;
-                    while (arr && arr->kind == AST_TYPE_ARRAY) {
-                        cg_puts(ctx, "[");
-                        if (arr->u.type_array.size) cg_const_expr(ctx, arr->u.type_array.size);
-                        cg_puts(ctx, "]");
-                        arr = arr->u.type_array.base;
-                    }
+                    cg_emit_array_suffixes(ctx, arr);
                     cg_puts(ctx, ";\n");
                     return;
                 }
@@ -1808,13 +1806,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
             }
             cg_printf(ctx, " %s", fname);
             const AstNode *cur = ast_ty;
-            while (cur && cur->kind == AST_TYPE_ARRAY) {
-                cg_puts(ctx, "[");
-                if (cur->u.type_array.size)
-                    cg_const_expr(ctx, cur->u.type_array.size);
-                cg_puts(ctx, "]");
-                cur = cur->u.type_array.base;
-            }
+            cg_emit_array_suffixes(ctx, cur);
         }
     }
     if (!array_with_unknown_sz) {
@@ -1826,8 +1818,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
         /* C8/C5: for function-pointer fields, use cg_type_from_ast for the
          * return type to preserve typedef aliases (e.g. `my_int_t (*fn)(int)`
          * instead of `int (*fn)(int)` when my_int_t is a typedef for int). */
-        bool is_fnptr = ft && ft->kind == TY_PTR &&
-                        ft->u.ptr.base && ft->u.ptr.base->kind == TY_FUNC;
+        bool is_fnptr = ty_is_func_ptr(ft);
         bool use_ast_ret = is_fnptr && fty &&
                            fty->kind == AST_TYPE_PTR &&
                            fty->u.type_ptr.base &&
@@ -2859,8 +2850,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
             }
             /* Disable ast path for PTR(ARRAY) UNLESS the AST cast type
                  * is PTR(TYPE_NAME(typedef_alias)) -- in that case preserve. */
-                if (pb && pb->kind == TY_PTR && pb->u.ptr.base &&
-                    pb->u.ptr.base->kind == TY_ARRAY) {
+                if (ty_is_ptr_to_array(pb)) {
                     /* Check if AST is PTR(TYPE_NAME(typedef)) -- keep use_ast=true */
                     const AstNode *cast_ast = expr->u.cast.type;
                     bool is_typedef_ptr = cast_ast &&
@@ -2870,15 +2860,8 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                         !cast_ast->u.type_ptr.base->u.type_name.is_struct_tag;
                     if (is_typedef_ptr && ctx->file_scope) {
                         const char *bnm = cast_ast->u.type_ptr.base->u.type_name.name;
-                        Symbol *sym2 = bnm ? scope_lookup(ctx->file_scope, bnm) : NULL;
-                        bool found_td = false;
-                        for (; sym2; sym2 = sym2->next) {
-                            if (strcmp(sym2->name, bnm) != 0) continue;
-                            if (sym2->kind == SYM_TYPE && sym2->decl &&
-                                sym2->decl->kind == AST_TYPEDEF_DECL)
-                                { found_td = true; break; }
-                        }
-                        if (!found_td) use_ast = false;
+                        Symbol *sym2 = scope_find_typedef(ctx->file_scope, bnm);
+                        if (!sym2) use_ast = false;
                     } else {
                         use_ast = false;
                     }
@@ -2891,8 +2874,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
         }
         if (cast_t && !ty_is_error(cast_t) && cast_t->kind != TY_VOID &&
             cast_t->kind != TY_ERROR) {
-            if (cast_t->kind == TY_PTR && cast_t->u.ptr.base &&
-                cast_t->u.ptr.base->kind == TY_ARRAY) {
+            if (ty_is_ptr_to_array(cast_t)) {
                 Type *arr = cast_t->u.ptr.base;
                 cg_type(ctx, arr->u.array.base);
                 cg_puts(ctx, " (*)[");
@@ -2909,8 +2891,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
             Type *ast_t = ty_from_ast(ctx->ts, expr->u.cast.type,
                                       cg_type_scope(ctx), NULL);
             if (ast_t && !ty_is_error(ast_t)) {
-                if (ast_t->kind == TY_PTR && ast_t->u.ptr.base &&
-                    ast_t->u.ptr.base->kind == TY_ARRAY) {
+                if (ty_is_ptr_to_array(ast_t)) {
                     Type *arr = ast_t->u.ptr.base;
                     cg_type(ctx, arr->u.array.base);
                     cg_puts(ctx, " (*)[");
@@ -2987,13 +2968,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                 }
                 /* Emit array suffixes */
                 cursor = op;
-                while (cursor && cursor->kind == AST_TYPE_ARRAY) {
-                    cg_puts(ctx, "[");
-                    if (cursor->u.type_array.size)
-                        cg_const_expr(ctx, cursor->u.type_array.size);
-                    cg_puts(ctx, "]");
-                    cursor = cursor->u.type_array.base;
-                }
+                cg_emit_array_suffixes(ctx, cursor);
             } else {
                 /* C8/C5: in C mode with an AST operand, prefer cg_type_from_ast
                  * which preserves typedef names (e.g. S → S, not struct __anon_struct_0). */
@@ -3447,12 +3422,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
                     cg_printf(ctx, " %s", vd->u.var_decl.name ? vd->u.var_decl.name : "");
                     /* Array suffixes */
                     const AstNode *arr = vd->u.var_decl.type;
-                    while (arr && arr->kind == AST_TYPE_ARRAY) {
-                        cg_puts(ctx, "[");
-                        if (arr->u.type_array.size) cg_const_expr(ctx, arr->u.type_array.size);
-                        cg_puts(ctx, "]");
-                        arr = arr->u.type_array.base;
-                    }
+                    cg_emit_array_suffixes(ctx, arr);
                     if (vd->u.var_decl.init) { cg_puts(ctx, " = "); cg_expr(ctx, vd->u.var_decl.init); }
                     cg_puts(ctx, ";"); cg_nl(ctx);
                     /* Clear from_inline_var so that
@@ -3565,13 +3535,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
                     cg_type(ctx, base_t);
                 cg_printf(ctx, " %s", vd->u.var_decl.name);
                 const AstNode *cur = ast_ty;
-                while (cur && cur->kind == AST_TYPE_ARRAY) {
-                    cg_puts(ctx, "[");
-                    if (cur->u.type_array.size)
-                        cg_const_expr(ctx, cur->u.type_array.size);
-                    cg_puts(ctx, "]");
-                    cur = cur->u.type_array.base;
-                }
+                cg_emit_array_suffixes(ctx, cur);
                 array_fallback_done:;
             } else {
                 /* No explicit array size in AST.  When the base type resolved
@@ -3643,12 +3607,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
             cg_printf(ctx, " %s", vd->u.var_decl.name);
             /* Emit array suffixes */
             cur = ast_ty;
-            while (cur && cur->kind == AST_TYPE_ARRAY) {
-                cg_puts(ctx, "[");
-                if (cur->u.type_array.size) cg_const_expr(ctx, cur->u.type_array.size);
-                cg_puts(ctx, "]");
-                cur = cur->u.type_array.base;
-            }
+            cg_emit_array_suffixes(ctx, cur);
         } else {
             /* C8: if the type has volatile/_Atomic anywhere, emit from AST
              * directly to preserve the qualifier -- the Type* path strips both. */
@@ -4116,12 +4075,7 @@ static void cg_block(CgCtx *ctx, const AstNode *block) {
                             for (int _pi = 0; _pi < _vis_ptr; _pi++) cg_puts(ctx, " *");
                             cg_printf(ctx, " %s", vd0->u.var_decl.name ? vd0->u.var_decl.name : "");
                             const AstNode *_arr = vd0->u.var_decl.type;
-                            while (_arr && _arr->kind == AST_TYPE_ARRAY) {
-                                cg_puts(ctx, "[");
-                                if (_arr->u.type_array.size) cg_const_expr(ctx, _arr->u.type_array.size);
-                                cg_puts(ctx, "]");
-                                _arr = _arr->u.type_array.base;
-                            }
+                            cg_emit_array_suffixes(ctx, _arr);
                             if (vd0->u.var_decl.init) { cg_puts(ctx, " = "); cg_expr(ctx, vd0->u.var_decl.init); }
                             /* Emit continuations */
                             for (size_t _k = i + 1; _k < j; _k++) {
@@ -4129,12 +4083,7 @@ static void cg_block(CgCtx *ctx, const AstNode *block) {
                                 cg_puts(ctx, ", ");
                                 cg_puts(ctx, _vdk->u.var_decl.name ? _vdk->u.var_decl.name : "");
                                 const AstNode *_a2 = _vdk->u.var_decl.type;
-                                while (_a2 && _a2->kind == AST_TYPE_ARRAY) {
-                                    cg_puts(ctx, "[");
-                                    if (_a2->u.type_array.size) cg_const_expr(ctx, _a2->u.type_array.size);
-                                    cg_puts(ctx, "]");
-                                    _a2 = _a2->u.type_array.base;
-                                }
+                                cg_emit_array_suffixes(ctx, _a2);
                                 if (_vdk->u.var_decl.init) { cg_puts(ctx, " = "); cg_expr(ctx, _vdk->u.var_decl.init); }
                             }
                             cg_puts(ctx, ";"); cg_nl(ctx);
@@ -4393,15 +4342,10 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
         ret_node->kind == AST_TYPE_NAME && !ret_node->u.type_name.is_struct_tag &&
         ctx->file_scope) {
         const char *rnm = ret_node->u.type_name.name;
-        Symbol *sym = rnm ? scope_lookup(ctx->file_scope, rnm) : NULL;
-        for (; sym; sym = sym->next) {
-            if (strcmp(sym->name, rnm) != 0) continue;
-            if (sym->kind == SYM_TYPE && sym->decl &&
-                sym->decl->kind == AST_TYPEDEF_DECL) {
-                ret_inner = NULL;   /* use flat typedef form */
-                ret_nstars = 0;
-                break;
-            }
+        Symbol *sym = scope_find_typedef(ctx->file_scope, rnm);
+        if (sym) {
+            ret_inner = NULL;   /* use flat typedef form */
+            ret_nstars = 0;
         }
     }
     /* pointer-to-array return type -- e.g. jmp_buf* where
@@ -4417,8 +4361,7 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
      * The nested form needs no typedef and is always valid. */
     Type *ret_arr_base  = NULL;
     int64_t ret_arr_size = -1;
-    if (!ret_inner && ret_t && ret_t->kind == TY_PTR &&
-        ret_t->u.ptr.base && ret_t->u.ptr.base->kind == TY_ARRAY) {
+    if (!ret_inner && ret_t && ty_is_ptr_to_array(ret_t)) {
         ret_arr_base = ret_t->u.ptr.base->u.array.base;
         ret_arr_size = ret_t->u.ptr.base->u.array.size;
     }
@@ -4432,14 +4375,9 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
         if (rn->kind == AST_TYPE_PTR) rn = rn->u.type_ptr.base;
         if (rn && rn->kind == AST_TYPE_NAME && !rn->u.type_name.is_struct_tag) {
             const char *rnm = rn->u.type_name.name;
-            Symbol *sym = rnm ? scope_lookup(ctx->file_scope, rnm) : NULL;
-            for (; sym; sym = sym->next) {
-                if (strcmp(sym->name, rnm) != 0) continue;
-                if (sym->kind == SYM_TYPE && sym->decl &&
-                    sym->decl->kind == AST_TYPEDEF_DECL) {
-                    ret_arr_base = NULL; ret_arr_size = -1;  /* use flat form */
-                    break;
-                }
+            Symbol *sym = scope_find_typedef(ctx->file_scope, rnm);
+            if (sym) {
+                ret_arr_base = NULL; ret_arr_size = -1;  /* use flat form */
             }
         }
     }
@@ -4457,7 +4395,7 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
             cg_type(ctx, ret_inner->u.func.ret);
             cg_puts(ctx, " (");
         }
-        for (int i = 0; i < ret_nstars; i++) cg_puts(ctx, "*");
+        cg_emit_stars(ctx, ret_nstars);
     } else if (ret_arr_base) {
         /* pointer-to-array: emit base type + ` (*` opener.
          * Closer `)[N]` is emitted after the parameter list. */
@@ -6161,12 +6099,7 @@ static bool cg_emit_field_maybe_inline(CgCtx *ctx,
         /* Array suffix for array-of-inline-struct */
         if (fty->kind == AST_TYPE_ARRAY) {
             const AstNode *_arr = fty;
-            while (_arr && _arr->kind == AST_TYPE_ARRAY) {
-                cg_puts(ctx, "[");
-                if (_arr->u.type_array.size) cg_const_expr(ctx, _arr->u.type_array.size);
-                cg_puts(ctx, "]");
-                _arr = _arr->u.type_array.base;
-            }
+            cg_emit_array_suffixes(ctx, _arr);
         }
         if (fi->u.field_decl.bit_width) { cg_puts(ctx, " : "); cg_expr(ctx, fi->u.field_decl.bit_width); }
         if (fi->u.field_decl.gcc_attrs) { cg_puts(ctx, " "); cg_puts(ctx, fi->u.field_decl.gcc_attrs); }
@@ -6465,13 +6398,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                 else         cg_puts(ctx, "int");
                 cg_printf(ctx, " (*%s", cname);
                 const AstNode *cur_arr = arr;
-                while (cur_arr && cur_arr->kind == AST_TYPE_ARRAY) {
-                    cg_puts(ctx, "[");
-                    if (cur_arr->u.type_array.size)
-                        cg_const_expr(ctx, cur_arr->u.type_array.size);
-                    cg_puts(ctx, "]");
-                    cur_arr = cur_arr->u.type_array.base;
-                }
+                cg_emit_array_suffixes(ctx, cur_arr);
                 cg_puts(ctx, ")");
                 cg_puts(ctx, "(");
                 /* Emit param types */
@@ -6506,13 +6433,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                 cg_printf(ctx, " %s", cname);
                 /* Emit array suffix(es) outermost-first */
                 const AstNode *cur_arr = arr;
-                while (cur_arr && cur_arr->kind == AST_TYPE_ARRAY) {
-                    cg_puts(ctx, "[");
-                    if (cur_arr->u.type_array.size)
-                        cg_const_expr(ctx, cur_arr->u.type_array.size);
-                    cg_puts(ctx, "]");
-                    cur_arr = cur_arr->u.type_array.base;
-                }
+                cg_emit_array_suffixes(ctx, cur_arr);
                 cg_puts(ctx, ";\n");
             }
         } else {
@@ -6625,7 +6546,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                         /* Pattern 1: Pointer-to-array typedef */
                         cg_type_from_ast(ctx, ptr->u.type_array.base);
                         cg_puts(ctx, " (");
-                        for (int _s = 0; _s < td_nstars; _s++) cg_puts(ctx, "*");
+                        cg_emit_stars(ctx, td_nstars);
                         cg_puts(ctx, cname);
                         cg_puts(ctx, ")[");
                         if (ptr->u.type_array.has_static)   cg_puts(ctx, "static ");
@@ -6896,12 +6817,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
                 cg_printf(ctx, "} %s", d->u.var_decl.name ? d->u.var_decl.name : "");
                 /* Emit array suffixes */
                 const AstNode *arr = ty_ast;
-                while (arr && arr->kind == AST_TYPE_ARRAY) {
-                    cg_puts(ctx, "[");
-                    if (arr->u.type_array.size) cg_const_expr(ctx, arr->u.type_array.size);
-                    cg_puts(ctx, "]");
-                    arr = arr->u.type_array.base;
-                }
+                cg_emit_array_suffixes(ctx, arr);
                 goto var_decl_emitted;
             }
         }
@@ -6972,12 +6888,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
                 cg_printf(ctx, " %s", d->u.var_decl.name ? d->u.var_decl.name : "");
                 /* Emit array suffixes */
                 const AstNode *arr2 = ty_ast;
-                while (arr2 && arr2->kind == AST_TYPE_ARRAY) {
-                    cg_puts(ctx, "[");
-                    if (arr2->u.type_array.size) cg_const_expr(ctx, arr2->u.type_array.size);
-                    cg_puts(ctx, "]");
-                    arr2 = arr2->u.type_array.base;
-                }
+                cg_emit_array_suffixes(ctx, arr2);
                 goto var_decl_emitted;
             }
         }
