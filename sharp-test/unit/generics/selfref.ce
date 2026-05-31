@@ -56,5 +56,24 @@ int main() {
     if (head.get_val() != 100) return 7;
     if (head.next->val != 200) return 8;
 
+    // --- T4: linked list traversal with methods ---
+    Node<int> n1 = {0};
+    Node<int> n2 = {0};
+    Node<int> n3 = {0};
+    n1.set_val(10);
+    n2.set_val(20);
+    n3.set_val(30);
+    n1.set_next(&n2);
+    n2.set_next(&n3);
+    n3.set_next((Node<int>*)0);
+
+    int total = 0;
+    Node<int>* cur = &n1;
+    while (cur != (Node<int>*)0) {
+        total = total + cur->get_val();
+        cur = cur->next;
+    }
+    if (total != 60) return 9;
+
     return 0;
 }

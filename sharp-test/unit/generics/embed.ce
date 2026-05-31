@@ -28,6 +28,7 @@ T    Labeled<T>.get_label(this) const { return this->label; }
 void Labeled<T>.set_label(this, T val) { this->label = val; }
 void Labeled<T>.set_xy(this, int x, int y) { this->pos.x = x; this->pos.y = y; }
 int  Labeled<T>.pos_x(this) const { return this->pos.x; }
+int  Labeled<T>.move_x(this, int dx) { this->pos.x = this->pos.x + dx; return this->pos.x; }
 
 int main() {
     /* Test zero-init (p235) */
@@ -55,6 +56,24 @@ int main() {
     Labeled<float> b = {0};
     b.set_label(3.14f);
     if (b.get_label() < 3.13f || b.get_label() > 3.15f) return 8;
+
+    // --- T3: nested Maybe pattern ---
+    Maybe<Maybe<int>> outer = {0};
+    if (outer.has_val()) return 9;
+    Maybe<int> inner = {0};
+    inner.set_val(42);
+    outer.set_val(inner);
+    if (!outer.has_val()) return 10;
+    Maybe<int> retrieved = outer.get_val();
+    if (!retrieved.has_val()) return 11;
+    if (retrieved.get_val() != 42) return 12;
+
+    // --- T4: Labeled with method chaining ---
+    Labeled<int> c = {0};
+    c.set_label(99);
+    c.set_xy(5, 10);
+    if (c.move_x(3) != 8) return 13;
+    if (c.pos_x() != 8) return 14;
 
     return 0;
 }

@@ -551,7 +551,65 @@ int main() {
 #line 109 "sharp-test/unit/generics/nested.ce"
     pv.first = 42;
 
-#line 111 "sharp-test/unit/generics/nested.ce"
+#line 112 "sharp-test/unit/generics/nested.ce"
+    Vec__int row_a = { 0 };
+
+#line 113 "sharp-test/unit/generics/nested.ce"
+    Vec__int__push(&row_a, 1);
+
+#line 114 "sharp-test/unit/generics/nested.ce"
+    Vec__int__push(&row_a, 2);
+
+#line 115 "sharp-test/unit/generics/nested.ce"
+    Vec__int row_b = { 0 };
+
+#line 116 "sharp-test/unit/generics/nested.ce"
+    Vec__int__push(&row_b, 3);
+
+#line 117 "sharp-test/unit/generics/nested.ce"
+    Vec__int__push(&row_b, 4);
+
+#line 118 "sharp-test/unit/generics/nested.ce"
+    Vec__Vec__int matrix = { 0 };
+
+#line 119 "sharp-test/unit/generics/nested.ce"
+    Vec__Vec__int__push(&matrix, row_a);
+
+#line 120 "sharp-test/unit/generics/nested.ce"
+    Vec__Vec__int__push(&matrix, row_b);
+
+#line 121 "sharp-test/unit/generics/nested.ce"
+    if (Vec__Vec__int__size(&matrix) != 2) 
+        return 13;
+
+#line 122 "sharp-test/unit/generics/nested.ce"
+    Vec__int r0 = Vec__Vec__int__get(&matrix, 0);
+
+#line 123 "sharp-test/unit/generics/nested.ce"
+    if (Vec__int__size(&r0) != 2) 
+        return 14;
+
+#line 124 "sharp-test/unit/generics/nested.ce"
+    if (Vec__int__get(&r0, 1) != 2) 
+        return 15;
+
+#line 125 "sharp-test/unit/generics/nested.ce"
+    Vec__int__destroy(&r0);
+
+#line 126 "sharp-test/unit/generics/nested.ce"
+    Vec__int mr1 = Vec__Vec__int__get(&matrix, 1);
+
+#line 127 "sharp-test/unit/generics/nested.ce"
+    if (Vec__int__get(&mr1, 0) != 3) 
+        return 16;
+
+#line 128 "sharp-test/unit/generics/nested.ce"
+    Vec__int__destroy(&mr1);
+
+#line 129 "sharp-test/unit/generics/nested.ce"
+    Vec__Vec__int__destroy(&matrix);
+
+#line 131 "sharp-test/unit/generics/nested.ce"
     return 0;
 }
 

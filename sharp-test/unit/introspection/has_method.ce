@@ -24,6 +24,17 @@ typedef float MyFloat;
 typedef long isize;
 class Point { int x; int y; };
 
+class WithDebug {
+    int val;
+};
+void WithDebug.debug_print(this) { (void)this; }
+int WithDebug.get_val(this) { return this->val; }
+
+class NoDebug {
+    int val;
+};
+int NoDebug.get_val(this) { return this->val; }
+
 int main() {
     // --- p250: @has_method ---
     Foo f; f.x = 42;
@@ -49,6 +60,19 @@ int main() {
     if (@is_arithmetic(Point)) { return 90; }
     if (@is_arithmetic(isize)) { } else { return 100; }
     @static_assert(@is_arithmetic(int), "int must be arithmetic");
+
+    // --- T4: conditional method dispatch based on introspection ---
+    WithDebug wd; wd.val = 42;
+    NoDebug nd; nd.val = 99;
+
+    if (@has_method(WithDebug, debug_print)) {
+        wd.debug_print();
+    }
+    if (@has_method(NoDebug, debug_print)) {
+        return 110;
+    }
+    if (wd.get_val() != 42) return 111;
+    if (nd.get_val() != 99) return 112;
 
     return 0;
 }

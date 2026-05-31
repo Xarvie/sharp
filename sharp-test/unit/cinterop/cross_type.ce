@@ -48,5 +48,16 @@ int main(void) {
     if (!(eq_test == s1)) return 5;
     if (eq_test == s2) return 6;
 
+    // --- T3: chained cross-type operations ---
+    VecC c2; c2.x = 0.0f; c2.y = 0.0f;
+    VecC result = c2 + s1 + s2;  /* 0+(10,20)+(30,40) = (40,60) */
+    if (result.x != 40.0f) return 7;
+    if (result.y != 60.0f) return 8;
+
+    // --- T4: cross-type equality with computed values ---
+    struct VecS s3; s3.x = 11.0f; s3.y = 22.0f;
+    VecC c3; c3.x = c1.x + s1.x; c3.y = c1.y + s1.y;
+    if (!(c3 == s3)) return 9;
+
     return 0;
 }

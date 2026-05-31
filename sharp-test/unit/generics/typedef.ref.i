@@ -182,6 +182,16 @@ typedef unsigned long usize;
 
 #line 72 "sharp-test/unit/generics/typedef.ce"
 
+#line 32 "sharp-test/unit/generics/typedef.ce"
+typedef struct Vec__int Vec__int;
+struct Vec__int {
+    int * data;
+    isize len;
+    isize cap;
+};
+
+
+
 #line 11 "sharp-test/unit/generics/typedef.ce"
 typedef struct Stack__int Stack__int;
 struct Stack__int {
@@ -192,14 +202,6 @@ struct Stack__int {
 
 
 #line 32 "sharp-test/unit/generics/typedef.ce"
-typedef struct Vec__int Vec__int;
-struct Vec__int {
-    int * data;
-    isize len;
-    isize cap;
-};
-
-
 typedef struct Vec__float Vec__float;
 struct Vec__float {
     float * data;
@@ -227,6 +229,9 @@ typedef Vec__float FloatVec;
 #line 69 "sharp-test/unit/generics/typedef.ce"
 typedef IntVec MyIntVec;
 
+#line 38 "sharp-test/unit/generics/typedef.ce"
+void Vec__int__push(Vec__int * this, int val);
+
 #line 16 "sharp-test/unit/generics/typedef.ce"
 Stack__int Stack__int__new(void);
 
@@ -235,9 +240,6 @@ void Stack__int__push(Stack__int * this, int v);
 
 #line 27 "sharp-test/unit/generics/typedef.ce"
 int Stack__int__top(Stack__int * this);
-
-#line 38 "sharp-test/unit/generics/typedef.ce"
-void Vec__int__push(Vec__int * this, int val);
 
 #line 50 "sharp-test/unit/generics/typedef.ce"
 long Vec__int__size(Vec__int * this);
@@ -400,100 +402,165 @@ extern size_t wcstombs(char * __restrict __s, const wchar_t * __restrict __pwcs,
 #line 77 "sharp-test/unit/generics/typedef.ce"
 
 #line 81 "sharp-test/unit/generics/typedef.ce"
-int main() {
+IntVec make_vec(int a, int b) {
+
+#line 82 "sharp-test/unit/generics/typedef.ce"
+    IntVec v = { 0 };
 
 #line 83 "sharp-test/unit/generics/typedef.ce"
-    Stack__int s = Stack__int__new();
+    Vec__int__push(&v, a);
 
 #line 84 "sharp-test/unit/generics/typedef.ce"
-    Stack__int__push(&s, 42);
+    Vec__int__push(&v, b);
 
 #line 85 "sharp-test/unit/generics/typedef.ce"
+    return v;
+}
+
+#line 88 "sharp-test/unit/generics/typedef.ce"
+int main() {
+
+#line 90 "sharp-test/unit/generics/typedef.ce"
+    Stack__int s = Stack__int__new();
+
+#line 91 "sharp-test/unit/generics/typedef.ce"
+    Stack__int__push(&s, 42);
+
+#line 92 "sharp-test/unit/generics/typedef.ce"
     if (Stack__int__top(&s) != 42) 
         return 1;
 
-#line 86 "sharp-test/unit/generics/typedef.ce"
+#line 93 "sharp-test/unit/generics/typedef.ce"
     if (s.n != 1) 
         return 2;
 
-#line 89 "sharp-test/unit/generics/typedef.ce"
+#line 96 "sharp-test/unit/generics/typedef.ce"
     IntVec v = { 0 };
 
-#line 90 "sharp-test/unit/generics/typedef.ce"
+#line 97 "sharp-test/unit/generics/typedef.ce"
     Vec__int__push(&v, 42);
 
-#line 91 "sharp-test/unit/generics/typedef.ce"
+#line 98 "sharp-test/unit/generics/typedef.ce"
     Vec__int__push(&v, 73);
 
-#line 92 "sharp-test/unit/generics/typedef.ce"
+#line 99 "sharp-test/unit/generics/typedef.ce"
     if (Vec__int__size(&v) != 2) 
         return 3;
 
-#line 93 "sharp-test/unit/generics/typedef.ce"
+#line 100 "sharp-test/unit/generics/typedef.ce"
     if (Vec__int__get(&v, 0) != 42) 
         return 4;
 
-#line 94 "sharp-test/unit/generics/typedef.ce"
+#line 101 "sharp-test/unit/generics/typedef.ce"
     if (Vec__int__get(&v, 1) != 73) 
         return 5;
 
-#line 95 "sharp-test/unit/generics/typedef.ce"
+#line 102 "sharp-test/unit/generics/typedef.ce"
     Vec__int__destroy(&v);
 
-#line 98 "sharp-test/unit/generics/typedef.ce"
+#line 105 "sharp-test/unit/generics/typedef.ce"
     MyIntVec v2 = { 0 };
 
-#line 99 "sharp-test/unit/generics/typedef.ce"
+#line 106 "sharp-test/unit/generics/typedef.ce"
     Vec__int__push(&v2, 99);
 
-#line 100 "sharp-test/unit/generics/typedef.ce"
+#line 107 "sharp-test/unit/generics/typedef.ce"
     if (Vec__int__size(&v2) != 1) 
         return 6;
 
-#line 101 "sharp-test/unit/generics/typedef.ce"
+#line 108 "sharp-test/unit/generics/typedef.ce"
     if (Vec__int__get(&v2, 0) != 99) 
         return 7;
 
-#line 102 "sharp-test/unit/generics/typedef.ce"
+#line 109 "sharp-test/unit/generics/typedef.ce"
     Vec__int__destroy(&v2);
 
-#line 105 "sharp-test/unit/generics/typedef.ce"
+#line 112 "sharp-test/unit/generics/typedef.ce"
     FloatVec fv = { 0 };
 
-#line 106 "sharp-test/unit/generics/typedef.ce"
+#line 113 "sharp-test/unit/generics/typedef.ce"
     Vec__float__push(&fv, 1.5f);
 
-#line 107 "sharp-test/unit/generics/typedef.ce"
+#line 114 "sharp-test/unit/generics/typedef.ce"
     if (Vec__float__size(&fv) != 1) 
         return 8;
 
-#line 108 "sharp-test/unit/generics/typedef.ce"
+#line 115 "sharp-test/unit/generics/typedef.ce"
     if (Vec__float__get(&fv, 0) < 1.4f || Vec__float__get(&fv, 0) > 1.6f) 
         return 9;
 
-#line 109 "sharp-test/unit/generics/typedef.ce"
+#line 116 "sharp-test/unit/generics/typedef.ce"
     Vec__float__destroy(&fv);
 
-#line 112 "sharp-test/unit/generics/typedef.ce"
+#line 119 "sharp-test/unit/generics/typedef.ce"
     IntVec z = { 0 };
 
-#line 113 "sharp-test/unit/generics/typedef.ce"
+#line 120 "sharp-test/unit/generics/typedef.ce"
     if (Vec__int__size(&z) != 0) 
         return 10;
 
-#line 116 "sharp-test/unit/generics/typedef.ce"
+#line 123 "sharp-test/unit/generics/typedef.ce"
     Arr__int arr = { 0 };
 
-#line 117 "sharp-test/unit/generics/typedef.ce"
+#line 124 "sharp-test/unit/generics/typedef.ce"
     arr.size = 5;
 
-#line 118 "sharp-test/unit/generics/typedef.ce"
+#line 125 "sharp-test/unit/generics/typedef.ce"
     if (Arr__int__len(&arr) != 5) 
         return 11;
 
-#line 120 "sharp-test/unit/generics/typedef.ce"
+#line 128 "sharp-test/unit/generics/typedef.ce"
+    IntVec mv = make_vec(10, 20);
+
+#line 129 "sharp-test/unit/generics/typedef.ce"
+    if (Vec__int__size(&mv) != 2) 
+        return 12;
+
+#line 130 "sharp-test/unit/generics/typedef.ce"
+    if (Vec__int__get(&mv, 0) != 10) 
+        return 13;
+
+#line 131 "sharp-test/unit/generics/typedef.ce"
+    if (Vec__int__get(&mv, 1) != 20) 
+        return 14;
+
+#line 132 "sharp-test/unit/generics/typedef.ce"
+    Vec__int__destroy(&mv);
+
+#line 134 "sharp-test/unit/generics/typedef.ce"
     return 0;
 }
+
+#line 38 "sharp-test/unit/generics/typedef.ce"
+__attribute__((weak)) void Vec__int__push(Vec__int * this, int val) {
+
+#line 39 "sharp-test/unit/generics/typedef.ce"
+    if (this->len >= this->cap) {
+
+#line 40 "sharp-test/unit/generics/typedef.ce"
+        isize new_cap = (this->cap == 0) ? 8 : this->cap * 2;
+
+#line 41 "sharp-test/unit/generics/typedef.ce"
+        int * nd = (int *)realloc(this->data, sizeof(int) * new_cap);
+
+#line 42 "sharp-test/unit/generics/typedef.ce"
+        if (!nd) 
+            __builtin_trap();
+
+#line 43 "sharp-test/unit/generics/typedef.ce"
+        this->data = nd;
+
+#line 44 "sharp-test/unit/generics/typedef.ce"
+        this->cap = new_cap;
+    }
+
+#line 46 "sharp-test/unit/generics/typedef.ce"
+    this->data[this->len] = val;
+
+#line 47 "sharp-test/unit/generics/typedef.ce"
+    this->len = this->len + 1;
+}
+
 
 #line 16 "sharp-test/unit/generics/typedef.ce"
 __attribute__((weak)) Stack__int Stack__int__new(void) {
@@ -525,37 +592,6 @@ __attribute__((weak)) int Stack__int__top(Stack__int * this) {
 
 #line 28 "sharp-test/unit/generics/typedef.ce"
     return this->data;
-}
-
-
-#line 38 "sharp-test/unit/generics/typedef.ce"
-__attribute__((weak)) void Vec__int__push(Vec__int * this, int val) {
-
-#line 39 "sharp-test/unit/generics/typedef.ce"
-    if (this->len >= this->cap) {
-
-#line 40 "sharp-test/unit/generics/typedef.ce"
-        isize new_cap = (this->cap == 0) ? 8 : this->cap * 2;
-
-#line 41 "sharp-test/unit/generics/typedef.ce"
-        int * nd = (int *)realloc(this->data, sizeof(int) * new_cap);
-
-#line 42 "sharp-test/unit/generics/typedef.ce"
-        if (!nd) 
-            __builtin_trap();
-
-#line 43 "sharp-test/unit/generics/typedef.ce"
-        this->data = nd;
-
-#line 44 "sharp-test/unit/generics/typedef.ce"
-        this->cap = new_cap;
-    }
-
-#line 46 "sharp-test/unit/generics/typedef.ce"
-    this->data[this->len] = val;
-
-#line 47 "sharp-test/unit/generics/typedef.ce"
-    this->len = this->len + 1;
 }
 
 

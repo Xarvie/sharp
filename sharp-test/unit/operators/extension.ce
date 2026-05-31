@@ -1,6 +1,8 @@
 // 来源: p225_operator_extension.ce, p267_runtime_operator.ce
 // 运算符作为扩展方法 + 运行时运算符重载测试
 
+#include <stdbool.h>
+
 // === p225: 运算符扩展方法 + 作用域测试 ===
 class Pt {
     int x;
@@ -53,6 +55,10 @@ Point Point.operator-(this, Point rhs) {
     return r;
 }
 
+bool Pt.operator==(this, Pt other) const {
+    return this->x == other.x && this->y == other.y;
+}
+
 int main() {
     // --- p225 测试 ---
     int r1 = test_before();
@@ -77,6 +83,16 @@ int main() {
     Point r_chain = p1 + p2 + p3;
     if (r_chain.x != 11) return 25;
     if (r_chain.y != 8)  return 26;
+
+    // --- T3: extension operator with const ---
+    Pt pa; pa.x = 3; pa.y = 5;
+    Pt pb; pb.x = 3; pb.y = 5;
+    if (!(pa == pb)) return 27;
+
+    // --- T4: extension operator in conditional ---
+    Pt pc; pc.x = 1; pc.y = 2;
+    if (pa == pc) return 28;
+    if (!(pa == pb)) return 29;
 
     return 0;
 }

@@ -40,6 +40,20 @@ int multi_op_check() {
     return r;  /* expected: 3 */
 }
 
+class HasAllOps {
+    int v;
+}
+int HasAllOps.operator+(this, HasAllOps rhs) { return this->v + rhs.v; }
+int HasAllOps.operator-(this, HasAllOps rhs) { return this->v - rhs.v; }
+int HasAllOps.operator==(this, HasAllOps rhs) { return this->v == rhs.v; }
+
+int try_add(HasAllOps a, HasAllOps b) {
+    if (@has_operator(HasAllOps, +)) {
+        return a + b;
+    }
+    return 0;
+}
+
 int main(void) {
     HasPlus a; a.v = 0;
     HasPlus b; b.v = 0;
@@ -49,5 +63,13 @@ int main(void) {
     if (branch_eq_has()   != 1) return 3;
     if (branch_eq_no()    != 0) return 4;
     if (multi_op_check()  != 3) return 5;
+
+    // --- T5: conditional operator usage based on introspection ---
+    HasAllOps x; x.v = 10;
+    HasAllOps y; y.v = 20;
+    if (try_add(x, y) != 30) return 6;
+    if (!@has_operator(HasAllOps, ==)) return 7;
+    if (@has_operator(HasAllOps, *)) return 8;
+
     return 0;
 }

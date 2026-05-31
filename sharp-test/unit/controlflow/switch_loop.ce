@@ -74,6 +74,40 @@ int main() {
 
     switch (x) { /* empty */ }
 
+    // --- T5: switch with fall-through computation ---
+    int acc = 0;
+    int mode = 2;
+    switch (mode) {
+        case 3: acc = acc + 100;
+        case 2: acc = acc + 10;
+        case 1: acc = acc + 1;
+                break;
+        default: acc = 999;
+    }
+    if (acc != 11) return 16;  /* 10+1, fall-through from case 2 */
+
+    // --- T6: nested switch ---
+    int outer = 1, inner = 2, result = 0;
+    switch (outer) {
+        case 1:
+            switch (inner) {
+                case 1: result = 11; break;
+                case 2: result = 12; break;
+                default: result = 19; break;
+            }
+            break;
+        case 2: result = 20; break;
+    }
+    if (result != 12) return 17;
+
+    // --- T7: do-while with nested condition ---
+    int sum3 = 0, k2 = 10;
+    do {
+        if (k2 % 2 == 0) sum3 = sum3 + k2;
+        k2 = k2 - 1;
+    } while (k2 > 0);
+    if (sum3 != 30) return 18;  /* 10+8+6+4+2 */
+
     // --- p255: do-while tests ---
     int sum = 0, i = 0;
     do { sum = sum + i; i = i + 1; } while (i < 5);

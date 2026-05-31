@@ -24,5 +24,18 @@ int main() {
     if (p2.get_x() != 3) return 4;
     if (p2.get_y() != 4) return 5;
 
+    // --- T2: method chaining across module ---
+    class Point2D p3;
+    p3.move_to(10, 20);
+    p3.move_to(p3.get_x() + 5, p3.get_y() + 5);
+    if (p3.get_x() != 15) return 6;
+    if (p3.get_y() != 25) return 7;
+
+    // --- T3: distance between moved points ---
+    class Point2D p4;
+    p4.move_to(15, 25);
+    int d2 = distance_sq(p3, p4);
+    if (d2 != 0) return 8;
+
     return 0;
 }

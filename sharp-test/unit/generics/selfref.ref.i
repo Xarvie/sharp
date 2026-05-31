@@ -109,7 +109,54 @@ int main() {
     if (head.next->val != 200) 
         return 8;
 
-#line 59 "sharp-test/unit/generics/selfref.ce"
+#line 60 "sharp-test/unit/generics/selfref.ce"
+    Node__int n1 = { 0 };
+
+#line 61 "sharp-test/unit/generics/selfref.ce"
+    Node__int n2 = { 0 };
+
+#line 62 "sharp-test/unit/generics/selfref.ce"
+    Node__int n3 = { 0 };
+
+#line 63 "sharp-test/unit/generics/selfref.ce"
+    Node__int__set_val(&n1, 10);
+
+#line 64 "sharp-test/unit/generics/selfref.ce"
+    Node__int__set_val(&n2, 20);
+
+#line 65 "sharp-test/unit/generics/selfref.ce"
+    Node__int__set_val(&n3, 30);
+
+#line 66 "sharp-test/unit/generics/selfref.ce"
+    Node__int__set_next(&n1, &n2);
+
+#line 67 "sharp-test/unit/generics/selfref.ce"
+    Node__int__set_next(&n2, &n3);
+
+#line 68 "sharp-test/unit/generics/selfref.ce"
+    Node__int__set_next(&n3, (Node__int *)0);
+
+#line 70 "sharp-test/unit/generics/selfref.ce"
+    int total = 0;
+
+#line 71 "sharp-test/unit/generics/selfref.ce"
+    Node__int * cur = &n1;
+
+#line 72 "sharp-test/unit/generics/selfref.ce"
+    while (cur != (Node__int *)0) {
+
+#line 73 "sharp-test/unit/generics/selfref.ce"
+        total = total + Node__int__get_val(cur);
+
+#line 74 "sharp-test/unit/generics/selfref.ce"
+        cur = cur->next;
+    }
+
+#line 76 "sharp-test/unit/generics/selfref.ce"
+    if (total != 60) 
+        return 9;
+
+#line 78 "sharp-test/unit/generics/selfref.ce"
     return 0;
 }
 

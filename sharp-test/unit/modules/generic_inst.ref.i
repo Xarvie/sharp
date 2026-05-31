@@ -102,7 +102,75 @@ int main() {
     if (RingBuf__int__size(&rb) != 0) 
         return 12;
 
-#line 30 "sharp-test/unit/modules/generic_inst.ce"
+#line 31 "sharp-test/unit/modules/generic_inst.ce"
+    int buf2[4] = { 0 };
+
+#line 32 "sharp-test/unit/modules/generic_inst.ce"
+    RingBuf__int rb2;
+
+#line 33 "sharp-test/unit/modules/generic_inst.ce"
+    RingBuf__int__init(&rb2, buf2, 4);
+
+#line 35 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__push(&rb2, 1)) 
+        return 13;
+
+#line 36 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__push(&rb2, 2)) 
+        return 14;
+
+#line 37 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__push(&rb2, 3)) 
+        return 15;
+
+#line 38 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__push(&rb2, 4)) 
+        return 16;
+
+#line 39 "sharp-test/unit/modules/generic_inst.ce"
+    if (RingBuf__int__push(&rb2, 5)) 
+        return 17;
+
+#line 41 "sharp-test/unit/modules/generic_inst.ce"
+    int v = 0;
+
+#line 42 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__pop(&rb2, &v) || v != 1) 
+        return 18;
+
+#line 43 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__pop(&rb2, &v) || v != 2) 
+        return 19;
+
+#line 45 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__push(&rb2, 5)) 
+        return 20;
+
+#line 46 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__push(&rb2, 6)) 
+        return 21;
+
+#line 48 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__pop(&rb2, &v) || v != 3) 
+        return 22;
+
+#line 49 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__pop(&rb2, &v) || v != 4) 
+        return 23;
+
+#line 50 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__pop(&rb2, &v) || v != 5) 
+        return 24;
+
+#line 51 "sharp-test/unit/modules/generic_inst.ce"
+    if (!RingBuf__int__pop(&rb2, &v) || v != 6) 
+        return 25;
+
+#line 52 "sharp-test/unit/modules/generic_inst.ce"
+    if (RingBuf__int__pop(&rb2, &v)) 
+        return 26;
+
+#line 54 "sharp-test/unit/modules/generic_inst.ce"
     return 0;
 }
 

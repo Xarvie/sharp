@@ -56,5 +56,15 @@ int main(void) {
         if (inside != 77) return 14;
     }
 
+    // --- T5: auto with array indexing ---
+    int arr[4] = {10, 20, 30, 40};
+    auto elem = arr[2];
+    if (elem != 30) return 15;
+
+    // --- T6: auto with struct member access ---
+    struct Point pt; pt.x = 100; pt.y = 200;
+    auto px = pt.x;
+    if (px != 100) return 16;
+
     return 0;
 }

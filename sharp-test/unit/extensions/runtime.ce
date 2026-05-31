@@ -46,6 +46,14 @@ int test_buffer() {
     return 0;
 }
 
+int Value.get_value_sq(this) const { return this->data * this->data; }
+
+int Buffer.sum(this) const {
+    int s = 0;
+    for (int i = 0; i < this->size; i = i + 1) s = s + this->buf[i];
+    return s;
+}
+
 int main() {
     // --- p264: extension defined after use ---
     Value v; v.data = 128;
@@ -59,6 +67,18 @@ int main() {
     // --- p265: buffer test ---
     int r = test_buffer();
     if (r != 0) return r;
+
+    // --- T3: extension method on const object ---
+    Value cv; cv.data = 7;
+    const Value* pcv = &cv;
+    if (pcv->get_value_sq() != 49) return 3;
+
+    // --- T4: multiple extension methods defined after forward declaration ---
+    Buffer b2 = {0};
+    b2.append(10);
+    b2.append(20);
+    b2.append(30);
+    if (b2.sum() != 60) return 4;
 
     return 0;
 }

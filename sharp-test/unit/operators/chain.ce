@@ -57,5 +57,19 @@ int main() {
     Vec3 right = b + a;
     if (!(left == right)) return 6;
 
+    // --- T3: mixed method/operator chain ---
+    Counter c2 = {0};
+    int val = c2.inc()->add(5)->get();
+    if (val != 6) return 7;
+
+    // --- T4: operator chain in expression ---
+    Vec3 d; d.x = 1; d.y = 0; d.z = 0;
+    Vec3 e; e.x = 0; e.y = 1; e.z = 0;
+    Vec3 f; f.x = 0; f.y = 0; f.z = 1;
+    Vec3 sum = a + b + d + e + f;
+    if (sum.x != 12) return 8;
+    if (sum.y != 23) return 9;
+    if (sum.z != 34) return 10;
+
     return 0;
 }

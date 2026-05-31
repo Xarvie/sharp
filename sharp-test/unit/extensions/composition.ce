@@ -38,6 +38,14 @@ void Player.reset(this) {
 }
 int  Player.read_score(this) const { return this->score; }
 
+class Transform {
+    Position pos;
+    Size size;
+    int rotation;
+};
+void Transform.move(this, int dx, int dy) { this->pos.move(dx, dy); }
+int Transform.area(this) const { return this->size.area(); }
+
 int main() {
     // --- Entity ---
     Entity e = { {1, 2}, {3, 4} };
@@ -56,6 +64,13 @@ int main() {
     if (s1 != 0) return 5;
     if (pl.origin.get_x() != 0) return 6;
     if (pl.origin.get_y() != 0) return 7;
+
+    // --- T3: deep composition chain ---
+    Transform t = { {0, 0}, {5, 6}, 0 };
+    if (t.area() != 30) return 8;
+    t.move(10, 20);
+    if (t.pos.get_x() != 10) return 9;
+    if (t.pos.get_y() != 20) return 10;
 
     return 0;
 }

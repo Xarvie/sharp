@@ -38,5 +38,24 @@ int main() {
     const Buffer cb = b;
     if (read_const(&cb) != 42) return 5;
 
+    // --- T3: const overload resolution in expression context ---
+    Buffer b2 = {0};
+    b2.write(7);
+    int v1 = b2.read();
+    const Buffer* pb2 = &b2;
+    int v2 = pb2->read();
+    if (v1 != 7) return 6;
+    if (v2 != 7) return 7;
+
+    // --- T4: const method on temporary ---
+    Counter c2 = Counter.from(50);
+    if (c2.get() != 50) return 8;
+
+    // --- T5: multiple const objects sharing read-only methods ---
+    Buffer cb1; cb1.data = 10;
+    Buffer cb2; cb2.data = 20;
+    if (cb1.read() != 10) return 9;
+    if (cb2.read() != 20) return 10;
+
     return 0;
 }

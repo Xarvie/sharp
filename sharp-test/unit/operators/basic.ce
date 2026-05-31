@@ -73,6 +73,13 @@ struct Point operator+(struct Point a, struct Point b) {
     return r;
 }
 
+class Accum {
+    int total;
+};
+Accum Accum.operator+(this, int n) const {
+    Accum r; r.total = this->total + n; return r;
+}
+
 int main() {
     // --- p110: 自由函数 Vec2 测试 ---
     struct Vec2 a; a.x = 1.0f; a.y = 2.0f;
@@ -133,6 +140,21 @@ int main() {
     struct Point pr = pa + pb;
     if (pr.x != 4) return 26;
     if (pr.y != 6) return 27;
+
+    // --- T5: operator with side effects ---
+    Accum ac; ac.total = 10;
+    Accum ac2 = ac + 5;
+    if (ac2.total != 15) return 28;
+    if (ac.total != 10) return 29;  /* original unchanged */
+
+    // --- T6: operator in complex expression ---
+    IntBox x1; x1.value = 2;
+    IntBox x2; x2.value = 3;
+    IntBox x3; x3.value = 4;
+    IntBox xsum = x1 + x2 + x3;
+    if (xsum.value != 9) return 30;
+    IntBox xprod = x1 * x2 * x3;
+    if (xprod.value != 24) return 31;
 
     return 0;
 }

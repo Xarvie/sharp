@@ -103,6 +103,44 @@ int main() {
     if (sizeof(Vec4) / sizeof(int) != 4) 
         return 15;
 
-#line 49 "sharp-test/unit/codegen/string_sizeof.ce"
+#line 50 "sharp-test/unit/codegen/string_sizeof.ce"
+    typedef struct Outer Outer;
+struct Outer {
+    Vec4 inner;
+    int flag;
+};
+
+
+#line 54 "sharp-test/unit/codegen/string_sizeof.ce"
+    if (sizeof(Outer) != 20) 
+        return 16;
+
+#line 55 "sharp-test/unit/codegen/string_sizeof.ce"
+    if (sizeof(Outer) - sizeof(Vec4) != 4) 
+        return 17;
+
+#line 58 "sharp-test/unit/codegen/string_sizeof.ce"
+    const char * msg = "sharp";
+
+#line 59 "sharp-test/unit/codegen/string_sizeof.ce"
+    int slen = 0;
+
+#line 60 "sharp-test/unit/codegen/string_sizeof.ce"
+    while (msg[slen] != 0) 
+        slen = slen + 1;
+
+#line 61 "sharp-test/unit/codegen/string_sizeof.ce"
+    if (slen != 5) 
+        return 18;
+
+#line 62 "sharp-test/unit/codegen/string_sizeof.ce"
+    if (msg[0] != 's') 
+        return 19;
+
+#line 63 "sharp-test/unit/codegen/string_sizeof.ce"
+    if (msg[4] != 'p') 
+        return 20;
+
+#line 65 "sharp-test/unit/codegen/string_sizeof.ce"
     return 0;
 }

@@ -108,5 +108,25 @@ int main() {
     Pair<int, Vec<int>> pv = {0};
     pv.first = 42;
 
+    // --- T4: nested generic with method calls ---
+    Vec<int> row_a = {0};
+    row_a.push(1);
+    row_a.push(2);
+    Vec<int> row_b = {0};
+    row_b.push(3);
+    row_b.push(4);
+    Vec<Vec<int>> matrix = {0};
+    matrix.push(row_a);
+    matrix.push(row_b);
+    if (matrix.size() != 2) return 13;
+    Vec<int> r0 = matrix.get(0);
+    if (r0.size() != 2) return 14;
+    if (r0.get(1) != 2) return 15;
+    r0.destroy();
+    Vec<int> mr1 = matrix.get(1);
+    if (mr1.get(0) != 3) return 16;
+    mr1.destroy();
+    matrix.destroy();
+
     return 0;
 }

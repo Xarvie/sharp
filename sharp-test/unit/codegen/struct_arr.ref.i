@@ -139,6 +139,51 @@ int main() {
     if (p4.y != 6) 
         return 11;
 
-#line 64 "sharp-test/unit/codegen/struct_arr.ce"
+#line 65 "sharp-test/unit/codegen/struct_arr.ce"
+    Vec2 tri[3] = { 0 };
+
+#line 66 "sharp-test/unit/codegen/struct_arr.ce"
+    tri[0].x = 0;
+    tri[0].y = 0;
+
+#line 67 "sharp-test/unit/codegen/struct_arr.ce"
+    tri[1].x = 3;
+    tri[1].y = 0;
+
+#line 68 "sharp-test/unit/codegen/struct_arr.ce"
+    tri[2].x = 0;
+    tri[2].y = 4;
+    int total_x = 0, total_y = 0;
+
+#line 70 "sharp-test/unit/codegen/struct_arr.ce"
+    for (int i = 0; i < 3; i = i + 1) {
+
+#line 71 "sharp-test/unit/codegen/struct_arr.ce"
+        total_x = total_x + tri[i].x;
+
+#line 72 "sharp-test/unit/codegen/struct_arr.ce"
+        total_y = total_y + tri[i].y;
+    }
+
+#line 74 "sharp-test/unit/codegen/struct_arr.ce"
+    if (total_x != 3) 
+        return 12;
+
+#line 75 "sharp-test/unit/codegen/struct_arr.ce"
+    if (total_y != 4) 
+        return 13;
+
+#line 78 "sharp-test/unit/codegen/struct_arr.ce"
+    Point sum_pt = Point__add((__extension__(({ Point __sharp_rv1 = (make_point(10, 20)); &__sharp_rv1; }))), make_point(30, 40));
+
+#line 79 "sharp-test/unit/codegen/struct_arr.ce"
+    if (sum_pt.x != 40) 
+        return 14;
+
+#line 80 "sharp-test/unit/codegen/struct_arr.ce"
+    if (sum_pt.y != 60) 
+        return 15;
+
+#line 82 "sharp-test/unit/codegen/struct_arr.ce"
     return 0;
 }

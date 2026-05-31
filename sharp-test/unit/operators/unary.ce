@@ -53,5 +53,14 @@ int main() {
     Val r3 = -u + -v;
     if (r3.x != -13) return 6;
 
+    // --- T5: unary negation with comparison ---
+    if (!(-u == -u)) return 7;
+    if (-u == u) return 8;
+
+    // --- T6: double negation ---
+    Val neg_u = -u;
+    Val dbl_neg = -neg_u;
+    if (dbl_neg.x != 10) return 9;
+
     return 0;
 }

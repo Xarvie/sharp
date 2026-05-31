@@ -49,6 +49,25 @@ int test_defer_ret(int v) {
     return 0;
 }
 
+/* T7: defer in nested function calls */
+int inner_ran = 0;
+int outer_ran = 0;
+void inner_func() {
+    defer { inner_ran = 1; }
+}
+void outer_func() {
+    defer { outer_ran = 1; }
+    inner_func();
+}
+
+/* T8: defer with conditional return */
+int cond_defer(int x) {
+    defer mark(50);
+    if (x > 10) return 1;
+    if (x < 0) return -1;
+    return 0;
+}
+
 int main(void) {
     /* T1: return-temp captured (p108) */
     counter = 0;
@@ -104,6 +123,24 @@ int main(void) {
     if (r6 != 42) return 20;
     if (seqn != 1) return 21;
     if (seq[0] != 100) return 22;
+
+    // --- T7: defer in nested function calls ---
+    inner_ran = 0;
+    outer_ran = 0;
+    outer_func();
+    if (inner_ran != 1) return 23;
+    if (outer_ran != 1) return 24;
+
+    // --- T8: defer with conditional return ---
+    seqn = 0;
+    int cr1 = cond_defer(15);
+    if (cr1 != 1) return 25;
+    if (seqn != 1 || seq[0] != 50) return 26;
+
+    seqn = 0;
+    int cr2 = cond_defer(5);
+    if (cr2 != 0) return 27;
+    if (seqn != 1 || seq[0] != 50) return 28;
 
     return 0;
 }

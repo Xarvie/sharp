@@ -25,6 +25,21 @@ long Str.find(this, char c) {
     return (long)-1;
 }
 
+int Str.count_char(this, char c) {
+    int count = 0;
+    for (long i = 0; i < this->len; i = i + 1)
+        if (this->ptr[i] == c) count = count + 1;
+    return count;
+}
+
+class Counter {
+    int n;
+};
+int Counter.increment(this) {
+    this->n = this->n + 1;
+    return this->n;
+}
+
 // === p228: extensions to array (sum, avg, copy), struct extension ===
 long array_sum(const int* a, long n) {
     long s = 0;
@@ -61,6 +76,17 @@ int main() {
     struct Box b = {3, 4};
     long h = box_hypot(b);
     if (h != 25) return 8;
+
+    // --- T3: extension method that modifies and returns ---
+    Counter cnt; cnt.n = 0;
+    if (cnt.increment() != 1) return 9;
+    if (cnt.increment() != 2) return 10;
+    if (cnt.n != 2) return 11;
+
+    // --- T4: extension method with loop ---
+    Str s2; s2.ptr = "abracadabra"; s2.len = 11;
+    if (s2.count_char('a') != 5) return 12;
+    if (s2.count_char('b') != 2) return 13;
 
     return 0;
 }

@@ -1371,6 +1371,68 @@ int main(void) {
 #line 116 "sharp-test/unit/modules/stdlib.ce"
     Vec_int__destroy(&v);
 
-#line 118 "sharp-test/unit/modules/stdlib.ce"
+#line 119 "sharp-test/unit/modules/stdlib.ce"
+    Vec_int v2;
+
+#line 120 "sharp-test/unit/modules/stdlib.ce"
+    v2.data = ((void *)0);
+
+#line 121 "sharp-test/unit/modules/stdlib.ce"
+    v2.len = 0;
+
+#line 122 "sharp-test/unit/modules/stdlib.ce"
+    v2.cap = 0;
+
+#line 123 "sharp-test/unit/modules/stdlib.ce"
+    for (int i = 0; i < 10; i = i + 1) 
+        Vec_int__push(&v2, i * 10);
+
+#line 124 "sharp-test/unit/modules/stdlib.ce"
+    if (Vec_int__size(&v2) != 10) 
+        return 9;
+
+#line 125 "sharp-test/unit/modules/stdlib.ce"
+    int pop_sum = 0;
+
+#line 126 "sharp-test/unit/modules/stdlib.ce"
+    while (Vec_int__size(&v2) > 0) 
+        pop_sum = pop_sum + Vec_int__pop(&v2);
+
+#line 127 "sharp-test/unit/modules/stdlib.ce"
+    if (pop_sum != 450) 
+        return 10;
+
+#line 128 "sharp-test/unit/modules/stdlib.ce"
+    Vec_int__destroy(&v2);
+
+#line 131 "sharp-test/unit/modules/stdlib.ce"
+    String s2;
+
+#line 132 "sharp-test/unit/modules/stdlib.ce"
+    s2.ptr = (char *)0;
+    s2.len = 0;
+    s2.cap = 0;
+
+#line 133 "sharp-test/unit/modules/stdlib.ce"
+    String__push_byte(&s2, 'A');
+
+#line 134 "sharp-test/unit/modules/stdlib.ce"
+    String__push_byte(&s2, 'B');
+
+#line 135 "sharp-test/unit/modules/stdlib.ce"
+    String__push_byte(&s2, 'C');
+
+#line 136 "sharp-test/unit/modules/stdlib.ce"
+    if (String__size(&s2) != 3) 
+        return 11;
+
+#line 137 "sharp-test/unit/modules/stdlib.ce"
+    if (s2.ptr[0] != 'A' || s2.ptr[1] != 'B' || s2.ptr[2] != 'C') 
+        return 12;
+
+#line 138 "sharp-test/unit/modules/stdlib.ce"
+    String__destroy(&s2);
+
+#line 140 "sharp-test/unit/modules/stdlib.ce"
     return 0;
 }

@@ -115,5 +115,27 @@ int main(void) {
     if (v_first != 10) return 8;
     v.destroy();
 
+    // --- T4: Vec_int push many + pop all ---
+    Vec_int v2;
+    v2.data = NULL;
+    v2.len = 0;
+    v2.cap = 0;
+    for (int i = 0; i < 10; i = i + 1) v2.push(i * 10);
+    if (v2.size() != 10) return 9;
+    int pop_sum = 0;
+    while (v2.size() > 0) pop_sum = pop_sum + v2.pop();
+    if (pop_sum != 450) return 10;  /* 0+10+20+...+90 = 450 */
+    v2.destroy();
+
+    // --- T5: String append multiple bytes ---
+    String s2;
+    s2.ptr = (char*)0; s2.len = 0; s2.cap = 0;
+    s2.push_byte('A');
+    s2.push_byte('B');
+    s2.push_byte('C');
+    if (s2.size() != 3) return 11;
+    if (s2.ptr[0] != 'A' || s2.ptr[1] != 'B' || s2.ptr[2] != 'C') return 12;
+    s2.destroy();
+
     return 0;
 }

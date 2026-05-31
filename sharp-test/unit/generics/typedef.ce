@@ -78,6 +78,13 @@ int Arr<T>.len(this) const {
     return this->size;
 }
 
+IntVec make_vec(int a, int b) {
+    IntVec v = {0};
+    v.push(a);
+    v.push(b);
+    return v;
+}
+
 int main() {
     /* Test generic associated function (p114) */
     Stack<int> s = Stack<int>.new();
@@ -116,6 +123,13 @@ int main() {
     Arr<int> arr = {0};
     arr.size = 5;
     if (arr.len() != 5) return 11;
+
+    // --- T6: typedef in function signature ---
+    IntVec mv = make_vec(10, 20);
+    if (mv.size() != 2) return 12;
+    if (mv.get(0) != 10) return 13;
+    if (mv.get(1) != 20) return 14;
+    mv.destroy();
 
     return 0;
 }

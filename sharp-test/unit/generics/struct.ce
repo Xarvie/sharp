@@ -35,6 +35,8 @@ T Stack<T>.peek(this) const {
     return this->top;
 }
 
+T Stack<T>.last(this) const { return this->top; }
+
 /* Test 5: Multi-type generic struct (p107) */
 class Map<K, V> {
     K* keys;
@@ -92,6 +94,17 @@ int main() {
     Map<int, float> m;
     m.count = 5;
     if (m.count != 5) return 14;
+
+    // --- T6: generic struct with const method returning field ---
+    Stack<int> s2;
+    s2.size = 0;
+    s2.push(77);
+    if (s2.last() != 77) return 15;
+    if (s2.peek() != 77) return 16;
+
+    // --- T7: generic struct zero-init ---
+    Box<int> b2 = {0};
+    if (b2.value != 0) return 17;
 
     return 0;
 }

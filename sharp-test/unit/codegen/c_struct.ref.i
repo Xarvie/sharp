@@ -526,6 +526,38 @@ int main(void) {
 #line 97 "sharp-test/unit/codegen/c_struct.ce"
     Vec_int__destroy(&vi);
 
-#line 99 "sharp-test/unit/codegen/c_struct.ce"
+#line 100 "sharp-test/unit/codegen/c_struct.ce"
+    struct CIface head = { 0 };
+
+#line 101 "sharp-test/unit/codegen/c_struct.ce"
+    struct CIface second = { 0 };
+
+#line 102 "sharp-test/unit/codegen/c_struct.ce"
+    head.userdata = (void *)0;
+
+#line 103 "sharp-test/unit/codegen/c_struct.ce"
+    head.refcount = 1;
+
+#line 104 "sharp-test/unit/codegen/c_struct.ce"
+    head.next = &second;
+
+#line 105 "sharp-test/unit/codegen/c_struct.ce"
+    second.userdata = (void *)0;
+
+#line 106 "sharp-test/unit/codegen/c_struct.ce"
+    second.refcount = 2;
+
+#line 107 "sharp-test/unit/codegen/c_struct.ce"
+    second.next = (struct CIface *)0;
+
+#line 108 "sharp-test/unit/codegen/c_struct.ce"
+    if (head.next->refcount != 2) 
+        return 8;
+
+#line 109 "sharp-test/unit/codegen/c_struct.ce"
+    if (head.next->next != (struct CIface *)0) 
+        return 9;
+
+#line 111 "sharp-test/unit/codegen/c_struct.ce"
     return 0;
 }

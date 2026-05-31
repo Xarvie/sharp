@@ -51,7 +51,7 @@ void Pair__int__float__set_first(Pair__int__float * this, int val);
 #line 36 "sharp-test/unit/generics/operator.ce"
 float Pair__int__float__second_val(Pair__int__float * this);
 
-#line 59 "sharp-test/unit/generics/operator.ce"
+#line 61 "sharp-test/unit/generics/operator.ce"
 void Arr__int__push(Arr__int * this, int item);
 
 #line 51 "sharp-test/unit/generics/operator.ce"
@@ -60,9 +60,12 @@ long Arr__int__size(Arr__int * this);
 #line 55 "sharp-test/unit/generics/operator.ce"
 int Arr__int__at(Arr__int * this, long i);
 
-#line 65 "sharp-test/unit/generics/operator.ce"
+#line 67 "sharp-test/unit/generics/operator.ce"
 void first__cint(const int * a, const int * b);
 void first__float(float * a, float * b);
+
+#line 59 "sharp-test/unit/generics/operator.ce"
+int Arr__int__op_idx(Arr__int * this, long i);
 
 #line 13 "sharp-test/unit/generics/operator.ce"
 
@@ -82,120 +85,140 @@ void first__float(float * a, float * b);
 
 #line 59 "sharp-test/unit/generics/operator.ce"
 
-#line 65 "sharp-test/unit/generics/operator.ce"
+#line 61 "sharp-test/unit/generics/operator.ce"
 
-#line 70 "sharp-test/unit/generics/operator.ce"
+#line 67 "sharp-test/unit/generics/operator.ce"
+
+#line 72 "sharp-test/unit/generics/operator.ce"
 int read_pair(const Pair__int__float * p) {
 
-#line 71 "sharp-test/unit/generics/operator.ce"
+#line 73 "sharp-test/unit/generics/operator.ce"
     return Pair__int__float__first_val(p);
 }
 
-#line 74 "sharp-test/unit/generics/operator.ce"
+#line 76 "sharp-test/unit/generics/operator.ce"
 int main() {
 
-#line 76 "sharp-test/unit/generics/operator.ce"
+#line 78 "sharp-test/unit/generics/operator.ce"
     Vec2__int a;
 
-#line 77 "sharp-test/unit/generics/operator.ce"
+#line 79 "sharp-test/unit/generics/operator.ce"
     a.x = 1;
     a.y = 2;
 
-#line 78 "sharp-test/unit/generics/operator.ce"
+#line 80 "sharp-test/unit/generics/operator.ce"
     Vec2__int b;
 
-#line 79 "sharp-test/unit/generics/operator.ce"
+#line 81 "sharp-test/unit/generics/operator.ce"
     b.x = 1;
     b.y = 2;
 
-#line 80 "sharp-test/unit/generics/operator.ce"
+#line 82 "sharp-test/unit/generics/operator.ce"
     Vec2__int c;
 
-#line 81 "sharp-test/unit/generics/operator.ce"
+#line 83 "sharp-test/unit/generics/operator.ce"
     c.x = 3;
     c.y = 4;
 
-#line 83 "sharp-test/unit/generics/operator.ce"
+#line 85 "sharp-test/unit/generics/operator.ce"
     if (!Vec2__int__equals(&a, b)) 
         return 1;
 
-#line 84 "sharp-test/unit/generics/operator.ce"
+#line 86 "sharp-test/unit/generics/operator.ce"
     if (Vec2__int__equals(&a, c)) 
         return 2;
 
-#line 86 "sharp-test/unit/generics/operator.ce"
+#line 88 "sharp-test/unit/generics/operator.ce"
     Vec2__int__add_into(&a, c);
 
-#line 87 "sharp-test/unit/generics/operator.ce"
+#line 89 "sharp-test/unit/generics/operator.ce"
     if (a.x != 4) 
         return 3;
 
-#line 88 "sharp-test/unit/generics/operator.ce"
+#line 90 "sharp-test/unit/generics/operator.ce"
     if (a.y != 6) 
         return 4;
 
-#line 90 "sharp-test/unit/generics/operator.ce"
+#line 92 "sharp-test/unit/generics/operator.ce"
     if (Vec2__int__sum(&a) != 10) 
         return 5;
 
-#line 93 "sharp-test/unit/generics/operator.ce"
+#line 95 "sharp-test/unit/generics/operator.ce"
     Pair__int__float p = { 0 };
 
-#line 94 "sharp-test/unit/generics/operator.ce"
+#line 96 "sharp-test/unit/generics/operator.ce"
     Pair__int__float__set_first(&p, 42);
 
-#line 95 "sharp-test/unit/generics/operator.ce"
+#line 97 "sharp-test/unit/generics/operator.ce"
     p.second = 3.14f;
 
-#line 97 "sharp-test/unit/generics/operator.ce"
+#line 99 "sharp-test/unit/generics/operator.ce"
     if (Pair__int__float__first_val(&p) != 42) 
         return 6;
 
-#line 98 "sharp-test/unit/generics/operator.ce"
+#line 100 "sharp-test/unit/generics/operator.ce"
     if (Pair__int__float__second_val(&p) < 3.13f || Pair__int__float__second_val(&p) > 3.15f) 
         return 7;
 
-#line 100 "sharp-test/unit/generics/operator.ce"
+#line 102 "sharp-test/unit/generics/operator.ce"
     int r = read_pair(&p);
 
-#line 101 "sharp-test/unit/generics/operator.ce"
+#line 103 "sharp-test/unit/generics/operator.ce"
     if (r != 42) 
         return 8;
 
-#line 104 "sharp-test/unit/generics/operator.ce"
+#line 106 "sharp-test/unit/generics/operator.ce"
     int arr[5];
 
-#line 105 "sharp-test/unit/generics/operator.ce"
+#line 107 "sharp-test/unit/generics/operator.ce"
     Arr__int v = { arr, 0, 5 };
 
-#line 106 "sharp-test/unit/generics/operator.ce"
+#line 108 "sharp-test/unit/generics/operator.ce"
     Arr__int__push(&v, 10);
 
-#line 107 "sharp-test/unit/generics/operator.ce"
+#line 109 "sharp-test/unit/generics/operator.ce"
     Arr__int__push(&v, 20);
 
-#line 108 "sharp-test/unit/generics/operator.ce"
+#line 110 "sharp-test/unit/generics/operator.ce"
     Arr__int__push(&v, 30);
 
-#line 109 "sharp-test/unit/generics/operator.ce"
+#line 111 "sharp-test/unit/generics/operator.ce"
     long s = Arr__int__size(&v);
 
-#line 110 "sharp-test/unit/generics/operator.ce"
+#line 112 "sharp-test/unit/generics/operator.ce"
     int val = Arr__int__at(&v, 1);
 
-#line 111 "sharp-test/unit/generics/operator.ce"
+#line 113 "sharp-test/unit/generics/operator.ce"
     if (val + (int)s - 23 != 0) 
         return 9;
     int ia = 3, ib = 4;
 
-#line 115 "sharp-test/unit/generics/operator.ce"
+#line 117 "sharp-test/unit/generics/operator.ce"
     first__cint(&ia, &ib);
     float fa = 1.0f, fb = 2.0f;
 
-#line 118 "sharp-test/unit/generics/operator.ce"
+#line 120 "sharp-test/unit/generics/operator.ce"
     first__float(&fa, &fb);
 
-#line 120 "sharp-test/unit/generics/operator.ce"
+#line 123 "sharp-test/unit/generics/operator.ce"
+    int data5[5] = { 0, 10, 20, 30, 40 };
+
+#line 124 "sharp-test/unit/generics/operator.ce"
+    Arr__int a2 = { data5, 5 };
+
+#line 125 "sharp-test/unit/generics/operator.ce"
+    if (Arr__int__op_idx(&a2, 0) != 0) 
+        return 10;
+
+#line 126 "sharp-test/unit/generics/operator.ce"
+    if (Arr__int__op_idx(&a2, 3) != 30) 
+        return 11;
+
+#line 127 "sharp-test/unit/generics/operator.ce"
+    if (Arr__int__at(&a2, 4) != 40) 
+        return 12;
+
+#line 129 "sharp-test/unit/generics/operator.ce"
     return 0;
 }
 
@@ -250,13 +273,13 @@ __attribute__((weak)) float Pair__int__float__second_val(Pair__int__float * this
 }
 
 
-#line 59 "sharp-test/unit/generics/operator.ce"
+#line 61 "sharp-test/unit/generics/operator.ce"
 __attribute__((weak)) void Arr__int__push(Arr__int * this, int item) {
 
-#line 60 "sharp-test/unit/generics/operator.ce"
+#line 62 "sharp-test/unit/generics/operator.ce"
     this->data[this->len] = item;
 
-#line 61 "sharp-test/unit/generics/operator.ce"
+#line 63 "sharp-test/unit/generics/operator.ce"
     this->len = this->len + 1;
 }
 
@@ -277,20 +300,26 @@ __attribute__((weak)) int Arr__int__at(Arr__int * this, long i) {
 }
 
 
-#line 65 "sharp-test/unit/generics/operator.ce"
+#line 67 "sharp-test/unit/generics/operator.ce"
 __attribute__((weak)) void first__cint(const int * a, const int * b) {
 
-#line 66 "sharp-test/unit/generics/operator.ce"
+#line 68 "sharp-test/unit/generics/operator.ce"
     (void)a;
     (void)b;
 }
 
 
-#line 65 "sharp-test/unit/generics/operator.ce"
+#line 67 "sharp-test/unit/generics/operator.ce"
 __attribute__((weak)) void first__float(float * a, float * b) {
 
-#line 66 "sharp-test/unit/generics/operator.ce"
+#line 68 "sharp-test/unit/generics/operator.ce"
     (void)a;
     (void)b;
+}
+
+
+#line 59 "sharp-test/unit/generics/operator.ce"
+__attribute__((weak)) int Arr__int__op_idx(Arr__int * this, long i) {
+    return this->data[i];
 }
 

@@ -57,5 +57,17 @@ int main() {
     int v4 = pd->read_a();
     if (v4 != 99) return 7;
 
+    // --- T5: const pointer to const struct ---
+    const ConstDemo* const pdc = &d;
+    int v5 = pdc->read_a();
+    if (v5 != 99) return 8;
+    int v6 = pdc->read_c();
+    if (v6 != 42) return 9;
+
+    // --- T6: const method returning value from const pointer ---
+    const ConstDemo* rp = &d;
+    if (rp->read_a() != 99) return 10;
+    if (rp->read_c() != 42) return 11;
+
     return 0;
 }

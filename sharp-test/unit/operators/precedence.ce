@@ -82,5 +82,18 @@ int main() {
     if (!(s20 >= s10)) return 15;
     if (!(s10 >= s10b)) return 16;
 
+    // --- T5: mixed arithmetic and comparison ---
+    Num five; five.val = 5;
+    Num three2; three2.val = 3;
+    Num result = five + three2 * three2;
+    if (result.val != 14) return 17;  /* 5 + 3*3 = 14 */
+    if (!(result == five + three2 * three2)) return 18;
+
+    // --- T6: comparison chain ---
+    Score s5; s5.pts = 5;
+    Score s15; s15.pts = 15;
+    if (!(s5 < s10 && s10 < s15)) return 19;
+    if (!(s5 < s10)) return 20;
+
     return 0;
 }

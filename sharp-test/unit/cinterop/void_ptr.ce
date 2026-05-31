@@ -42,6 +42,8 @@ void Button.set_callback(this, void (*cb)(int)) {
 typedef int (*IntUnary)(int);
 IntUnary make_doubler() { return 0; }
 
+int double_it(int x) { return x * 2; }
+
 void cb_a(int id) { (void)id; }
 void cb_b(int id) { (void)id; }
 
@@ -73,6 +75,22 @@ int main() {
     b.click();
     Button b2 = {0};
     b2.click();  /* null callback check */
+
+    // --- T3: void* array of mixed types ---
+    int ia = 100;
+    float fa = 2.5f;
+    void* ptrs[2];
+    ptrs[0] = (void*)&ia;
+    ptrs[1] = (void*)&fa;
+    int* pi = (int*)ptrs[0];
+    float* pf = (float*)ptrs[1];
+    if (*pi != 100) return 6;
+    if (*pf < 2.49f || *pf > 2.51f) return 7;
+
+    // --- T4: function pointer stored and invoked ---
+    int (*fn)(int) = double_it;
+    if (fn(5) != 10) return 8;
+    if (fn(21) != 42) return 9;
 
     return 0;
 }

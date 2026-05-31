@@ -56,6 +56,8 @@ T Arr<T>.at(this, long i) const {
     return this->data[i];
 }
 
+T Arr<T>.operator[](this, long i) const { return this->data[i]; }
+
 void Arr<T>.push(this, T item) {
     this->data[this->len] = item;
     this->len = this->len + 1;
@@ -116,6 +118,13 @@ int main() {
 
     float fa = 1.0f, fb = 2.0f;
     first<float>(&fa, &fb);
+
+    // --- T5: generic operator[] on Arr ---
+    int data5[5] = {0, 10, 20, 30, 40};
+    Arr<int> a2 = { data5, 5 };
+    if (a2[0] != 0) return 10;
+    if (a2[3] != 30) return 11;
+    if (a2.at(4) != 40) return 12;
 
     return 0;
 }

@@ -82,6 +82,36 @@ int main() {
     if (Point2D__get_y(&p2) != 4) 
         return 5;
 
-#line 27 "sharp-test/unit/modules/cross_ref.ce"
+#line 28 "sharp-test/unit/modules/cross_ref.ce"
+    Point2D p3;
+
+#line 29 "sharp-test/unit/modules/cross_ref.ce"
+    Point2D__move_to(&p3, 10, 20);
+
+#line 30 "sharp-test/unit/modules/cross_ref.ce"
+    Point2D__move_to(&p3, Point2D__get_x(&p3) + 5, Point2D__get_y(&p3) + 5);
+
+#line 31 "sharp-test/unit/modules/cross_ref.ce"
+    if (Point2D__get_x(&p3) != 15) 
+        return 6;
+
+#line 32 "sharp-test/unit/modules/cross_ref.ce"
+    if (Point2D__get_y(&p3) != 25) 
+        return 7;
+
+#line 35 "sharp-test/unit/modules/cross_ref.ce"
+    Point2D p4;
+
+#line 36 "sharp-test/unit/modules/cross_ref.ce"
+    Point2D__move_to(&p4, 15, 25);
+
+#line 37 "sharp-test/unit/modules/cross_ref.ce"
+    int d2 = distance_sq(p3, p4);
+
+#line 38 "sharp-test/unit/modules/cross_ref.ce"
+    if (d2 != 0) 
+        return 8;
+
+#line 40 "sharp-test/unit/modules/cross_ref.ce"
     return 0;
 }

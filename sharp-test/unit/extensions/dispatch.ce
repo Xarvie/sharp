@@ -28,6 +28,10 @@ int compute_sum(class Data a, class Data b) {
     return a.get_val() + b.get_val();
 }
 
+class Rect { int w; int h; };
+int Rect.area(this) const { return this->w * this->h; }
+void Rect.scale(this, int f) { this->w = this->w * f; this->h = this->h * f; }
+
 int main() {
     // --- p241: 同名方法 ---
     Point2D p2; p2.x = 3; p2.y = 4;
@@ -51,6 +55,15 @@ int main() {
     int s = compute_sum(a, b);
     if (s != 30) return 5;
     if (a.get_val() != 10) return 6;
+
+    // --- T4: const overload dispatch with same-name methods ---
+    Rect r; r.w = 3; r.h = 4;
+    if (r.area() != 12) return 7;
+    r.scale(2);
+    if (r.area() != 48) return 8;
+
+    const Rect* pr = &r;
+    if (pr->area() != 48) return 9;
 
     return 0;
 }

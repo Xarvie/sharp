@@ -110,5 +110,11 @@ int main() {
     if (!v2b || *v2b != 222) return 9;
 
     m.destroy();
+
+    // --- T3: compound static_assert with logical operators ---
+    @static_assert(@has_method(Kt, hash) && @has_operator(Kt, ==), "Kt needs hash and ==");
+    @static_assert(!@has_method(Kt, missing), "Kt should not have missing");
+    @static_assert(@is_arithmetic(int) || @is_arithmetic(float), "int or float is arithmetic");
+
     return 0;
 }

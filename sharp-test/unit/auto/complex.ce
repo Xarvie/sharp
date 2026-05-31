@@ -73,5 +73,16 @@ int main() {
     auto v1 = d.read();
     if (v1 != 77) return 11;
 
+    // --- T5: auto with pointer and dereference ---
+    int raw = 55;
+    auto rp = &raw;
+    if (*rp != 55) return 12;
+    *rp = 66;
+    if (raw != 66) return 13;
+
+    // --- T6: auto in nested expression ---
+    auto nested = (1 + 2) * (3 + 4);
+    if (nested != 21) return 14;
+
     return 0;
 }

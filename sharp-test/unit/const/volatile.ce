@@ -34,5 +34,20 @@ int main() {
     const Sensor* sp = &s;
     if (sp->get_id() != 42) return 5;
 
+    // --- T3: volatile field written via non-const method ---
+    s.reading = 100;
+    if (s.get_reading() != 100) return 6;
+
+    // --- T4: const pointer to volatile struct ---
+    const Sensor* sp2 = &s;
+    if (sp2->get_reading() != 100) return 7;
+    if (sp2->get_id() != 42) return 8;
+
+    // --- T5: Data const method chain ---
+    Data d2;
+    d2.set_val(999);
+    const Data* pd2 = &d2;
+    if (read_val(pd2) != 999) return 9;
+
     return 0;
 }

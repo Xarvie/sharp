@@ -65,5 +65,16 @@ int main() {
         int x = p.missing;  /* dead code */
     }
 
+    // --- T6: @is_pointer with double pointer ---
+    if (!@is_pointer(int**)) return 50;
+    if (!@is_pointer(char**)) return 51;
+    if (@is_pointer(int)) return 52;
+
+    // --- T7: @type_name for more types ---
+    const char* n_long = @type_name(long);
+    if (n_long[0] != 'l') return 53;
+    const char* n_float = @type_name(float);
+    if (n_float[0] != 'f') return 54;
+
     return 0;
 }

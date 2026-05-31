@@ -104,7 +104,27 @@ int main() {
 #line 63 "sharp-test/unit/generics/extern.ce"
     flatten(x);
 
-#line 65 "sharp-test/unit/generics/extern.ce"
+#line 67 "sharp-test/unit/generics/extern.ce"
+    int ext_arr[4];
+
+#line 68 "sharp-test/unit/generics/extern.ce"
+    Vec__int ev = { ext_arr, 0, 4 };
+
+#line 69 "sharp-test/unit/generics/extern.ce"
+    Vec__int__push(&ev, 7);
+
+#line 70 "sharp-test/unit/generics/extern.ce"
+    Vec__int__push(&ev, 8);
+
+#line 71 "sharp-test/unit/generics/extern.ce"
+    if (Vec__int__size(&ev) != 2) 
+        return 5;
+
+#line 72 "sharp-test/unit/generics/extern.ce"
+    if (Vec__int__at(&ev, 0) != 7) 
+        return 6;
+
+#line 74 "sharp-test/unit/generics/extern.ce"
     return 0;
 }
 

@@ -24,6 +24,16 @@ int get_status_val(enum Status s) {
     return -1;
 }
 
+typedef enum Color { RED, GREEN, BLUE } ColorT;
+ColorT get_color(int idx) {
+    switch (idx) {
+        case 0: return RED;
+        case 1: return GREEN;
+        case 2: return BLUE;
+        default: return RED;
+    }
+}
+
 int main() {
     // --- p269 ---
     OurInt a = 100;
@@ -40,6 +50,18 @@ int main() {
 
     enum Status s = WARN;
     if (s != WARN) return 14;
+
+    // --- T3: enum used in switch with typedef return ---
+    ColorT clr = get_color(1);
+    if (clr != GREEN) return 15;
+    if (get_color(0) != RED) return 16;
+    if (get_color(99) != RED) return 17;
+
+    // --- T4: typedef chain arithmetic ---
+    OurInt x = 50;
+    YourInt y = 25;
+    OurInt z = x - y;
+    if (z != 25) return 18;
 
     return 0;
 }

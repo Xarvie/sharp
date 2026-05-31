@@ -34,6 +34,10 @@ MyCount add_counts(MyCount a, MyCount b) {
     return a + b;
 }
 
+MyCount multiply_counts(MyCount a, int factor) {
+    return a * factor;
+}
+
 int main() {
     // --- p230: zero-init ---
     int x = {0};
@@ -69,6 +73,15 @@ int main() {
     Point3D r3;
     r3.x = 0.0f; r3.y = 0.0f; r3.z = 1.0f;
     if (r3.dot(p) < 2.99f || r3.dot(p) > 3.01f) return 12;
+
+    // --- T3: typedef chain in function parameter and return ---
+    MyCount mc = multiply_counts(5, 3);
+    if (mc != 15) return 13;
+
+    // --- T4: nested struct zero-init with typedef ---
+    Container c2 = {0};
+    if (c2.val != 0) return 14;
+    if (c2.inner.a != 0) return 15;
 
     return 0;
 }

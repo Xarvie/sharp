@@ -62,5 +62,14 @@ int main() {
     Vec2<Vec2<int>> x;
     flatten(x);
 
+    // --- T4: extern struct instantiation ---
+    extern Vec<int>;
+    int ext_arr[4];
+    Vec<int> ev = { ext_arr, 0, 4 };
+    ev.push(7);
+    ev.push(8);
+    if (ev.size() != 2) return 5;
+    if (ev.at(0) != 7) return 6;
+
     return 0;
 }

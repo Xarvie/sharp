@@ -96,5 +96,17 @@ int main(void) {
     if (vi.get(1) != 73) return 7;
     vi.destroy();
 
+    // --- T3: C struct with linked list pattern ---
+    struct CIface head = {0};
+    struct CIface second = {0};
+    head.userdata = (void*)0;
+    head.refcount = 1;
+    head.next = &second;
+    second.userdata = (void*)0;
+    second.refcount = 2;
+    second.next = (struct CIface*)0;
+    if (head.next->refcount != 2) return 8;
+    if (head.next->next != (struct CIface*)0) return 9;
+
     return 0;
 }

@@ -24,6 +24,13 @@ class Wrap<T> {
 void Wrap<T>.set(this, T v) { this->value = v; }
 T    Wrap<T>.get(this) const { return this->value; }
 
+Pair<T> Pair<T>.reversed(this) const {
+    Pair<T> r;
+    r.first = this->second;
+    r.second = this->first;
+    return r;
+}
+
 int main() {
     /* Test Pair<int> monomorphization (p268) */
     Pair<int> p;
@@ -64,6 +71,17 @@ int main() {
     Wrap<int> wi2;
     wi2.set(99);
     if (wi2.get() != 99) return 11;
+
+    // --- T3: generic method returning generic type ---
+    Pair<int> p2 = {10, 20};
+    Pair<int> rev = p2.reversed();
+    if (rev.first != 20) return 12;
+    if (rev.second != 10) return 13;
+
+    // --- T4: multiple generic instances in same expression ---
+    Wrap<int> w1; w1.set(5);
+    Wrap<int> w2; w2.set(10);
+    if (w1.get() + w2.get() != 15) return 14;
 
     return 0;
 }

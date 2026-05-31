@@ -46,5 +46,21 @@ int main() {
     if (sizeof(IntArr) != 40) return 14;
     if (sizeof(Vec4) / sizeof(int) != 4) return 15;
 
+    // --- T3: sizeof with nested struct ---
+    class Outer {
+        Vec4 inner;
+        int flag;
+    };
+    if (sizeof(Outer) != 20) return 16;
+    if (sizeof(Outer) - sizeof(Vec4) != 4) return 17;
+
+    // --- T4: string operations with length check ---
+    const char* msg = "sharp";
+    int slen = 0;
+    while (msg[slen] != 0) slen = slen + 1;
+    if (slen != 5) return 18;
+    if (msg[0] != 's') return 19;
+    if (msg[4] != 'p') return 20;
+
     return 0;
 }
