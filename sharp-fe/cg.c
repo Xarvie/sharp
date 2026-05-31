@@ -406,8 +406,11 @@ static bool ast_type_has_volatile(const AstNode *ty) {
             { ty = ty->u.type_const.base; continue; }
         if (ty->kind == AST_TYPE_PTR)
             { ty = ty->u.type_ptr.base; continue; }
+        if (ty->kind == AST_TYPE_ARRAY)
+            { ty = ty->u.type_array.base; continue; }
         return false;
     }
+    return false;
 }
 
 /* ast_type_is_flat_emittable -- true when the AST type node can be emitted
@@ -5547,6 +5550,17 @@ static void cg_collect_stmt(CgCtx *ctx, const AstNode *stmt) {
         cg_collect_expr(ctx, stmt->u.for_.cond);
         cg_collect_stmt(ctx, stmt->u.for_.body);
         break;
+    case AST_DO_WHILE:
+        cg_collect_expr(ctx, stmt->u.do_while.cond);
+        cg_collect_stmt(ctx, stmt->u.do_while.body);
+        break;
+    case AST_DEFER:
+        cg_collect_stmt(ctx, stmt->u.defer_.body);
+        break;
+    case AST_SWITCH:
+        cg_collect_expr(ctx, stmt->u.switch_.cond);
+        cg_collect_stmt(ctx, stmt->u.switch_.body);
+        break;
     default: break;
     }
 }
@@ -7214,6 +7228,8 @@ static bool decl_uses_struct(const AstNode *d, const char *name) {
 
 /* Returns true if the function body references 'this' (method),
  * false if it never does (associated function). */
+static bool cg_stmt_uses_this(const AstNode *stmt);
+static bool cg_stmt_uses_name(const AstNode *stmt, const char *name);
 static bool cg_expr_uses_this(const AstNode *expr) {
     if (!expr) return false;
     if (expr->kind == AST_IDENT && expr->u.ident.name &&
@@ -7254,6 +7270,41 @@ case AST_STRUCT_LIT: {
             if (cg_expr_uses_this(expr->u.struct_lit.field_vals.data[i])) return true;
         return false;
     }
+    case AST_COMMA:
+        return cg_expr_uses_this(expr->u.comma.lhs) ||
+               cg_expr_uses_this(expr->u.comma.rhs);
+    case AST_SIZEOF:
+        return !expr->u.sizeof_.is_type &&
+               cg_expr_uses_this(expr->u.sizeof_.operand);
+    case AST_INIT_LIST: {
+        for (size_t i = 0; i < expr->u.init_list.items.len; i++)
+            if (cg_expr_uses_this(expr->u.init_list.items.data[i])) return true;
+        return false;
+    }
+    case AST_DESIGNATED_INIT:
+        return cg_expr_uses_this(expr->u.designated_init.value);
+    case AST_COMPOUND_LIT:
+        return cg_expr_uses_this(expr->u.compound_lit.init);
+    case AST_AT_INTRINSIC: {
+        for (size_t i = 0; i < expr->u.at_intrinsic.args.len; i++)
+            if (cg_expr_uses_this(expr->u.at_intrinsic.args.data[i])) return true;
+        return false;
+    }
+    case AST_STMT_EXPR:
+        return cg_stmt_uses_this(expr->u.stmt_expr.block);
+    case AST_GENERIC_EXPR: {
+        if (cg_expr_uses_this(expr->u.generic_expr.controlling)) return true;
+        for (size_t i = 0; i < expr->u.generic_expr.associations.len; i++)
+            if (cg_expr_uses_this(expr->u.generic_expr.associations.data[i])) return true;
+        return false;
+    }
+    case AST_GENERIC_ASSOC:
+        return cg_expr_uses_this(expr->u.generic_assoc.value);
+    case AST_GENERIC_CALL: {
+        for (size_t i = 0; i < expr->u.generic_call.call_args.len; i++)
+            if (cg_expr_uses_this(expr->u.generic_call.call_args.data[i])) return true;
+        return false;
+    }
     default: return false;
     }
 }
@@ -7284,6 +7335,9 @@ static bool cg_stmt_uses_this(const AstNode *stmt) {
             return cg_expr_uses_this(stmt->u.decl_stmt.decl->u.var_decl.init);
         return false;
     case AST_DEFER:     return cg_stmt_uses_this(stmt->u.defer_.body);
+    case AST_SWITCH:
+        return cg_expr_uses_this(stmt->u.switch_.cond) ||
+               cg_stmt_uses_this(stmt->u.switch_.body);
     default: return false;
     }
 }
@@ -7348,6 +7402,32 @@ static bool cg_expr_uses_name(const AstNode *expr, const char *name) {
         return cg_expr_uses_name(expr->u.designated_init.value, name);
     case AST_COMPOUND_LIT:
         return cg_expr_uses_name(expr->u.compound_lit.init, name);
+    case AST_COMMA:
+        return cg_expr_uses_name(expr->u.comma.lhs, name) ||
+               cg_expr_uses_name(expr->u.comma.rhs, name);
+    case AST_SIZEOF:
+        return !expr->u.sizeof_.is_type &&
+               cg_expr_uses_name(expr->u.sizeof_.operand, name);
+    case AST_AT_INTRINSIC: {
+        for (size_t i = 0; i < expr->u.at_intrinsic.args.len; i++)
+            if (cg_expr_uses_name(expr->u.at_intrinsic.args.data[i], name)) return true;
+        return false;
+    }
+    case AST_STMT_EXPR:
+        return cg_stmt_uses_name(expr->u.stmt_expr.block, name);
+    case AST_GENERIC_EXPR: {
+        if (cg_expr_uses_name(expr->u.generic_expr.controlling, name)) return true;
+        for (size_t i = 0; i < expr->u.generic_expr.associations.len; i++)
+            if (cg_expr_uses_name(expr->u.generic_expr.associations.data[i], name)) return true;
+        return false;
+    }
+    case AST_GENERIC_ASSOC:
+        return cg_expr_uses_name(expr->u.generic_assoc.value, name);
+    case AST_GENERIC_CALL: {
+        for (size_t i = 0; i < expr->u.generic_call.call_args.len; i++)
+            if (cg_expr_uses_name(expr->u.generic_call.call_args.data[i], name)) return true;
+        return false;
+    }
     default: return false;
     }
 }
@@ -7378,6 +7458,9 @@ static bool cg_stmt_uses_name(const AstNode *stmt, const char *name) {
             return cg_expr_uses_name(stmt->u.decl_stmt.decl->u.var_decl.init, name);
         return false;
     case AST_DEFER:     return cg_stmt_uses_name(stmt->u.defer_.body, name);
+    case AST_SWITCH:
+        return cg_expr_uses_name(stmt->u.switch_.cond, name) ||
+               cg_stmt_uses_name(stmt->u.switch_.body, name);
     default: return false;
     }
 }

@@ -1581,7 +1581,11 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
     case AST_COMPUTED_GOTO:
         sema_expr(ss, stmt->u.computed_goto.target);
         break;
-
+    case AST_SWITCH: {
+        sema_expr(ss, stmt->u.switch_.cond);
+        sema_stmt(ss, stmt->u.switch_.body);
+        break;
+    }
     default:
         break;
     }
@@ -1954,6 +1958,9 @@ static void dc_stmt(DcState *ds, const AstNode *stmt) {
         break;
     case AST_DO_WHILE:
         dc_stmt(ds, stmt->u.do_while.body);
+        break;
+    case AST_SWITCH:
+        dc_stmt(ds, stmt->u.switch_.body);
         break;
     case AST_DECL_STMT: case AST_EXPR_STMT: case AST_RETURN:
     case AST_BREAK:     case AST_CONTINUE:  case AST_LABEL:

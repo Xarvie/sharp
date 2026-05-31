@@ -803,6 +803,9 @@ static void build_stmt(Scope *cur, AstNode *stmt, FeDiagArr *diags) {
     case AST_DEFER:
         build_stmt(cur, stmt->u.defer_.body, diags);
         break;
+    case AST_SWITCH:
+        build_stmt(cur, stmt->u.switch_.body, diags);
+        break;
     case AST_LABEL:
         /* labels live in the function scope — look up by traversing parents */
         break;
