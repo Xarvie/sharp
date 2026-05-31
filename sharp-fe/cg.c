@@ -355,6 +355,14 @@ static AstPtrPeel ast_peel_ptr(const AstNode *n) {
     return r;
 }
 
+static const AstNode *ast_type_strip_cv(const AstNode *n) {
+    while (n && (n->kind == AST_TYPE_CONST || n->kind == AST_TYPE_VOLATILE))
+        n = n->kind == AST_TYPE_CONST
+            ? n->u.type_const.base
+            : n->u.type_volatile.base;
+    return n;
+}
+
 static void cg_emit_array_suffixes(CgCtx *ctx, const AstNode *cur) {
     while (cur && cur->kind == AST_TYPE_ARRAY) {
         cg_puts(ctx, "[");
@@ -1417,6 +1425,48 @@ static const char *op_suffix(const char *sym) {
     return "op";
 }
 
+static void cg_emit_mangled_free_op_name(CgCtx *ctx, const char *sym,
+                                          AstNode *fn) {
+    cg_printf(ctx, "operator_%s", op_suffix(sym));
+    for (size_t pi = 0; pi < fn->u.func_def.params.len; pi++) {
+        AstNode *p = fn->u.func_def.params.data[pi];
+        if (!p || p->u.param_decl.is_vararg) continue;
+        Type *pt = ty_from_ast(ctx->ts, p->u.param_decl.type,
+                               cg_type_scope(ctx), NULL);
+        if (pt && pt->kind == TY_STRUCT && pt->u.struct_.name)
+            cg_printf(ctx, "__%s", pt->u.struct_.name);
+        else if (pt) {
+            char *ms = cg_mangle_type_str(pt);
+            cg_printf(ctx, "__%s", ms);
+            free(ms);
+        }
+    }
+}
+
+static int cg_resolve_generic_param_count(CgCtx *ctx, int np, int type_nargs,
+                                           const char *struct_name) {
+    if (np == 0 && type_nargs > 0 && ctx->file_scope) {
+        Symbol *ss = scope_lookup_type(ctx->file_scope, struct_name);
+        if (ss && ss->kind == SYM_TYPE && ss->decl &&
+            ss->decl->kind == AST_STRUCT_DEF)
+            return (int)ss->decl->u.struct_def.generic_params.len;
+    }
+    return np;
+}
+
+static void cg_fill_pnames_from_struct(CgCtx *ctx, const char *struct_name,
+                                        const char **pnames, int np) {
+    Symbol *ss = scope_lookup_type(ctx->file_scope, struct_name);
+    if (ss && ss->kind == SYM_TYPE && ss->decl &&
+        ss->decl->kind == AST_STRUCT_DEF) {
+        for (size_t i = 0;
+             i < (size_t)np && i < ss->decl->u.struct_def.generic_params.len;
+             i++)
+            pnames[i] = ss->decl->u.struct_def.generic_params.data[i]
+                              ->u.generic_param.name;
+    }
+}
+
 /* Emit the mangled C name for a struct method/operator. */
 static void cg_method_name(CgCtx *ctx, const char *sname, const char *mname) {
     if (strncmp(mname, "operator", 8) == 0) {
@@ -1800,10 +1850,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
      * the AST to preserve the original expression. */
     bool array_with_unknown_sz = false;
     if (ft && ft->kind == TY_ARRAY && ft->u.array.size < 0) {
-        const AstNode *ast_ty = fd->u.field_decl.type;
-        while (ast_ty && (ast_ty->kind == AST_TYPE_CONST ||
-                          ast_ty->kind == AST_TYPE_VOLATILE))
-            ast_ty = ast_ty->u.type_const.base;
+        const AstNode *ast_ty = ast_type_strip_cv(fd->u.field_decl.type);
         if (ast_ty && ast_ty->kind == AST_TYPE_ARRAY &&
             ast_ty->u.type_array.size &&
             ast_ty->u.type_array.size->kind != AST_INT_LIT) {
@@ -2360,20 +2407,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
             /* Free-function operator: mangle name from param types, emit
              * (lhs, rhs) -- no address-taking, both args are values. */
             const char *op_sym = free_op_fn->u.func_def.name + 8; /* after "operator" */
-            cg_printf(ctx, "operator_%s", op_suffix(op_sym));
-            for (size_t pi = 0; pi < free_op_fn->u.func_def.params.len; pi++) {
-                AstNode *p = free_op_fn->u.func_def.params.data[pi];
-                if (!p || p->u.param_decl.is_vararg) continue;
-                Type *pt = ty_from_ast(ctx->ts, p->u.param_decl.type,
-                                       cg_type_scope(ctx), NULL);
-                if (pt && pt->kind == TY_STRUCT && pt->u.struct_.name)
-                    cg_printf(ctx, "__%s", pt->u.struct_.name);
-                else if (pt) {
-                    char *ms = cg_mangle_type_str(pt);
-                    cg_printf(ctx, "__%s", ms);
-                    free(ms);
-                }
-            }
+            cg_emit_mangled_free_op_name(ctx, op_sym, free_op_fn);
             cg_puts(ctx, "(");
             cg_expr(ctx, expr->u.binop.lhs);
             cg_puts(ctx, ", ");
@@ -2481,20 +2515,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                         fsym->decl->kind == AST_FUNC_DEF &&
                         fsym->decl->u.func_def.is_operator) {
                         const char *sym_sfx = fsym->decl->u.func_def.name + 8;
-                        cg_printf(ctx, "operator_%s", op_suffix(sym_sfx));
-                        for (size_t pi = 0; pi < fsym->decl->u.func_def.params.len; pi++) {
-                            AstNode *p = fsym->decl->u.func_def.params.data[pi];
-                            if (!p || p->u.param_decl.is_vararg) continue;
-                            Type *pt = ty_from_ast(ctx->ts, p->u.param_decl.type,
-                                                   cg_type_scope(ctx), NULL);
-                            if (pt && pt->kind == TY_STRUCT && pt->u.struct_.name)
-                                cg_printf(ctx, "__%s", pt->u.struct_.name);
-                            else if (pt) {
-                                char *ms = cg_mangle_type_str(pt);
-                                cg_printf(ctx, "__%s", ms);
-                                free(ms);
-                            }
-                        }
+                        cg_emit_mangled_free_op_name(ctx, sym_sfx, fsym->decl);
                         cg_puts(ctx, "(");
                         cg_expr(ctx, expr->u.unary.operand);
                         cg_puts(ctx, ")");
@@ -3514,10 +3535,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
         if (array_fallback && vd->u.var_decl.type) {
             /* Walk down the AST type to find the innermost base type
              * and collect array size expressions in order. */
-            const AstNode *ast_ty = vd->u.var_decl.type;
-            while (ast_ty && (ast_ty->kind == AST_TYPE_CONST ||
-                              ast_ty->kind == AST_TYPE_VOLATILE))
-                ast_ty = ast_ty->u.type_const.base;
+            const AstNode *ast_ty = ast_type_strip_cv(vd->u.var_decl.type);
             if (ast_ty && ast_ty->kind == AST_TYPE_ARRAY &&
                 ast_ty->u.type_array.size) {
                 const AstNode *base_ast = ast_ty;
@@ -3607,13 +3625,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
         } else if (type_from_ast && vd->u.var_decl.name) {
             /* Local struct type: emit directly from AST node.
              * Walk to find base type, emit it, then the name and array suffixes. */
-            const AstNode *ast_ty = vd->u.var_decl.type;
-            /* Strip const/volatile wrappers to find the underlying array/struct */
-            while (ast_ty && (ast_ty->kind == AST_TYPE_CONST ||
-                               ast_ty->kind == AST_TYPE_VOLATILE))
-                ast_ty = ast_ty->kind == AST_TYPE_CONST
-                        ? ast_ty->u.type_const.base
-                        : ast_ty->u.type_volatile.base;
+            const AstNode *ast_ty = ast_type_strip_cv(vd->u.var_decl.type);
             /* Collect array dimensions */
             const AstNode *cur = ast_ty;
             while (cur && cur->kind == AST_TYPE_ARRAY)
@@ -4444,21 +4456,7 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
          * a regular C function that happens to start with "operator",
          * not a Sharp operator overload -- emit the name verbatim. */
         const char *sym = fn->u.func_def.name + 8;
-        cg_printf(ctx, "operator_%s", op_suffix(sym));
-        for (size_t pi = 0; pi < fn->u.func_def.params.len; pi++) {
-            AstNode *p = fn->u.func_def.params.data[pi];
-            if (!p) continue;
-            if (p->u.param_decl.is_vararg) continue;
-            Type *pt = ty_from_ast(ctx->ts, p->u.param_decl.type,
-                                   cg_type_scope(ctx), NULL);
-            if (pt && pt->kind == TY_STRUCT && pt->u.struct_.name) {
-                cg_printf(ctx, "__%s", pt->u.struct_.name);
-            } else if (pt) {
-                char *ms = cg_mangle_type_str(pt);
-                cg_printf(ctx, "__%s", ms);
-                free(ms);
-            }
-        }
+        cg_emit_mangled_free_op_name(ctx, sym, fn);
     } else {
         /* C8: if the source had a parenthesized name `(func)`, preserve it. */
         if (fn->u.func_def.name_paren && !sname)
@@ -5179,12 +5177,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
 
                     const AstNode *efn = es->decl;
                     size_t np = efn->u.func_def.generic_params.len;
-                    if (np == 0 && lt_unc->u.struct_.nargs > 0) {
-                        Symbol *ss = scope_lookup_type(ctx->file_scope, sn_raw);
-                        if (ss && ss->kind == SYM_TYPE && ss->decl &&
-                            ss->decl->kind == AST_STRUCT_DEF)
-                            np = ss->decl->u.struct_def.generic_params.len;
-                    }
+                    np = (size_t)cg_resolve_generic_param_count(ctx, (int)np, (int)lt_unc->u.struct_.nargs, sn_raw);
                     if (np == 0) continue;
 
                     const char **pnames = malloc(np * sizeof *pnames);
@@ -5193,15 +5186,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                         free(pnames); free(pvals); continue;
                     }
 
-                    Symbol *ss = scope_lookup_type(ctx->file_scope, sn_raw);
-                    if (ss && ss->kind == SYM_TYPE && ss->decl &&
-                        ss->decl->kind == AST_STRUCT_DEF) {
-                        for (size_t i = 0; i < np &&
-                             i < ss->decl->u.struct_def.generic_params.len; i++)
-                            pnames[i] =
-                                ss->decl->u.struct_def.generic_params.data[i]
-                                    ->u.generic_param.name;
-                    }
+                    cg_fill_pnames_from_struct(ctx, sn_raw, pnames, (int)np);
 
                     size_t nargs = lt_unc->u.struct_.nargs;
                     for (size_t i = 0; i < np && i < nargs; i++)
@@ -5280,31 +5265,17 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                             size_t np = efn->u.func_def.generic_params.len;
                             /* Extension methods use the struct's generic params,
                              * not their own (generic_params is typically 0). */
-                            bool from_struct = false;
-                            if (np == 0 && st->u.struct_.nargs > 0 && ctx->file_scope) {
-                                Symbol *ss = scope_lookup_type(ctx->file_scope, sname);
-                                if (ss && ss->kind == SYM_TYPE && ss->decl &&
-                                    ss->decl->kind == AST_STRUCT_DEF) {
-                                    np = ss->decl->u.struct_def.generic_params.len;
-                                    from_struct = true;
-                                }
-                            }
+                            np = (size_t)cg_resolve_generic_param_count(ctx, (int)np, (int)st->u.struct_.nargs, sname);
                             if (np == 0) continue;
                             const char **pnames = malloc(np * sizeof *pnames);
                             Type **pvals = calloc(np, sizeof *pvals);
                             if (!pnames || !pvals) { free(pnames); free(pvals); continue; }
-                            if (from_struct) {
-                                Symbol *ss = scope_lookup_type(ctx->file_scope, sname);
-                                if (ss && ss->kind == SYM_TYPE && ss->decl &&
-                                    ss->decl->kind == AST_STRUCT_DEF) {
-                                    for (size_t k = 0; k < np; k++)
-                                        pnames[k] = ss->decl->u.struct_def.generic_params.data[k]
-                                                          ->u.generic_param.name;
-                                }
-                            } else {
+                            if (efn->u.func_def.generic_params.len > 0) {
                                 for (size_t k = 0; k < np; k++)
                                     pnames[k] = efn->u.func_def.generic_params.data[k]
                                                       ->u.generic_param.name;
+                            } else {
+                                cg_fill_pnames_from_struct(ctx, sname, pnames, (int)np);
                             }
                             for (size_t k = 0; k < np && k < st->u.struct_.nargs; k++) {
                                 Type *arg = st->u.struct_.args[k];
@@ -5409,14 +5380,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                             continue;
 
                         size_t np = efn->u.func_def.generic_params.len;
-                        if (np == 0 && nargs > 0 && ctx->file_scope) {
-                            /* Extension method uses the struct's params. */
-                            Symbol *ss =
-                                scope_lookup_type(ctx->file_scope, tname);
-                            if (ss && ss->kind == SYM_TYPE && ss->decl &&
-                                ss->decl->kind == AST_STRUCT_DEF)
-                                np = ss->decl->u.struct_def.generic_params.len;
-                        }
+                        np = (size_t)cg_resolve_generic_param_count(ctx, (int)np, (int)nargs, tname);
                         if (np == 0) continue; /* non-generic */
 
                         const char **pnames = malloc(np * sizeof *pnames);
@@ -5424,21 +5388,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                         if (!pnames || !pvals) {
                             free(pnames); free(pvals); continue;
                         }
-                        {
-                            Symbol *ss =
-                                scope_lookup_type(ctx->file_scope, tname);
-                            if (ss && ss->kind == SYM_TYPE && ss->decl) {
-                                const AstNode *sd = ss->decl;
-                                for (size_t i = 0;
-                                     i < np &&
-                                     i < sd->u.struct_def.generic_params.len;
-                                     i++)
-                                    pnames[i] =
-                                        sd->u.struct_def.generic_params
-                                            .data[i]
-                                            ->u.generic_param.name;
-                            }
-                        }
+                        cg_fill_pnames_from_struct(ctx, tname, pnames, (int)np);
                         for (size_t i = 0; i < np && i < nargs; i++)
                             if (targs[i] && !cg_type_has_params(targs[i]))
                                 pvals[i] = targs[i];
@@ -5519,26 +5469,14 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
 
             const AstNode *efn = es->decl;
             size_t np = efn->u.func_def.generic_params.len;
-            if (np == 0 && base_unc->u.struct_.nargs > 0) {
-                Symbol *ss = scope_lookup_type(ctx->file_scope, sn_raw);
-                if (ss && ss->kind == SYM_TYPE && ss->decl &&
-                    ss->decl->kind == AST_STRUCT_DEF)
-                    np = ss->decl->u.struct_def.generic_params.len;
-            }
+            np = (size_t)cg_resolve_generic_param_count(ctx, (int)np, (int)base_unc->u.struct_.nargs, sn_raw);
             if (np == 0) continue;
 
             const char **pnames = malloc(np * sizeof *pnames);
             Type **pvals = calloc(np, sizeof *pvals);
             if (!pnames || !pvals) { free(pnames); free(pvals); break; }
 
-            Symbol *ss = scope_lookup_type(ctx->file_scope, sn_raw);
-            if (ss && ss->kind == SYM_TYPE && ss->decl &&
-                ss->decl->kind == AST_STRUCT_DEF) {
-                for (size_t i = 0; i < np &&
-                     i < ss->decl->u.struct_def.generic_params.len; i++)
-                    pnames[i] = ss->decl->u.struct_def.generic_params.data[i]
-                                  ->u.generic_param.name;
-            }
+            cg_fill_pnames_from_struct(ctx, sn_raw, pnames, (int)np);
 
             size_t nargs = base_unc->u.struct_.nargs;
             for (size_t i = 0; i < np && i < nargs; i++)
@@ -5908,14 +5846,7 @@ static void cg_emit_gfunc_fwd_decls(CgCtx *ctx) {
             for (size_t k = 0; k < np; k++)
                 pnames[k] = fn->u.func_def.generic_params.data[k]->u.generic_param.name;
         } else if (fn->u.func_def.struct_name && ctx->file_scope) {
-            /* Get pnames from the struct's generic params. */
-            Symbol *ss = scope_lookup_type(ctx->file_scope, fn->u.func_def.struct_name);
-            if (ss && ss->kind == SYM_TYPE && ss->decl &&
-                ss->decl->kind == AST_STRUCT_DEF) {
-                for (size_t k = 0; k < np && k < ss->decl->u.struct_def.generic_params.len; k++)
-                    pnames[k] = ss->decl->u.struct_def.generic_params.data[k]
-                                      ->u.generic_param.name;
-            }
+            cg_fill_pnames_from_struct(ctx, fn->u.func_def.struct_name, pnames, (int)np);
         }
 
         ctx->gp_names  = pnames;
@@ -5964,13 +5895,7 @@ static void cg_emit_gfunc_specs(CgCtx *ctx) {
             for (size_t k = 0; k < np; k++)
                 pnames[k] = fn->u.func_def.generic_params.data[k]->u.generic_param.name;
         } else if (fn->u.func_def.struct_name && ctx->file_scope) {
-            Symbol *ss = scope_lookup_type(ctx->file_scope, fn->u.func_def.struct_name);
-            if (ss && ss->kind == SYM_TYPE && ss->decl &&
-                ss->decl->kind == AST_STRUCT_DEF) {
-                for (size_t k = 0; k < np && k < ss->decl->u.struct_def.generic_params.len; k++)
-                    pnames[k] = ss->decl->u.struct_def.generic_params.data[k]
-                                      ->u.generic_param.name;
-            }
+            cg_fill_pnames_from_struct(ctx, fn->u.func_def.struct_name, pnames, (int)np);
         }
         cg_emit_spec_func(ctx, fn, gi->mangle_name, pnames, gi->targs, np);
         free(pnames);
@@ -8082,16 +8007,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                     pnames[k] = fn->u.func_def.generic_params.data[k]
                                     ->u.generic_param.name;
             } else if (fn->u.func_def.struct_name && ctx->file_scope) {
-                /* Extension method: get param names from the struct. */
-                Symbol *ss = scope_lookup_type(ctx->file_scope,
-                                                fn->u.func_def.struct_name);
-                if (ss && ss->kind == SYM_TYPE && ss->decl &&
-                    ss->decl->kind == AST_STRUCT_DEF) {
-                    for (size_t k = 0; k < np &&
-                         k < ss->decl->u.struct_def.generic_params.len; k++)
-                        pnames[k] = ss->decl->u.struct_def.generic_params
-                                        .data[k]->u.generic_param.name;
-                }
+                cg_fill_pnames_from_struct(ctx, fn->u.func_def.struct_name, pnames, (int)np);
             }
 
             /* Install gp context and walk the template body.

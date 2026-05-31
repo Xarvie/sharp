@@ -57,18 +57,12 @@ static void add_sys_path_if_valid(CppCtx *ctx, const char *path) {
     strarr_push(&ctx->sys_include_paths, cpp_xstrdup(path));
 }
 
-/* Add a zig libc include path (e.g. "any-windows-any", "generic-mingw")
- * to ctx->sys_include_paths. */
+static void add_zig_path(CppCtx *ctx, const char *zig_dir, const char *rel);
+
 static void add_zig_sub_path(CppCtx *ctx, const char *rel) {
     const char *zdir = cpp_find_zig_install_dir();
     if (!zdir) return;
-    char path[MAX_PATH];
-#ifdef _WIN32
-    snprintf(path, sizeof path, "%s\\%s", zdir, rel);
-#else
-    snprintf(path, sizeof path, "%s/%s", zdir, rel);
-#endif
-    add_sys_path_if_valid(ctx, path);
+    add_zig_path(ctx, zdir, rel);
 }
 
 static void add_zig_libc_path(CppCtx *ctx, const char *suffix) {
@@ -681,74 +675,30 @@ void cpp_detect_target_sys_paths(CppCtx *ctx, const char *target) {
     const char *inc_suffix = zig_include_dir_for_os(target_os);
     if (!inc_suffix) return;
 
-    /* 1. Cross-compile mode: find zig installation and add target-specific
-     *    libc include directories. This works on any host for any target. */
     const char *zig_dir = cpp_find_zig_install_dir();
     if (zig_dir) {
-        char path[MAX_PATH];
+        add_zig_path(ctx, zig_dir, "lib/include");
 
-        /* Always add zig's builtin include for compiler-provided headers
-         * like <mm_malloc.h>, <__stdarg_va_copy.h>, etc. */
-#ifdef _WIN32
-        snprintf(path, sizeof path, "%s\\lib\\include", zig_dir);
-#else
-        snprintf(path, sizeof path, "%s/lib/include", zig_dir);
-#endif
-        add_sys_path_if_valid(ctx, path);
+        char rel[MAX_PATH];
+        snprintf(rel, sizeof rel, "lib/libc/include/%s", inc_suffix);
+        add_zig_path(ctx, zig_dir, rel);
 
-        /* Add target-specific zig libc headers:
-         *   <zig>/lib/libc/include/<platform-dir>/ */
-#ifdef _WIN32
-        snprintf(path, sizeof path, "%s\\lib\\libc\\include\\%s",
-                 zig_dir, inc_suffix);
-#else
-        snprintf(path, sizeof path, "%s/lib/libc/include/%s",
-                 zig_dir, inc_suffix);
-#endif
-        add_sys_path_if_valid(ctx, path);
-
-        /* For Linux targets, also add libc-internal headers (like
-         * <bits/...>, <asm/...> which live in generic-glibc or generic-musl) */
         if (strcmp(target_os, "linux") == 0) {
-#ifdef _WIN32
-            snprintf(path, sizeof path, "%s\\lib\\libc\\include\\generic-glibc",
-                     zig_dir);
-#else
-            snprintf(path, sizeof path, "%s/lib/libc/include/generic-glibc",
-                     zig_dir);
-#endif
-            add_sys_path_if_valid(ctx, path);
+            add_zig_path(ctx, zig_dir, "lib/libc/include/generic-glibc");
         }
 
-        /* For Darwin targets, also add musl headers (provides stdbool.h etc.) */
         if (strcmp(target_os, "macos") == 0 ||
             strcmp(target_os, "ios") == 0 ||
             strcmp(target_os, "tvos") == 0 ||
             strcmp(target_os, "watchos") == 0) {
-#ifdef _WIN32
-            snprintf(path, sizeof path, "%s\\lib\\libc\\include\\generic-musl",
-                     zig_dir);
-#else
-            snprintf(path, sizeof path, "%s/lib/libc/include/generic-musl",
-                     zig_dir);
-#endif
-            add_sys_path_if_valid(ctx, path);
+            add_zig_path(ctx, zig_dir, "lib/libc/include/generic-musl");
         }
 
-        /* For Windows targets, add MinGW-specific headers */
         if (strcmp(target_os, "windows") == 0) {
-#ifdef _WIN32
-            snprintf(path, sizeof path, "%s\\lib\\libc\\mingw\\include",
-                     zig_dir);
-#else
-            snprintf(path, sizeof path, "%s/lib/libc/mingw/include",
-                     zig_dir);
-#endif
-            add_sys_path_if_valid(ctx, path);
+            add_zig_path(ctx, zig_dir, "lib/libc/mingw/include");
         }
     }
 
-    /* 2. Native Windows SDK / MSVC paths when targeting Windows */
     if (strcmp(target_os, "windows") == 0) {
 #ifdef _WIN32
         detect_msvc_paths(ctx);
@@ -764,13 +714,7 @@ void cpp_detect_target_sys_paths(CppCtx *ctx, const char *target) {
 /* ======================================================================== */
 
 static void add_zig_base_include(CppCtx *ctx, const char *zig_dir) {
-    char p[MAX_PATH];
-#ifdef _WIN32
-    snprintf(p, sizeof p, "%s\\lib\\include", zig_dir);
-#else
-    snprintf(p, sizeof p, "%s/lib/include", zig_dir);
-#endif
-    add_sys_path_if_valid(ctx, p);
+    add_zig_path(ctx, zig_dir, "lib/include");
 }
 
 static void add_zig_path(CppCtx *ctx, const char *zig_dir, const char *rel) {
@@ -792,33 +736,24 @@ static void add_zig_path(CppCtx *ctx, const char *zig_dir, const char *rel) {
  * is not installed or the target is unknown.
  */
 void cpp_detect_zig_sys_paths(CppCtx *ctx, const char *target) {
-#ifdef _WIN32
     const char *zig_dir = cpp_find_zig_install_dir();
     if (!zig_dir) {
         cpp_detect_sys_include_paths(ctx);
         return;
     }
 
-    /* Always add compiler builtin headers first (mm_malloc.h, etc.) */
-    char p[MAX_PATH];
-    snprintf(p, sizeof p, "%s\\lib\\include", zig_dir);
-    add_sys_path_if_valid(ctx, p);
+    add_zig_path(ctx, zig_dir, "lib/include");
 
     const char *target_os = extract_target_os(target);
 
     if (!target_os) {
-        snprintf(p, sizeof p, "%s\\lib\\libc\\include\\any-windows-any", zig_dir);
-        add_sys_path_if_valid(ctx, p);
-        snprintf(p, sizeof p, "%s\\lib\\libc\\mingw\\include", zig_dir);
-        add_sys_path_if_valid(ctx, p);
+        cpp_detect_sys_include_paths(ctx);
         return;
     }
 
     if (strcmp(target_os, "windows") == 0) {
-        snprintf(p, sizeof p, "%s\\lib\\libc\\include\\any-windows-any", zig_dir);
-        add_sys_path_if_valid(ctx, p);
-        snprintf(p, sizeof p, "%s\\lib\\libc\\mingw\\include", zig_dir);
-        add_sys_path_if_valid(ctx, p);
+        add_zig_path(ctx, zig_dir, "lib/libc/include/any-windows-any");
+        add_zig_path(ctx, zig_dir, "lib/libc/mingw/include");
     } else if (strcmp(target_os, "linux") == 0) {
         int is_x86 = target && (strncmp(target, "x86_64", 6) == 0 ||
                                 strncmp(target, "x86-", 4) == 0);
@@ -826,184 +761,57 @@ void cpp_detect_zig_sys_paths(CppCtx *ctx, const char *target) {
         int is_musl = target && strstr(target, "musl");
 
         if (is_x86 && is_musl) {
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\x86_64-linux-musl", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\generic-musl", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\x86-linux-any", zig_dir);
-            add_sys_path_if_valid(ctx, p);
+            add_zig_path(ctx, zig_dir, "lib/libc/include/x86_64-linux-musl");
+            add_zig_path(ctx, zig_dir, "lib/libc/include/generic-musl");
+            add_zig_path(ctx, zig_dir, "lib/libc/include/x86-linux-any");
         } else if (is_x86) {
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\x86-linux-gnu", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\generic-glibc", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\x86-linux-any", zig_dir);
-            add_sys_path_if_valid(ctx, p);
+            add_zig_path(ctx, zig_dir, "lib/libc/include/x86-linux-gnu");
+            add_zig_path(ctx, zig_dir, "lib/libc/include/generic-glibc");
+            add_zig_path(ctx, zig_dir, "lib/libc/include/x86-linux-any");
         } else if (is_aarch64 && is_musl) {
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\aarch64-linux-musl", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\generic-musl", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\aarch64-linux-any", zig_dir);
-            add_sys_path_if_valid(ctx, p);
+            add_zig_path(ctx, zig_dir, "lib/libc/include/aarch64-linux-musl");
+            add_zig_path(ctx, zig_dir, "lib/libc/include/generic-musl");
+            add_zig_path(ctx, zig_dir, "lib/libc/include/aarch64-linux-any");
         } else if (is_aarch64) {
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\aarch64-linux-gnu", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\generic-glibc", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\aarch64-linux-any", zig_dir);
-            add_sys_path_if_valid(ctx, p);
+            add_zig_path(ctx, zig_dir, "lib/libc/include/aarch64-linux-gnu");
+            add_zig_path(ctx, zig_dir, "lib/libc/include/generic-glibc");
+            add_zig_path(ctx, zig_dir, "lib/libc/include/aarch64-linux-any");
         } else {
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\x86-linux-gnu", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\generic-glibc", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\x86-linux-any", zig_dir);
-            add_sys_path_if_valid(ctx, p);
+            add_zig_path(ctx, zig_dir, "lib/libc/include/x86-linux-gnu");
+            add_zig_path(ctx, zig_dir, "lib/libc/include/generic-glibc");
+            add_zig_path(ctx, zig_dir, "lib/libc/include/x86-linux-any");
         }
-        snprintf(p, sizeof p, "%s\\lib\\libc\\include\\any-linux-any", zig_dir);
-        add_sys_path_if_valid(ctx, p);
-    } else if (strcmp(target_os, "macos") == 0) {
-        snprintf(p, sizeof p, "%s\\lib\\libc\\include\\any-darwin-any", zig_dir);
-        add_sys_path_if_valid(ctx, p);
-    } else if (strcmp(target_os, "freebsd") == 0) {
-        int is_x86_64 = target && strncmp(target, "x86_64", 6) == 0;
-        if (is_x86_64) {
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\x86_64-freebsd-none", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-        }
-        snprintf(p, sizeof p, "%s\\lib\\libc\\include\\generic-freebsd", zig_dir);
-        add_sys_path_if_valid(ctx, p);
-    } else if (strcmp(target_os, "netbsd") == 0) {
-        int is_x86_64 = target && strncmp(target, "x86_64", 6) == 0;
-        if (is_x86_64) {
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\x86_64-netbsd-none", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-        }
-        snprintf(p, sizeof p, "%s\\lib\\libc\\include\\generic-netbsd", zig_dir);
-        add_sys_path_if_valid(ctx, p);
-    } else if (strcmp(target_os, "openbsd") == 0) {
-        int is_x86_64 = target && strncmp(target, "x86_64", 6) == 0;
-        if (is_x86_64) {
-            snprintf(p, sizeof p, "%s\\lib\\libc\\include\\x86_64-openbsd-none", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-        }
-        snprintf(p, sizeof p, "%s\\lib\\libc\\include\\generic-openbsd", zig_dir);
-        add_sys_path_if_valid(ctx, p);
-    } else if (strcmp(target_os, "wasi") == 0) {
-        snprintf(p, sizeof p, "%s\\lib\\libc\\include\\wasm-wasi-musl", zig_dir);
-        add_sys_path_if_valid(ctx, p);
-        snprintf(p, sizeof p, "%s\\lib\\libc\\include\\generic-musl", zig_dir);
-        add_sys_path_if_valid(ctx, p);
-    } else {
-        cpp_detect_sys_include_paths(ctx);
-    }
-#else
-    /* Linux/macOS: find zig dir and construct Unix-style paths */
-    const char *zig_dir = cpp_find_zig_install_dir();
-    if (!zig_dir) {
-        cpp_detect_sys_include_paths(ctx);
-        return;
-    }
-
-    char p[MAX_PATH];
-    snprintf(p, sizeof p, "%s/lib/include", zig_dir);
-    add_sys_path_if_valid(ctx, p);
-
-    const char *target_os = extract_target_os(target);
-
-    if (!target_os) {
-        cpp_detect_sys_include_paths(ctx);
-        return;
-    }
-
-    if (strcmp(target_os, "linux") == 0) {
-        int is_x86 = target && (strncmp(target, "x86_64", 6) == 0 ||
-                                strncmp(target, "x86-", 4) == 0);
-        int is_aarch64 = target && strncmp(target, "aarch64", 7) == 0;
-        int is_musl = target && strstr(target, "musl");
-
-        if (is_x86 && is_musl) {
-            snprintf(p, sizeof p, "%s/lib/libc/include/x86_64-linux-musl", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s/lib/libc/include/generic-musl", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s/lib/libc/include/x86-linux-any", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-        } else if (is_x86) {
-            snprintf(p, sizeof p, "%s/lib/libc/include/x86-linux-gnu", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s/lib/libc/include/generic-glibc", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s/lib/libc/include/x86-linux-any", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-        } else if (is_aarch64 && is_musl) {
-            snprintf(p, sizeof p, "%s/lib/libc/include/aarch64-linux-musl", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s/lib/libc/include/generic-musl", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s/lib/libc/include/aarch64-linux-any", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-        } else if (is_aarch64) {
-            snprintf(p, sizeof p, "%s/lib/libc/include/aarch64-linux-gnu", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s/lib/libc/include/generic-glibc", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s/lib/libc/include/aarch64-linux-any", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-        } else {
-            snprintf(p, sizeof p, "%s/lib/libc/include/x86-linux-gnu", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s/lib/libc/include/generic-glibc", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-            snprintf(p, sizeof p, "%s/lib/libc/include/x86-linux-any", zig_dir);
-            add_sys_path_if_valid(ctx, p);
-        }
-        snprintf(p, sizeof p, "%s/lib/libc/include/any-linux-any", zig_dir);
-        add_sys_path_if_valid(ctx, p);
+        add_zig_path(ctx, zig_dir, "lib/libc/include/any-linux-any");
     } else if (strcmp(target_os, "macos") == 0 ||
                strcmp(target_os, "ios") == 0 ||
                strcmp(target_os, "tvos") == 0 ||
                strcmp(target_os, "watchos") == 0) {
-        /* Platform-native SDK paths first (macOS SDK via xcrun).
-         * These take priority over zig's libc headers to avoid
-         * redefinition conflicts (e.g. _OSSwapInt16). */
         cpp_detect_sys_include_paths(ctx);
-        snprintf(p, sizeof p, "%s/lib/libc/include/any-darwin-any", zig_dir);
-        add_sys_path_if_valid(ctx, p);
+        add_zig_path(ctx, zig_dir, "lib/libc/include/any-darwin-any");
     } else if (strcmp(target_os, "freebsd") == 0) {
         int is_x86_64 = target && strncmp(target, "x86_64", 6) == 0;
         if (is_x86_64) {
-            snprintf(p, sizeof p, "%s/lib/libc/include/x86_64-freebsd-none", zig_dir);
-            add_sys_path_if_valid(ctx, p);
+            add_zig_path(ctx, zig_dir, "lib/libc/include/x86_64-freebsd-none");
         }
-        snprintf(p, sizeof p, "%s/lib/libc/include/generic-freebsd", zig_dir);
-        add_sys_path_if_valid(ctx, p);
+        add_zig_path(ctx, zig_dir, "lib/libc/include/generic-freebsd");
     } else if (strcmp(target_os, "netbsd") == 0) {
         int is_x86_64 = target && strncmp(target, "x86_64", 6) == 0;
         if (is_x86_64) {
-            snprintf(p, sizeof p, "%s/lib/libc/include/x86_64-netbsd-none", zig_dir);
-            add_sys_path_if_valid(ctx, p);
+            add_zig_path(ctx, zig_dir, "lib/libc/include/x86_64-netbsd-none");
         }
-        snprintf(p, sizeof p, "%s/lib/libc/include/generic-netbsd", zig_dir);
-        add_sys_path_if_valid(ctx, p);
+        add_zig_path(ctx, zig_dir, "lib/libc/include/generic-netbsd");
     } else if (strcmp(target_os, "openbsd") == 0) {
         int is_x86_64 = target && strncmp(target, "x86_64", 6) == 0;
         if (is_x86_64) {
-            snprintf(p, sizeof p, "%s/lib/libc/include/x86_64-openbsd-none", zig_dir);
-            add_sys_path_if_valid(ctx, p);
+            add_zig_path(ctx, zig_dir, "lib/libc/include/x86_64-openbsd-none");
         }
-        snprintf(p, sizeof p, "%s/lib/libc/include/generic-openbsd", zig_dir);
-        add_sys_path_if_valid(ctx, p);
+        add_zig_path(ctx, zig_dir, "lib/libc/include/generic-openbsd");
     } else if (strcmp(target_os, "wasi") == 0) {
-        snprintf(p, sizeof p, "%s/lib/libc/include/wasm-wasi-musl", zig_dir);
-        add_sys_path_if_valid(ctx, p);
-        snprintf(p, sizeof p, "%s/lib/libc/include/generic-musl", zig_dir);
-        add_sys_path_if_valid(ctx, p);
+        add_zig_path(ctx, zig_dir, "lib/libc/include/wasm-wasi-musl");
+        add_zig_path(ctx, zig_dir, "lib/libc/include/generic-musl");
     } else {
         cpp_detect_sys_include_paths(ctx);
     }
-#endif
 }
 
 size_t cpp_sys_include_count(const CppCtx *ctx) {

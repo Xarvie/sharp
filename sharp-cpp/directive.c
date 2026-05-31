@@ -40,6 +40,7 @@ static void fix_token_ptrs(CppState *st, const char *old_buf);
 static PPTok make_file_tok(CppState *st, CppLoc loc);
 static PPTok make_line_tok(CppState *st, CppLoc loc);
 static PPTok make_counter_tok(CppState *st, CppLoc loc);
+static PPTok make_timestamp_tok(CppState *st, CppLoc loc);
 
 
 /* =========================================================================
@@ -1682,6 +1683,39 @@ static PPTok make_timestamp_tok(CppState *st, CppLoc loc) {
     return t;
 }
 
+static bool try_emit_builtin(CppState *st, const char *name, CppLoc loc,
+                              const char *leading_ws) {
+    if (strcmp(name, "__FILE__") == 0) {
+        PPTok ft = make_file_tok(st, loc);
+        ft.leading_ws = leading_ws;
+        emit_tok_text(st, &ft);
+        pptok_free(&ft);
+        return true;
+    }
+    if (strcmp(name, "__LINE__") == 0) {
+        PPTok lt = make_line_tok(st, loc);
+        lt.leading_ws = leading_ws;
+        emit_tok_text(st, &lt);
+        pptok_free(&lt);
+        return true;
+    }
+    if (strcmp(name, "__COUNTER__") == 0) {
+        PPTok ct = make_counter_tok(st, loc);
+        ct.leading_ws = leading_ws;
+        emit_tok_text(st, &ct);
+        pptok_free(&ct);
+        return true;
+    }
+    if (strcmp(name, "__TIMESTAMP__") == 0) {
+        PPTok tt = make_timestamp_tok(st, loc);
+        tt.leading_ws = leading_ws;
+        emit_tok_text(st, &tt);
+        pptok_free(&tt);
+        return true;
+    }
+    return false;
+}
+
 /* Phase R12: emit a single post-expansion token, performing on-the-fly
  * substitution for the dynamic builtins __FILE__ / __LINE__ / __COUNTER__.
  *
@@ -1739,29 +1773,10 @@ static void emit_pragma_text(CppState *st, const char *raw_string_lit,
 }
 
 static void emit_post_expansion_tok(CppState *st, const PPTok *t, CppLoc inv_loc) {
-    if (t->kind == CPPT_IDENT) {
+    if (t->kind == CPPT_IDENT && !t->hide) {
         const char *name = pptok_spell(t);
-        if (strcmp(name, "__FILE__") == 0) {
-            PPTok ft = make_file_tok(st, inv_loc);
-            ft.leading_ws = t->leading_ws;
-            emit_tok_text(st, &ft);
-            pptok_free(&ft);
+        if (try_emit_builtin(st, name, inv_loc, t->leading_ws))
             return;
-        }
-        if (strcmp(name, "__LINE__") == 0) {
-            PPTok lt = make_line_tok(st, inv_loc);
-            lt.leading_ws = t->leading_ws;
-            emit_tok_text(st, &lt);
-            pptok_free(&lt);
-            return;
-        }
-        if (strcmp(name, "__COUNTER__") == 0) {
-            PPTok ct = make_counter_tok(st, inv_loc);
-            ct.leading_ws = t->leading_ws;
-            emit_tok_text(st, &ct);
-            pptok_free(&ct);
-            return;
-        }
     }
     emit_tok_text(st, t);
 }
@@ -2144,40 +2159,11 @@ static void process_buf(CppState *st, CppReader *rd) {
 
         /* ------------------------------------------------------------- */
         /* Normal token — potentially a macro invocation                   */
-        if (t.kind == CPPT_IDENT) {
+        if (t.kind == CPPT_IDENT && !t.hide) {
             const char *name = pptok_spell(&t);
 
-            /* Dynamic built-ins */
-            if (strcmp(name, "__FILE__") == 0) {
-                PPTok ft = make_file_tok(st, t.loc);
-                ft.leading_ws = t.leading_ws;
+            if (try_emit_builtin(st, name, t.loc, t.leading_ws)) {
                 pptok_free(&t);
-                emit_tok_text(st, &ft);
-                pptok_free(&ft);
-                continue;
-            }
-            if (strcmp(name, "__LINE__") == 0) {
-                PPTok lt = make_line_tok(st, t.loc);
-                lt.leading_ws = t.leading_ws;
-                pptok_free(&t);
-                emit_tok_text(st, &lt);
-                pptok_free(&lt);
-                continue;
-            }
-            if (strcmp(name, "__COUNTER__") == 0) {
-                PPTok ct = make_counter_tok(st, t.loc);
-                ct.leading_ws = t.leading_ws;
-                pptok_free(&t);
-                emit_tok_text(st, &ct);
-                pptok_free(&ct);
-                continue;
-            }
-            if (strcmp(name, "__TIMESTAMP__") == 0) {
-                PPTok tt = make_timestamp_tok(st, t.loc);
-                tt.leading_ws = t.leading_ws;
-                pptok_free(&t);
-                emit_tok_text(st, &tt);
-                pptok_free(&tt);
                 continue;
             }
 
