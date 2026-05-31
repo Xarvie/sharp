@@ -53,6 +53,21 @@ static bool in_live_branch(const CppState *st) {
     return true;
 }
 
+static bool parent_is_live(const CppState *st) {
+    for (int i = 0; i < st->cond_depth - 1; i++)
+        if (!st->cond_stack[i].in_true_branch) return false;
+    return true;
+}
+
+static const char *find_last_sep(const char *path) {
+    const char *sep = strrchr(path, '/');
+#ifdef _WIN32
+    const char *bsep = strrchr(path, '\\');
+    if (bsep && (!sep || bsep > sep)) sep = bsep;
+#endif
+    return sep;
+}
+
 /* Push a diagnostic into st->diags; bump st->fatal on FATAL level. */
 static void emit_diag(CppState *st, CppDiagLevel lvl, CppLoc loc, const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
@@ -460,11 +475,7 @@ static char *find_include_ex(CppState *st, const char *name, bool is_system,
     /* Compute the directory that contains skip_until once, up front. */
     char skip_dir[4096] = {0};
     if (skip_until) {
-        const char *slash = strrchr(skip_until, '/');
-#ifdef _WIN32
-        const char *bslash = strrchr(skip_until, '\\');
-        if (bslash && (!slash || bslash > slash)) slash = bslash;
-#endif
+        const char *slash = find_last_sep(skip_until);
         if (slash) {
             size_t dlen = (size_t)(slash - skip_until);
             if (dlen >= sizeof skip_dir) dlen = sizeof skip_dir - 1;
@@ -497,11 +508,7 @@ static char *find_include_ex(CppState *st, const char *name, bool is_system,
      * headers via Lua's lauxlib.c).  Also skipped when skip_until is
      * active because #include_next never looks in the source's own dir. */
     if (current_file && !skipping && !is_system) {
-        const char *slash = strrchr(current_file, '/');
-#ifdef _WIN32
-        const char *bslash = strrchr(current_file, '\\');
-        if (bslash && (!slash || bslash > slash)) slash = bslash;
-#endif
+        const char *slash = find_last_sep(current_file);
         if (slash) {
             size_t dir_len = (size_t)(slash - current_file + 1);
             snprintf(path, sizeof path, "%.*s%s", (int)dir_len, current_file, name);
@@ -584,11 +591,7 @@ static bool cpp_has_include(CppState *st, const char *name, bool is_system,
     bool skipping = is_next;
     char skip_dir[4096] = {0};
     if (skipping && current_file) {
-        const char *slash = strrchr(current_file, '/');
-#ifdef _WIN32
-        const char *bslash = strrchr(current_file, '\\');
-        if (bslash && (!slash || bslash > slash)) slash = bslash;
-#endif
+        const char *slash = find_last_sep(current_file);
         if (slash) {
             size_t dlen = (size_t)(slash - current_file);
             if (dlen >= sizeof skip_dir) dlen = sizeof skip_dir - 1;
@@ -776,11 +779,7 @@ static void handle_include(CppState *st, TokList *line, CppLoc loc,
          * so the user can quickly see where the lookup failed.  This mirrors
          * Clang's "<...> search starts here:" hint.                        */
         if (!is_sys && current_file) {
-            const char *slash = strrchr(current_file, '/');
-#ifdef _WIN32
-            const char *bslash = strrchr(current_file, '\\');
-            if (bslash && (!slash || bslash > slash)) slash = bslash;
-#endif
+            const char *slash = find_last_sep(current_file);
             if (slash) {
                 char dirbuf[4096];
                 size_t dlen = (size_t)(slash - current_file);
@@ -1225,9 +1224,7 @@ static void handle_elif(CppState *st, TokList *line, CppLoc loc) {
     bool cond = !err && val != 0;
 
     /* Only activate if parent scopes are all live */
-    bool parent_live = true;
-    for (int i = 0; i < st->cond_depth - 1; i++)
-        if (!st->cond_stack[i].in_true_branch) { parent_live = false; break; }
+    bool parent_live = parent_is_live(st);
     f->in_true_branch = cond && parent_live;
     if (cond) f->ever_true = true;
 }
@@ -1244,9 +1241,7 @@ static void handle_else(CppState *st, TokList *line, CppLoc loc) {
         return;
     }
     f->has_else = true;
-    bool parent_live = true;
-    for (int i = 0; i < st->cond_depth - 1; i++)
-        if (!st->cond_stack[i].in_true_branch) { parent_live = false; break; }
+    bool parent_live = parent_is_live(st);
     f->in_true_branch = !f->ever_true && parent_live;
     /* GCC-style: warn (don't error) if there are extra tokens after #else.
      * Comments are filtered above so legacy patterns using a comment as a
@@ -2566,17 +2561,22 @@ static void process_buf(CppState *st, CppReader *rd) {
     /* (Only report from the top-level file) */
 }
 
-static void process_file(CppState *st, const char *filename) {
+static CppReader *reader_open_or_fatal(CppState *st, const char *filename) {
     CppReader *rd = reader_new_from_file(filename, st->interns, st->diags);
     if (!rd) {
         CppDiag d = { CPP_DIAG_FATAL, {filename, 0, 0},
                       cpp_xstrdup("cannot open file") };
         diag_push(st->diags, d);
         st->fatal = true;
-        return;
+        return NULL;
     }
-    /* Phase R12: propagate trigraph mode from CppCtx to the reader. */
     reader_set_trigraphs(rd, st->ctx->trigraphs);
+    return rd;
+}
+
+static void process_file(CppState *st, const char *filename) {
+    CppReader *rd = reader_open_or_fatal(st, filename);
+    if (!rd) return;
     emit_linemarker(st, 1, filename);
     process_buf(st, rd);
     reader_free(rd);
@@ -2589,16 +2589,9 @@ static void process_file(CppState *st, const char *filename) {
  * returns) carries the correct flag-3 status.                          */
 static void process_include_file(CppState *st, const char *filename,
                                   bool is_sys_header) {
-    CppReader *rd = reader_new_from_file(filename, st->interns, st->diags);
-    if (!rd) {
-        CppDiag d = { CPP_DIAG_FATAL, {filename, 0, 0},
-                      cpp_xstrdup("cannot open file") };
-        diag_push(st->diags, d);
-        st->fatal = true;
-        return;
-    }
+    CppReader *rd = reader_open_or_fatal(st, filename);
+    if (!rd) return;
 
-    reader_set_trigraphs(rd, st->ctx->trigraphs);
     bool saved_is_sys = st->cur_file_is_sys;
     st->cur_file_is_sys = is_sys_header;
     emit_linemarker_ex(st, 1, filename, 1,

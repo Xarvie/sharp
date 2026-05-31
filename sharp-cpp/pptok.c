@@ -228,6 +228,15 @@ static int reader_peekc(CppReader *rd) {
  * Reader construction / destruction
  * ====================================================================== */
 
+static size_t escape_char(unsigned char c, char *out) {
+    if (c == '\\')      { out[0] = '\\'; out[1] = '\\'; return 2; }
+    else if (c == '"')  { out[0] = '\\'; out[1] = '"';  return 2; }
+    else if (c == '\n') { out[0] = '\\'; out[1] = 'n';  return 2; }
+    else if (c == '\t') { out[0] = '\\'; out[1] = 't';  return 2; }
+    else if (c == '\r') { out[0] = '\\'; out[1] = 'r';  return 2; }
+    else { out[0] = c; return 1; }
+}
+
 static char *convert_raw_strings_cpp(const char *src, size_t len, size_t *out_len) {
     size_t cap = len + len / 4 + 64;
     char *out = (char *)cpp_xmalloc(cap);
@@ -294,12 +303,7 @@ static char *convert_raw_strings_cpp(const char *src, size_t len, size_t *out_le
                 out[w++] = '"';
                 for (size_t i = 0; i < content_len; i++) {
                     unsigned char c = (unsigned char)after_q[i];
-                    if (c == '\\')      { out[w++] = '\\'; out[w++] = '\\'; }
-                    else if (c == '"')  { out[w++] = '\\'; out[w++] = '"';  }
-                    else if (c == '\n') { out[w++] = '\\'; out[w++] = 'n';  }
-                    else if (c == '\t') { out[w++] = '\\'; out[w++] = 't';  }
-                    else if (c == '\r') { out[w++] = '\\'; out[w++] = 'r';  }
-                    else out[w++] = c;
+                    w += escape_char(c, out + w);
                 }
                 out[w++] = '"';
                 r_pos = close - src + 1;
@@ -334,12 +338,7 @@ static char *convert_raw_strings_cpp(const char *src, size_t len, size_t *out_le
                     out[w++] = '"';
                     for (size_t i = 0; i < content_len; i++) {
                         unsigned char c = (unsigned char)content_start[i];
-                        if (c == '\\')      { out[w++] = '\\'; out[w++] = '\\'; }
-                        else if (c == '"')  { out[w++] = '\\'; out[w++] = '"';  }
-                        else if (c == '\n') { out[w++] = '\\'; out[w++] = 'n';  }
-                        else if (c == '\t') { out[w++] = '\\'; out[w++] = 't';  }
-                        else if (c == '\r') { out[w++] = '\\'; out[w++] = 'r';  }
-                        else out[w++] = c;
+                        w += escape_char(c, out + w);
                     }
                     out[w++] = '"';
                     r_pos = close - src + 1 + nhash;
@@ -353,6 +352,27 @@ static char *convert_raw_strings_cpp(const char *src, size_t len, size_t *out_le
     out[w] = '\0';
     if (out_len) *out_len = w;
     return out;
+}
+
+static bool is_sharp_extension(const char *filename) {
+    if (!filename) return false;
+    const char *ext = strrchr(filename, '.');
+    return ext && (strcmp(ext, ".ce") == 0 || strcmp(ext, ".he") == 0);
+}
+
+static void reader_init(CppReader *rd, char *buf, size_t len,
+                        const char *filename, InternTable *interns,
+                        CppDiagArr *diags) {
+    rd->raw.buf      = buf;
+    rd->raw.len      = len;
+    rd->raw.pos      = 0;
+    rd->raw.line     = 1;
+    rd->raw.col      = 1;
+    rd->raw.filename = intern_cstr(interns, filename);
+    rd->interns      = interns;
+    rd->diags        = diags;
+    rd->at_bol       = true;
+    rd->sharp_mode   = true;
 }
 
 CppReader *reader_new_from_file(const char *filename,
@@ -390,10 +410,7 @@ CppReader *reader_new_from_file(const char *filename,
     buf[nr] = '\0';
 
     {
-        int is_sharp_ext = 0;
-        const char *ext = strrchr(filename, '.');
-        if (ext && (strcmp(ext, ".ce") == 0 || strcmp(ext, ".he") == 0))
-            is_sharp_ext = 1;
+        bool is_sharp_ext = is_sharp_extension(filename);
         if (is_sharp_ext) {
             size_t out_len = 0;
             char *converted = convert_raw_strings_cpp(buf, (size_t)nr, &out_len);
@@ -405,17 +422,8 @@ CppReader *reader_new_from_file(const char *filename,
 
     CppReader *rd = cpp_xmalloc(sizeof *rd);
     memset(rd, 0, sizeof *rd);
-    rd->owned_buf    = buf;
-    rd->raw.buf        = buf;
-    rd->raw.len        = nr;
-    rd->raw.pos        = 0;
-    rd->raw.line       = 1;
-    rd->raw.col        = 1;
-    rd->raw.filename   = intern_cstr(interns, filename);
-    rd->interns        = interns;
-    rd->diags          = diags;
-    rd->at_bol         = true;
-    rd->sharp_mode     = true;   /* Sharp @-intrinsic recognition always on */
+    rd->owned_buf = buf;
+    reader_init(rd, buf, nr, filename, interns, diags);
     return rd;
 }
 
@@ -429,12 +437,7 @@ CppReader *reader_new_from_buf(const char *buf, size_t len,
     copy[len] = '\0';
 
     {
-        int is_sharp_ext = 0;
-        if (filename) {
-            const char *ext = strrchr(filename, '.');
-            if (ext && (strcmp(ext, ".ce") == 0 || strcmp(ext, ".he") == 0))
-                is_sharp_ext = 1;
-        }
+        bool is_sharp_ext = is_sharp_extension(filename);
         if (is_sharp_ext) {
             size_t out_len = 0;
             char *converted = convert_raw_strings_cpp(copy, len, &out_len);
@@ -446,17 +449,8 @@ CppReader *reader_new_from_buf(const char *buf, size_t len,
 
     CppReader *rd = cpp_xmalloc(sizeof *rd);
     memset(rd, 0, sizeof *rd);
-    rd->owned_buf    = copy;
-    rd->raw.buf      = copy;
-    rd->raw.len      = len;
-    rd->raw.pos      = 0;
-    rd->raw.line     = 1;
-    rd->raw.col      = 1;
-    rd->raw.filename = intern_cstr(interns, filename);
-    rd->interns      = interns;
-    rd->diags        = diags;
-    rd->at_bol       = true;
-    rd->sharp_mode   = true;
+    rd->owned_buf = copy;
+    reader_init(rd, copy, len, filename, interns, diags);
     return rd;
 }
 
