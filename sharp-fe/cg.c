@@ -363,6 +363,10 @@ static const AstNode *ast_type_strip_cv(const AstNode *n) {
     return n;
 }
 
+static const char *struct_kw(const AstNode *sd) {
+    return sd->u.struct_def.is_union ? "union" : "struct";
+}
+
 static void cg_emit_array_suffixes(CgCtx *ctx, const AstNode *cur) {
     while (cur && cur->kind == AST_TYPE_ARRAY) {
         cg_puts(ctx, "[");
@@ -990,6 +994,17 @@ static void cg_type(CgCtx *ctx, Type *t) {
             cg_puts(ctx, " const");  /* → "T * const" */
         } else {
             cg_puts(ctx, "const ");
+            cg_type(ctx, inner);
+        }
+        break;
+    }
+    case TY_ATOMIC: {
+        Type *inner = t->u.atomic.base;
+        if (inner && inner->kind == TY_PTR) {
+            cg_type(ctx, inner);
+            cg_puts(ctx, " _Atomic");
+        } else {
+            cg_puts(ctx, "_Atomic ");
             cg_type(ctx, inner);
         }
         break;
@@ -1755,7 +1770,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
         const AstNode *inner_sd = cg_find_struct_def(ctx, inner_name);
         if (inner_sd && inner_sd->u.struct_def.fields.len > 0) {
             /* Emit inline body: `union {\n  fields...\n};` */
-            const char *kw = inner_sd->u.struct_def.is_union ? "union" : "struct";
+            const char *kw = struct_kw(inner_sd);
             cg_printf(ctx, "%s {\n", kw);
             for (size_t j = 0; j < inner_sd->u.struct_def.fields.len; j++) {
                 const AstNode *sub = inner_sd->u.struct_def.fields.data[j];
@@ -1788,7 +1803,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                 }
             }
             if (inner_sd && inner_sd->u.struct_def.fields.len > 0) {
-                const char *kw = inner_sd->u.struct_def.is_union ? "union" : "struct";
+                const char *kw = struct_kw(inner_sd);
                 cg_printf(ctx, "%s {\n", kw);
                 cg_emit_struct_fields(ctx, inner_sd, "    ", false);
                 if (inner_sd->u.struct_def.tail_attrs)
@@ -1844,7 +1859,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                      * cg_emit_decl_sharp — fall through so the field uses
                      * a tag-name reference instead of an inline body. */
                 } else {
-                    const char *kw = inner_sd->u.struct_def.is_union ? "union" : "struct";
+                    const char *kw = struct_kw(inner_sd);
                     cg_printf(ctx, "%s %s {\n", kw, inner_name);
                     cg_emit_struct_fields(ctx, inner_sd, "    ", false);
                     if (inner_sd->u.struct_def.tail_attrs)
@@ -3415,7 +3430,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
                 const char *vnm = vty->u.type_name.name;
                 const AstNode *vsd = cg_find_inline_struct_def(ctx, vnm);
                 if (vsd && vsd->u.struct_def.fields.len > 0) {
-                    const char *vkw = vsd->u.struct_def.is_union ? "union" : "struct";
+                    const char *vkw = struct_kw(vsd);
                     bool is_named = strncmp(vnm, "__anon_", 7) != 0;
                     if (vis_const) cg_puts(ctx, "const ");
                     if (vis_vol) cg_puts(ctx, "volatile ");
@@ -4061,7 +4076,7 @@ static void cg_block(CgCtx *ctx, const AstNode *block) {
                         const char *_vnm = _vty->u.type_name.name;
                         const AstNode *_vsd = cg_find_inline_struct_def(ctx, _vnm);
                         if (_vsd && _vsd->u.struct_def.fields.len > 0) {
-                            const char *_vkw = _vsd->u.struct_def.is_union ? "union" : "struct";
+                            const char *_vkw = struct_kw(_vsd);
                             bool _is_named = strncmp(_vnm, "__anon_", 7) != 0;
                             if (_vis_const) cg_puts(ctx, "const ");
                             if (_vis_vol) cg_puts(ctx, "volatile ");
@@ -4204,6 +4219,17 @@ static void cg_emit_struct_type(CgCtx *ctx, const char *sname) {
             tag->decl->u.struct_def.is_union) kw = "union";
     }
     cg_printf(ctx, "%s %s", kw, sname);
+}
+
+static void cg_emit_struct_fwd_decl(CgCtx *ctx, const char *name) {
+    Symbol *tag = scope_lookup_struct_tag(ctx->file_scope, name);
+    bool is_union = tag && tag->decl && tag->decl->kind == AST_STRUCT_DEF && tag->decl->u.struct_def.is_union;
+    bool has_td = cg_struct_has_explicit_typedef(ctx, name);
+    const char *kw = is_union ? "union" : "struct";
+    if (has_td)
+        cg_printf(ctx, "typedef %s %s %s;\n", kw, name, name);
+    else
+        cg_printf(ctx, "%s %s;\n", kw, name);
 }
 
 static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
@@ -4698,7 +4724,7 @@ static void cg_struct(CgCtx *ctx, const AstNode *sd) {
      * emitted because unions can be self-referencing only via pointer
      * (same restriction as struct), so the symbol-level `union T` form
      * already covers forward-references inside the body. */
-    const char *kw = sd->u.struct_def.is_union ? "union" : "struct";
+    const char *kw = struct_kw(sd);
 
     /* Skip the local `typedef ... X;` if the same name is also bound
      * to a function or variable in this scope (see cg_type TY_STRUCT
@@ -5062,11 +5088,20 @@ static bool cg_type_has_params(Type *t) {
     case TY_PARAM:  return true;
     case TY_PTR:    return cg_type_has_params(t->u.ptr.base);
     case TY_CONST:  return cg_type_has_params(t->u.const_.base);
+    case TY_ATOMIC: return cg_type_has_params(t->u.atomic.base);
     case TY_ARRAY:  return cg_type_has_params(t->u.array.base);
+    case TY_FUNC: {
+        if (cg_type_has_params(t->u.func.ret)) return true;
+        for (size_t i = 0; i < t->u.func.nparams; i++)
+            if (cg_type_has_params(t->u.func.params[i])) return true;
+        return false;
+    }
     case TY_STRUCT:
         for (size_t _i = 0; _i < t->u.struct_.nargs; _i++)
             if (cg_type_has_params(t->u.struct_.args[_i])) return true;
         return false;
+    case TY_ENUM:   return false;
+    case TY_VECTOR: return cg_type_has_params(t->u.vector.elem);
     default: return false;
     }
 }
@@ -5090,8 +5125,18 @@ static void cg_collect_type(CgCtx *ctx, Type *t) {
             }
         }
         break;
-    case TY_PTR:   cg_collect_type(ctx, t->u.ptr.base);    break;
-    case TY_CONST: cg_collect_type(ctx, t->u.const_.base); break;
+    case TY_PTR:    cg_collect_type(ctx, t->u.ptr.base);    break;
+    case TY_CONST:  cg_collect_type(ctx, t->u.const_.base); break;
+    case TY_ATOMIC: cg_collect_type(ctx, t->u.atomic.base); break;
+    case TY_ARRAY:  cg_collect_type(ctx, t->u.array.base);  break;
+    case TY_FUNC: {
+        cg_collect_type(ctx, t->u.func.ret);
+        for (size_t i = 0; i < t->u.func.nparams; i++)
+            cg_collect_type(ctx, t->u.func.params[i]);
+        break;
+    }
+    case TY_ENUM:   break;
+    case TY_VECTOR: cg_collect_type(ctx, t->u.vector.elem); break;
     default: break;
     }
 }
@@ -5574,6 +5619,23 @@ static void infer_ty_params(const char **pnames, Type **pvals, size_t np,
             infer_ty_params(pnames, pvals, np,
                            formal->u.struct_.args[i], actual->u.struct_.args[i]);
     }
+    /* Array: descend into base */
+    if (formal->kind == TY_ARRAY && actual->kind == TY_ARRAY) {
+        infer_ty_params(pnames, pvals, np, formal->u.array.base, actual->u.array.base);
+    }
+    /* Func: match return and parameter types */
+    if (formal->kind == TY_FUNC && actual->kind == TY_FUNC) {
+        infer_ty_params(pnames, pvals, np, formal->u.func.ret, actual->u.func.ret);
+        if (formal->u.func.nparams == actual->u.func.nparams) {
+            for (size_t i = 0; i < formal->u.func.nparams; i++)
+                infer_ty_params(pnames, pvals, np,
+                               formal->u.func.params[i], actual->u.func.params[i]);
+        }
+    }
+    /* Vector: descend into element type */
+    if (formal->kind == TY_VECTOR && actual->kind == TY_VECTOR) {
+        infer_ty_params(pnames, pvals, np, formal->u.vector.elem, actual->u.vector.elem);
+    }
 }
 
 /* Infer TY_PARAM bindings by matching formal parameter types to actual types.
@@ -5987,7 +6049,7 @@ static bool cg_emit_field_maybe_inline(CgCtx *ctx,
             const AstNode*_dd=ctx->file_ast->u.file.decls.data[_ii];
             if(_dd==_td) { _b=!_p; } if(_dd==parent_sd) { _p=true; } }
           if(!_b) break; }
-        const char *ikw = _td->u.struct_def.is_union ? "union" : "struct";
+        const char *ikw = struct_kw(_td);
         cg_printf(ctx, "%s %s {\n", ikw, tname);
         cg_emit_struct_fields(ctx, _td, "        ", false);
         cg_printf(ctx, "    }");
@@ -6079,11 +6141,11 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
         /* Determine struct vs union by looking up the registered tag. */
         const char *kw = "struct";
         if (target->kind == AST_STRUCT_DEF)
-            kw = target->u.struct_def.is_union ? "union" : "struct";
+            kw = struct_kw(target);
         if (ctx->file_scope) {
             Symbol *tag = scope_lookup_struct_tag(ctx->file_scope, alias);
             if (tag && tag->decl && tag->decl->kind == AST_STRUCT_DEF) {
-                kw = tag->decl->u.struct_def.is_union ? "union" : "struct";
+                kw = struct_kw(tag->decl);
                 if (tag->decl->u.struct_def.generic_params.len > 0)
                     return; /* generic template -- only specializations are emitted */
             }
@@ -6125,13 +6187,13 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
     if (target->kind == AST_STRUCT_DEF) {
         /* typedef struct [Tag] { ... } Alias; */
         if (target->u.struct_def.generic_params.len > 0) return; /* generic template */
-        const char *kw   = target->u.struct_def.is_union ? "union" : "struct";
+        const char *kw   = struct_kw(target);
         const char *sname = target->u.struct_def.name;
         /* Look up actual is_union from scope (R8 forward stub fix) */
         if (sname && ctx->file_scope) {
             Symbol *tag = scope_lookup_struct_tag(ctx->file_scope, sname);
             if (tag && tag->decl && tag->decl->kind == AST_STRUCT_DEF)
-                kw = tag->decl->u.struct_def.is_union ? "union" : "struct";
+                kw = struct_kw(tag->decl);
         }
         bool has_body = (target->u.struct_def.fields.len > 0 ||
                          target->u.struct_def.methods.len > 0);
@@ -6226,7 +6288,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
             const char *anon_name = tgt_anon_base->u.type_name.name;
             const AstNode *anon_sd = cg_find_struct_def(ctx, anon_name);
             if (anon_sd) {
-                const char *kw = anon_sd->u.struct_def.is_union ? "union" : "struct";
+                const char *kw = struct_kw(anon_sd);
                 if (anon_sd->u.struct_def.fields.len > 0) {
                     cg_printf(ctx, "typedef %s {\n", kw);
                     cg_emit_struct_fields(ctx, anon_sd, "    ", true);
@@ -6251,7 +6313,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
             const char *anon_name = target->u.type_name.name;
             const AstNode *anon_sd = cg_find_struct_def(ctx, anon_name);
             if (anon_sd) {
-                const char *kw = anon_sd->u.struct_def.is_union ? "union" : "struct";
+                const char *kw = struct_kw(anon_sd);
                 if (anon_sd->u.struct_def.fields.len > 0) {
                     cg_printf(ctx, "typedef %s {\n", kw);
                     cg_emit_struct_fields(ctx, anon_sd, "    ", true);
@@ -6416,7 +6478,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                         }
                     }
                     if (body_sd2) {
-                        const char *kw2 = body_sd2->u.struct_def.is_union ? "union" : "struct";
+                        const char *kw2 = struct_kw(body_sd2);
                         cg_printf(ctx, "typedef %s %s {\n", kw2, tname);
                         cg_emit_struct_fields(ctx, body_sd2, "    ", false);
                         if (post_attr || body_sd2->u.struct_def.tail_attrs)
@@ -6701,7 +6763,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
             const char *anon_nm = vty_inner->u.type_name.name;
             const AstNode *inner_sd = cg_find_struct_def(ctx, anon_nm);
             if (inner_sd && inner_sd->u.struct_def.fields.len > 0) {
-                const char *kw = inner_sd->u.struct_def.is_union ? "union" : "struct";
+                const char *kw = struct_kw(inner_sd);
                 if (vty_is_const) cg_puts(ctx, "const ");
                 if (vty_is_volatile) cg_puts(ctx, "volatile ");
                 cg_printf(ctx, "%s {\n", kw);
@@ -6766,7 +6828,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
             if (iv_sd && iv_sd->u.struct_def.fields.len > 0 &&
                 var_idx != SIZE_MAX && iv_sd_idx != SIZE_MAX &&
                 var_idx > iv_sd_idx && var_idx - iv_sd_idx <= 2) {
-                const char *kw = iv_sd->u.struct_def.is_union ? "union" : "struct";
+                const char *kw = struct_kw(iv_sd);
                 /* Emit const/volatile qualifiers that were
                  * stripped during type unwrapping.  Without this, `static const
                  * struct NanInfName { } aNanInfName[]` loses `const`. */
@@ -7100,23 +7162,6 @@ static void collect_struct_names(const AstNode *file,
     *n_out = n;
 }
 
-/* Return true if file.decls contains an explicit user typedef for the
- * given struct name (e.g. `typedef struct X { ... } X;`). */
-static bool _struct_has_typedef(const AstNode *file, const char *name) {
-    for (size_t i = 0; i < file->u.file.decls.len; i++) {
-        const AstNode *d = file->u.file.decls.data[i];
-        if (d && d->kind == AST_TYPEDEF_DECL &&
-            d->u.typedef_decl.alias &&
-            strcmp(d->u.typedef_decl.alias, name) == 0 &&
-            d->u.typedef_decl.target &&
-            d->u.typedef_decl.target->kind == AST_TYPE_NAME &&
-            d->u.typedef_decl.target->u.type_name.name &&
-            strcmp(d->u.typedef_decl.target->u.type_name.name, name) == 0)
-            return true;
-    }
-    return false;
-}
-
 /* Return true if the type AST node references a struct/union name. */
 static bool type_refs_struct(const AstNode *ty, const char *name) {
     if (!ty) return false;
@@ -7377,7 +7422,7 @@ static void cg_emit_decl_sharp(CgCtx *ctx, AstNode *d) {
         if (d->u.struct_def.is_nested_in_struct &&
             d->u.struct_def.name &&
             strncmp(d->u.struct_def.name, "__anon_", 7) == 0) return;
-        const char *kw = d->u.struct_def.is_union ? "union" : "struct";
+        const char *kw = struct_kw(d);
         const char *nm = d->u.struct_def.name;
         const char *enm = nm;
         bool has_body = d->u.struct_def.has_body ||
@@ -7589,24 +7634,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                 already_emitted = true;
         }
         if (needs_fwd && !already_emitted) {
-            const char *enm = name;
-            /* Determine struct vs union */
-            const char *kw = "struct";
-            bool is_class = false;
-            if (ctx->file_scope) {
-                Symbol *sym = scope_lookup_struct_tag(ctx->file_scope, name);
-                if (sym && sym->decl && sym->decl->kind == AST_STRUCT_DEF) {
-                    if (sym->decl->u.struct_def.is_union) kw = "union";
-                    if (sym->decl->u.struct_def.is_class) is_class = true;
-                }
-            }
-            /* class gets an auto typedef; explicit typedef or plain struct gets struct X; */
-            bool has_typedef = _struct_has_typedef(file, name) || is_class;
-            if (has_typedef) {
-                cg_printf(ctx, "typedef %s %s %s;\n", kw, enm, enm);
-            } else {
-                cg_printf(ctx, "%s %s;\n", kw, enm);
-            }
+            cg_emit_struct_fwd_decl(ctx, name);
             fwd_decl_emitted[si] = true;
         }
     }
@@ -7774,15 +7802,6 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                     if (par && par->u.param_decl.type)
                         _CHECK_TYPE_TD(par->u.param_decl.type, fpos);
                 }
-                /* Helper lambda: emit fwd decl if not already emitted */
-                #define _EMIT_FWD(name_kw_expr) do { \
-                    const char *_e = (name_kw_expr).enm; \
-                    const char *_k = (name_kw_expr).kw; \
-                    bool _ht = (name_kw_expr).has_typedef; \
-                    if (_ht) cg_printf(ctx, "typedef %s %s %s;\n", _k, _e, _e); \
-                    else cg_printf(ctx, "%s %s;\n", _k, _e); \
-                    fwd_decl_emitted[(name_kw_expr).si] = true; \
-                } while(0)
                 /* Check return type */
                 if (fn->u.func_def.ret_type) {
                     for (size_t si = 0; si < ndefined; si++) {
@@ -7792,22 +7811,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                                 if (fwd_decl_emitted[_ei] && defined[_ei] && strcmp(defined[_ei], defined[si]) == 0)
                                     { already_e = true; break; }
                             if (!already_e) {
-                                const char *enm = defined[si];
-                                const char *kw = "struct";
-                                if (ctx->file_scope) {
-                                    Symbol *sym = scope_lookup_struct_tag(ctx->file_scope, defined[si]);
-                                    if (sym && sym->decl && sym->decl->kind == AST_STRUCT_DEF &&
-                                        sym->decl->u.struct_def.is_union) kw = "union";
-                                }
-                                bool _is_cls = false;
-                                if (ctx->file_scope) {
-                                    Symbol *_s = scope_lookup_struct_tag(ctx->file_scope, defined[si]);
-                                    if (_s && _s->decl && _s->decl->kind == AST_STRUCT_DEF)
-                                        _is_cls = _s->decl->u.struct_def.is_class;
-                                }
-                                bool has_typedef = _struct_has_typedef(file, defined[si]) || _is_cls;
-                                if (has_typedef) cg_printf(ctx, "typedef %s %s %s;\n", kw, enm, enm);
-                                else cg_printf(ctx, "%s %s;\n", kw, enm);
+                                cg_emit_struct_fwd_decl(ctx, defined[si]);
                                 fwd_decl_emitted[si] = true;
                             }
                         }
@@ -7824,29 +7828,13 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
                                     if (fwd_decl_emitted[_ei] && defined[_ei] && strcmp(defined[_ei], defined[si]) == 0)
                                         { already_e = true; break; }
                                 if (!already_e) {
-                                    const char *enm = defined[si];
-                                    const char *kw = "struct";
-                                    if (ctx->file_scope) {
-                                        Symbol *sym = scope_lookup_struct_tag(ctx->file_scope, defined[si]);
-                                        if (sym && sym->decl && sym->decl->kind == AST_STRUCT_DEF &&
-                                            sym->decl->u.struct_def.is_union) kw = "union";
-                                    }
-                                    bool _is_cls2 = false;
-                                    if (ctx->file_scope) {
-                                        Symbol *_s2 = scope_lookup_struct_tag(ctx->file_scope, defined[si]);
-                                        if (_s2 && _s2->decl && _s2->decl->kind == AST_STRUCT_DEF)
-                                            _is_cls2 = _s2->decl->u.struct_def.is_class;
-                                    }
-                                    bool has_typedef = _struct_has_typedef(file, defined[si]) || _is_cls2;
-                                    if (has_typedef) cg_printf(ctx, "typedef %s %s %s;\n", kw, enm, enm);
-                                    else cg_printf(ctx, "%s %s;\n", kw, enm);
+                                    cg_emit_struct_fwd_decl(ctx, defined[si]);
                                     fwd_decl_emitted[si] = true;
                                 }
                             }
                         }
                     }
                 }
-                #undef _EMIT_FWD
                 #undef _CHECK_TYPE_TD
                 #undef _EMIT_TD_FWD
                 cg_func_decl(ctx, fns[fi].fn, fns[fi].sname);
@@ -8072,7 +8060,7 @@ static void cg_file(CgCtx *ctx, const AstNode *file) {
              * non-generic structs may reference specialised types. */
             const char *sname = uw->u.struct_def.name;
             const char *enm = sname;
-            const char *kw = uw->u.struct_def.is_union ? "union" : "struct";
+            const char *kw = struct_kw(uw);
             /* class: emit typedef first so bare name works */
             if (uw->u.struct_def.is_class && uw->u.struct_def.has_body && enm) {
                 cg_printf(ctx, "typedef %s %s %s;\n", kw, enm, enm);

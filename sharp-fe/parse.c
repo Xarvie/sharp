@@ -437,6 +437,7 @@ static int collect_balanced_call_body(PS *ps, char *buf, int buf_size) {
         } else if (tk.kind == STOK_RPAREN) {
             if (depth == 0) {
                 blen += snprintf(buf + blen, buf_size - blen, ")");
+                if (blen >= buf_size) blen = buf_size - 1;
                 ps_advance(ps);
                 break;
             }
@@ -922,6 +923,7 @@ static AstNode *parse_type(PS *ps) {
             /* Collect everything from '(' to matching ')' verbatim */
             char buf[256]; int blen = 0;
             blen += snprintf(buf + blen, sizeof buf - blen, "__typeof__(");
+            if (blen >= (int)sizeof buf) blen = (int)sizeof buf - 1;
             ps_advance(ps);  /* eat '(' */
             int depth = 0;
             while (!ps_at(ps, STOK_EOF)) {
@@ -1783,6 +1785,7 @@ static bool tspec_try_consume(PS *ps, TSpec *ts) {
         char buf[256]; int blen = 0;
         SharpTok saved_toks[256]; int ntoks = 0;
         blen += snprintf(buf + blen, sizeof buf - blen, "__typeof__(");
+        if (blen >= (int)sizeof buf) blen = (int)sizeof buf - 1;
         if (ps_at(ps, STOK_LPAREN)) {
             ps_advance(ps);
             int depth = 0;

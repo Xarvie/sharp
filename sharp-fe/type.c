@@ -1171,6 +1171,7 @@ void ty_mangle(StrBuf *sb, const Type *t) {
     case TY_LONGDOUBLE:sb_push_cstr(sb, "ldouble"); break;
     case TY_PTR:    sb_push_ch(sb, 'P'); ty_mangle(sb, t->u.ptr.base);    break;
     case TY_CONST:  sb_push_ch(sb, 'c'); ty_mangle(sb, t->u.const_.base); break;
+    case TY_ATOMIC: sb_push_ch(sb, 'a'); ty_mangle(sb, t->u.atomic.base); break;
     case TY_ARRAY:  ty_mangle(sb, t->u.array.base); sb_push_ch(sb, 'a');  break;
     case TY_FUNC:   sb_push_ch(sb, 'F'); ty_mangle(sb, t->u.func.ret);    break;
     case TY_STRUCT:
@@ -1218,6 +1219,8 @@ Type *ty_subst(TyStore *ts, Type *t,
         return ty_ptr(ts, ty_subst(ts, t->u.ptr.base, pnames, pvals, np));
     case TY_CONST:
         return ty_const(ts, ty_subst(ts, t->u.const_.base, pnames, pvals, np));
+    case TY_ATOMIC:
+        return ty_atomic(ts, ty_subst(ts, t->u.atomic.base, pnames, pvals, np));
     case TY_ARRAY:
         return ty_array(ts, ty_subst(ts, t->u.array.base, pnames, pvals, np),
                         t->u.array.size);
@@ -1239,6 +1242,25 @@ Type *ty_subst(TyStore *ts, Type *t,
         return ty_vector_type(ts,
             ty_subst(ts, t->u.vector.elem, pnames, pvals, np),
             t->u.vector.count, t->u.vector.name);
+    case TY_FUNC: {
+        Type *ret = ty_subst(ts, t->u.func.ret, pnames, pvals, np);
+        bool changed = (ret != t->u.func.ret);
+        Type **params = NULL;
+        if (t->u.func.nparams > 0) {
+            params = malloc(t->u.func.nparams * sizeof *params);
+            if (!params) abort();
+            for (size_t i = 0; i < t->u.func.nparams; i++) {
+                params[i] = ty_subst(ts, t->u.func.params[i], pnames, pvals, np);
+                if (params[i] != t->u.func.params[i]) changed = true;
+            }
+        }
+        if (!changed) { free(params); return t; }
+        Type *r = ty_func(ts, ret, params, t->u.func.nparams);
+        r->u.func.is_vararg = t->u.func.is_vararg;
+        r->u.func.params_unspecified = t->u.func.params_unspecified;
+        free(params);
+        return r;
+    }
     default: return t;
     }
 }

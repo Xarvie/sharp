@@ -2366,11 +2366,20 @@ static bool ty_contains_param(const Type *t) {
     case TY_PARAM:  return true;
     case TY_PTR:    return ty_contains_param(t->u.ptr.base);
     case TY_CONST:  return ty_contains_param(t->u.const_.base);
+    case TY_ATOMIC: return ty_contains_param(t->u.atomic.base);
     case TY_ARRAY:  return ty_contains_param(t->u.array.base);
+    case TY_FUNC: {
+        if (ty_contains_param(t->u.func.ret)) return true;
+        for (size_t i = 0; i < t->u.func.nparams; i++)
+            if (ty_contains_param(t->u.func.params[i])) return true;
+        return false;
+    }
     case TY_STRUCT:
         for (size_t i = 0; i < t->u.struct_.nargs; i++)
             if (ty_contains_param(t->u.struct_.args[i])) return true;
         return false;
+    case TY_ENUM:   return false;
+    case TY_VECTOR: return ty_contains_param(t->u.vector.elem);
     default:        return false;
     }
 }
