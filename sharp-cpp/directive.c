@@ -37,6 +37,8 @@
 
 /* Forward declaration */
 static void fix_token_ptrs(CppState *st, const char *old_buf);
+static PPTok make_file_tok(CppState *st, CppLoc loc);
+static PPTok make_counter_tok(CppState *st, CppLoc loc);
 
 
 /* =========================================================================
@@ -1148,21 +1150,8 @@ static void handle_if(CppState *st, TokList *line, CppLoc loc) {
             pptok_free(&n->tok);
             n->tok = lt;
         } else if (strcmp(sp, "__FILE__") == 0) {
-            const char *fname = loc.file ? loc.file : "";
-            char fbuf[1024];
-            size_t pos = 0;
-            fbuf[pos++] = '"';
-            for (const char *s = fname; *s && pos < sizeof(fbuf)-3; s++) {
-                if (*s == '\\' || *s == '"') fbuf[pos++] = '\\';
-                fbuf[pos++] = *s;
-            }
-            fbuf[pos++] = '"';
-            fbuf[pos] = '\0';
-            PPTok ft = {0};
-            ft.kind = CPPT_STRING_LIT;
-            ft.loc  = n->tok.loc;
+            PPTok ft = make_file_tok(st, loc);
             ft.leading_ws = n->tok.leading_ws;
-            sb_push_cstr(&ft.spell, fbuf);
             pptok_free(&n->tok);
             n->tok = ft;
         }
@@ -1669,6 +1658,16 @@ static PPTok make_line_tok(CppState *st, CppLoc loc) {
     return t;
 }
 
+static PPTok make_counter_tok(CppState *st, CppLoc loc) {
+    PPTok t = {0};
+    t.kind = CPPT_PP_NUMBER;
+    t.loc  = loc;
+    char buf[32];
+    snprintf(buf, sizeof buf, "%d", st->counter++);
+    sb_push_cstr(&t.spell, buf);
+    return t;
+}
+
 static PPTok make_timestamp_tok(CppState *st, CppLoc loc) {
     PPTok t = {0};
     t.kind = CPPT_STRING_LIT;
@@ -1766,19 +1765,38 @@ static void emit_post_expansion_tok(CppState *st, const PPTok *t, CppLoc inv_loc
             return;
         }
         if (strcmp(name, "__COUNTER__") == 0) {
-            char cbuf[32];
-            snprintf(cbuf, sizeof cbuf, "%d", st->counter++);
-            PPTok ct = {0};
-            ct.kind = CPPT_PP_NUMBER;
-            ct.loc  = inv_loc;
+            PPTok ct = make_counter_tok(st, inv_loc);
             ct.leading_ws = t->leading_ws;
-            sb_push_cstr(&ct.spell, cbuf);
             emit_tok_text(st, &ct);
             pptok_free(&ct);
             return;
         }
     }
     emit_tok_text(st, t);
+}
+
+static bool suppress_pragma_line(CppState *st) {
+    size_t len = st->out_text.len;
+    const char *buf = st->out_text.buf;
+    while (len > 0 && buf[len-1] == '\n') len--;
+    while (len > 0 && buf[len-1] == ' ') len--;
+    const char *pb = NULL;
+    if (len > 9) {
+        for (size_t i = len - 1; i >= 9; i--) {
+            if (buf[i] == ' ') { pb = buf + i + 1; break; }
+        }
+    }
+    if (!pb) return false;
+    if ((strncmp(pb, "region", 6) == 0 && (pb[6] == '\0' || pb[6] == ' ')) ||
+        (strncmp(pb, "endregion", 9) == 0 && (pb[9] == '\0' || pb[9] == ' ')) ||
+        (strncmp(pb, "push_macro", 10) == 0 && (pb[10] == '\0' || pb[10] == ' ' || pb[10] == '(')) ||
+        (strncmp(pb, "pop_macro", 9) == 0 && (pb[9] == '\0' || pb[9] == ' ' || pb[9] == '('))) {
+        size_t bp = (size_t)(pb - buf) - strlen("#pragma ");
+        while (bp > 0 && buf[bp-1] != '\n') bp--;
+        st->out_text.len = bp;
+        return true;
+    }
+    return false;
 }
 
 /* Phase R16: emit a TokList of expanded tokens, converting any
@@ -1852,29 +1870,7 @@ static void emit_expanded_list(CppState *st, TokList *tl, CppLoc inv_loc,
                 st->out_newlines++;
             }
             /* Suppress region/endregion/push_macro/pop_macro (clang code-folding) */
-            {
-                size_t len = st->out_text.len;
-                while (len > 0 && st->out_text.buf[len-1] == '\n') len--;
-                while (len > 0 && st->out_text.buf[len-1] == ' ') len--;
-                const char *start = st->out_text.buf;
-                const char *pb = NULL;
-                if (len > 9) {
-                    for (size_t i = len - 1; i >= 9; i--) {
-                        if (start[i] == ' ') { pb = start + i + 1; break; }
-                    }
-                }
-                if (pb) {
-                    if ((strncmp(pb, "region", 6) == 0 && (pb[6] == '\0' || pb[6] == ' ')) ||
-                        (strncmp(pb, "endregion", 9) == 0 && (pb[9] == '\0' || pb[9] == ' ')) ||
-                        (strncmp(pb, "push_macro", 10) == 0 && (pb[10] == '\0' || pb[10] == ' ' || pb[10] == '(')) ||
-                        (strncmp(pb, "pop_macro", 9) == 0 && (pb[9] == '\0' || pb[9] == ' ' || pb[9] == '('))) {
-                        size_t bp = (size_t)(pb - start) - 9;
-                        while (bp > 0 && start[bp-1] != '\n') bp--;
-                        st->out_text.len = bp;
-                        continue;
-                    }
-                }
-            }
+            suppress_pragma_line(st);
             continue;
         passthrough2:;
         }
@@ -2178,13 +2174,8 @@ static void process_buf(CppState *st, CppReader *rd) {
                 continue;
             }
             if (strcmp(name, "__COUNTER__") == 0) {
-                char cbuf[32];
-                snprintf(cbuf, sizeof cbuf, "%d", st->counter++);
-                PPTok ct = {0};
-                ct.kind = CPPT_PP_NUMBER;
-                ct.loc  = t.loc;
+                PPTok ct = make_counter_tok(st, t.loc);
                 ct.leading_ws = t.leading_ws;
-                sb_push_cstr(&ct.spell, cbuf);
                 pptok_free(&t);
                 emit_tok_text(st, &ct);
                 pptok_free(&ct);
@@ -2335,41 +2326,7 @@ static void process_buf(CppState *st, CppReader *rd) {
                     if (in_live_branch(st)) {
                         PUSH_CH(st, '\n');
                         st->out_newlines++;
-                        /* Suppress region/endregion/push_macro/pop_macro */
-                        {
-                            size_t len = st->out_text.len;
-                            const char *buf = st->out_text.buf;
-                            while (len > 0 && buf[len-1] == '\n') len--;
-                            while (len > 0 && buf[len-1] == ' ') len--;
-                            if (len >= 6 && strncmp(buf + len - 6, "region", 6) == 0) {
-                                size_t bp = len - 6;
-                                while (bp > 0 && buf[bp-1] != '\n') bp--;
-                                st->out_text.len = bp;
-                                pptok_free(&t);
-                                continue;
-                            }
-                            if (len >= 9 && strncmp(buf + len - 9, "endregion", 9) == 0) {
-                                size_t bp = len - 9;
-                                while (bp > 0 && buf[bp-1] != '\n') bp--;
-                                st->out_text.len = bp;
-                                pptok_free(&t);
-                                continue;
-                            }
-                            if (len >= 10 && strncmp(buf + len - 10, "push_macro", 10) == 0) {
-                                size_t bp = len - 10;
-                                while (bp > 0 && buf[bp-1] != '\n') bp--;
-                                st->out_text.len = bp;
-                                pptok_free(&t);
-                                continue;
-                            }
-                            if (len >= 9 && strncmp(buf + len - 9, "pop_macro", 9) == 0) {
-                                size_t bp = len - 9;
-                                while (bp > 0 && buf[bp-1] != '\n') bp--;
-                                st->out_text.len = bp;
-                                pptok_free(&t);
-                                continue;
-                            }
-                        }
+                        suppress_pragma_line(st);
                     }
                     pptok_free(&t);
                 } else {

@@ -2588,6 +2588,56 @@ static void parse_param_list(PS *ps, AstVec *params) {
     ps_expect(ps, STOK_RPAREN, "parameter list ')'");
 }
 
+static bool is_kr_param_list(const AstVec *params) {
+    bool all_bare = params->len > 0;
+    for (size_t pi = 0; pi < params->len && all_bare; pi++) {
+        AstNode *p = params->data[pi];
+        if (!p || p->kind != AST_PARAM_DECL) { all_bare = false; break; }
+        if (p->u.param_decl.is_vararg) continue;
+        if (p->u.param_decl.name != NULL) { all_bare = false; break; }
+        if (!p->u.param_decl.type ||
+            p->u.param_decl.type->kind != AST_TYPE_NAME) { all_bare = false; break; }
+        const char *tname = p->u.param_decl.type->u.type_name.name;
+        if (!tname) { all_bare = false; break; }
+        static const char * const prims[] = {
+            "int","char","short","long","float","double","void","unsigned",
+            "signed","_Bool","__int128", NULL };
+        for (int ki = 0; prims[ki]; ki++) {
+            if (strcmp(tname, prims[ki]) == 0) { all_bare = false; break; }
+        }
+    }
+    return all_bare;
+}
+
+static void consume_kr_declarations(PS *ps, AstVec *params) {
+    while (!ps_at(ps, STOK_LBRACE) && !ps_at(ps, STOK_SEMI) && !ps_at(ps, STOK_EOF)) {
+        DeclSpecs kds = parse_decl_specifiers(ps);
+        if (kds.empty) break;
+        do {
+            char *pname = NULL;
+            AstNode *pty = parse_declarator(ps, ast_clone_type(kds.base_ty), &pname);
+            if (pname) {
+                for (size_t pi = 0; pi < params->len; pi++) {
+                    AstNode *p = params->data[pi];
+                    if (!p || p->kind != AST_PARAM_DECL) continue;
+                    const char *kr_name = p->u.param_decl.type &&
+                        p->u.param_decl.type->kind == AST_TYPE_NAME
+                        ? p->u.param_decl.type->u.type_name.name : NULL;
+                    if (kr_name && strcmp(kr_name, pname) == 0) {
+                        ast_node_free(p->u.param_decl.type);
+                        p->u.param_decl.type = pty;
+                        p->u.param_decl.name = cpp_xstrdup(pname);
+                        pty = NULL; break;
+                    }
+                }
+                free(pname);
+            }
+            if (pty) ast_node_free(pty);
+        } while (ps_match(ps, STOK_COMMA));
+        ps_match(ps, STOK_SEMI);
+        ast_node_free(kds.base_ty);
+    }
+}
 
 /* =========================================================================
  * Function definition body (after name + generic params + param list)
@@ -2617,71 +2667,8 @@ static AstNode *finish_func(PS *ps, AstNode *ret_type,
      * In K&R form, each param in (a, b) is parsed as type=TYPE_NAME{"a"} with
      * name=NULL (the identifier was consumed as the "type specifier").
      * Form: `int add(a, b) int a; int b; { ... }` */
-    bool maybe_kr = fn->u.func_def.params.len > 0 &&
-                    !ps_at(ps, STOK_LBRACE) && !ps_at(ps, STOK_SEMI) &&
-                    !ps_at(ps, STOK_EOF);
-    if (maybe_kr) {
-        /* K&R params: name==NULL, type is TYPE_NAME with a non-primitive name.
-         * Check ALL params match this pattern. */
-        bool all_bare = true;
-        for (size_t pi = 0; pi < fn->u.func_def.params.len && all_bare; pi++) {
-            AstNode *p = fn->u.func_def.params.data[pi];
-            if (!p || p->kind != AST_PARAM_DECL) { all_bare = false; break; }
-            if (p->u.param_decl.is_vararg) continue;
-            /* K&R bare param: name==NULL, type is TYPE_NAME whose name
-             * looks like a plain identifier (not a C keyword). */
-            if (p->u.param_decl.name != NULL) { all_bare = false; break; }
-            if (!p->u.param_decl.type ||
-                p->u.param_decl.type->kind != AST_TYPE_NAME) { all_bare = false; break; }
-            const char *tname = p->u.param_decl.type->u.type_name.name;
-            if (!tname) { all_bare = false; break; }
-            /* Reject if it's a C primitive keyword (int, char, etc.) */
-            static const char * const prims[] = {
-                "int","char","short","long","float","double","void","unsigned",
-                "signed","_Bool","__int128", NULL };
-            for (int ki = 0; prims[ki]; ki++) {
-                if (strcmp(tname, prims[ki]) == 0) { all_bare = false; break; }
-            }
-        }
-        if (all_bare) {
-            /* Build a map from K&R param name → index for type assignment.
-             * For each K&R param, the "type name" is actually the param name. */
-            /* Consume K&R parameter type declarations until '{' */
-            while (!ps_at(ps, STOK_LBRACE) && !ps_at(ps, STOK_SEMI) &&
-                   !ps_at(ps, STOK_EOF)) {
-                DeclSpecs kds = parse_decl_specifiers(ps);
-                if (kds.empty) break;
-                /* Parse one or more declarators sharing this base type */
-                do {
-                    char *pname = NULL;
-                    AstNode *pty = parse_declarator(ps, ast_clone_type(kds.base_ty), &pname);
-                    /* Find and update the matching parameter (matched by the
-                     * K&R param's type name == the declared variable name) */
-                    if (pname) {
-                        for (size_t pi = 0; pi < fn->u.func_def.params.len; pi++) {
-                            AstNode *p = fn->u.func_def.params.data[pi];
-                            if (!p || p->kind != AST_PARAM_DECL) continue;
-                            const char *kr_name = p->u.param_decl.type &&
-                                p->u.param_decl.type->kind == AST_TYPE_NAME
-                                ? p->u.param_decl.type->u.type_name.name : NULL;
-                            if (kr_name && strcmp(kr_name, pname) == 0) {
-                                /* Replace the placeholder type with the real type
-                                 * and set the actual parameter name. */
-                                ast_node_free(p->u.param_decl.type);
-                                p->u.param_decl.type = pty;
-                                p->u.param_decl.name = cpp_xstrdup(pname);
-                                pty = NULL;
-                                break;
-                            }
-                        }
-                        free(pname);
-                    }
-                    if (pty) ast_node_free(pty);
-                } while (ps_match(ps, STOK_COMMA));
-                ps_match(ps, STOK_SEMI);
-                ast_node_free(kds.base_ty);
-            }
-        }
+    if (is_kr_param_list(&fn->u.func_def.params)) {
+        consume_kr_declarations(ps, &fn->u.func_def.params);
     }
 
     /* body or ';' for forward decl */
@@ -4194,50 +4181,9 @@ static AstNode *parse_top_decl(PS *ps) {
         ds.storage != SC_TYPEDEF &&
         !ps_at(ps, STOK_LBRACE) && !ps_at(ps, STOK_SEMI) &&
         !ps_at(ps, STOK_CONST) && !ps_at(ps, STOK_EOF)) {
-        /* Heuristic: if ALL params have no name (name==NULL) and TYPE_NAME type
-         * (parsed as bare identifier = param name), it's K&R style. */
         AstNode *fn_ty = full_ty;
-        bool all_bare = fn_ty->u.type_func.params.len > 0;
-        for (size_t pi = 0; pi < fn_ty->u.type_func.params.len && all_bare; pi++) {
-            AstNode *p = fn_ty->u.type_func.params.data[pi];
-            if (!p || p->kind != AST_PARAM_DECL) { all_bare = false; break; }
-            if (p->u.param_decl.is_vararg) continue;
-            if (p->u.param_decl.name != NULL) { all_bare = false; break; }
-            if (!p->u.param_decl.type ||
-                p->u.param_decl.type->kind != AST_TYPE_NAME)
-                { all_bare = false; break; }
-        }
-        if (all_bare) {
-            /* Consume K&R parameter type declarations */
-            while (!ps_at(ps, STOK_LBRACE) && !ps_at(ps, STOK_SEMI) &&
-                   !ps_at(ps, STOK_EOF)) {
-                DeclSpecs kds = parse_decl_specifiers(ps);
-                if (kds.empty) break;
-                do {
-                    char *pname = NULL;
-                    AstNode *pty = parse_declarator(ps, ast_clone_type(kds.base_ty), &pname);
-                    if (pname) {
-                        /* Find matching K&R param (type name == this pname) */
-                        for (size_t pi = 0; pi < fn_ty->u.type_func.params.len; pi++) {
-                            AstNode *p = fn_ty->u.type_func.params.data[pi];
-                            if (!p || p->kind != AST_PARAM_DECL) continue;
-                            const char *kr_nm = p->u.param_decl.type &&
-                                p->u.param_decl.type->kind == AST_TYPE_NAME
-                                ? p->u.param_decl.type->u.type_name.name : NULL;
-                            if (kr_nm && strcmp(kr_nm, pname) == 0) {
-                                ast_node_free(p->u.param_decl.type);
-                                p->u.param_decl.type = pty;
-                                p->u.param_decl.name = cpp_xstrdup(pname);
-                                pty = NULL; break;
-                            }
-                        }
-                        free(pname);
-                    }
-                    if (pty) ast_node_free(pty);
-                } while (ps_match(ps, STOK_COMMA));
-                ps_match(ps, STOK_SEMI);
-                ast_node_free(kds.base_ty);
-            }
+        if (is_kr_param_list(&fn_ty->u.type_func.params)) {
+            consume_kr_declarations(ps, &fn_ty->u.type_func.params);
             is_kr_func = true;
         }
     }

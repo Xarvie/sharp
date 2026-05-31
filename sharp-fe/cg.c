@@ -317,6 +317,48 @@ static const AstNode *cg_find_struct_def(const CgCtx *ctx, const char *name) {
     return NULL;
 }
 
+static const AstNode *cg_find_inline_struct_def(const CgCtx *ctx, const char *name) {
+    if (!name) return NULL;
+    if (ctx->local_block_stmts) {
+        for (size_t k = 0; k < ctx->local_block_stmts->len; k++) {
+            const AstNode *d = ctx->local_block_stmts->data[k];
+            if (d && d->kind == AST_STRUCT_DEF &&
+                (d->u.struct_def.from_inline_var ||
+                 (d->u.struct_def.name && strncmp(d->u.struct_def.name, "__anon_", 7) == 0)) &&
+                d->u.struct_def.name && strcmp(d->u.struct_def.name, name) == 0)
+                return d;
+        }
+    }
+    if (ctx->file_ast) {
+        for (size_t k = 0; k < ctx->file_ast->u.file.decls.len; k++) {
+            const AstNode *d = ctx->file_ast->u.file.decls.data[k];
+            if (d && d->kind == AST_STRUCT_DEF &&
+                (d->u.struct_def.from_inline_var ||
+                 (d->u.struct_def.name && strncmp(d->u.struct_def.name, "__anon_", 7) == 0)) &&
+                d->u.struct_def.name && strcmp(d->u.struct_def.name, name) == 0)
+                return d;
+        }
+    }
+    return NULL;
+}
+
+static void cg_emit_typedef_close(CgCtx *ctx, const char *cname,
+                                    const char *tail_attrs,
+                                    const char *gcc_attrs) {
+    if (gcc_attrs && tail_attrs)
+        cg_printf(ctx, "} %s %s %s;\n", tail_attrs, cname, gcc_attrs);
+    else if (tail_attrs)
+        cg_printf(ctx, "} %s %s;\n", tail_attrs, cname);
+    else if (gcc_attrs)
+        cg_printf(ctx, "} %s %s;\n", cname, gcc_attrs);
+    else
+        cg_printf(ctx, "} %s;\n", cname);
+}
+
+static inline bool field_is_comma_cont(const AstNode *n) {
+    return n && n->kind == AST_FIELD_DECL && n->u.field_decl.is_comma_cont;
+}
+
 static void cg_printf(CgCtx *ctx, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -1694,8 +1736,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                 cg_printf(ctx, "%s {\n", kw);
                 for (size_t j = 0; j < inner_sd->u.struct_def.fields.len; j++) {
                     const AstNode *fj = inner_sd->u.struct_def.fields.data[j];
-                    if (fj && fj->kind == AST_FIELD_DECL &&
-                        fj->u.field_decl.is_comma_cont) continue;
+                    if (field_is_comma_cont(fj)) continue;
                     cg_puts(ctx, "    ");
                     cg_emit_field_group(ctx, &inner_sd->u.struct_def.fields, j);
                 }
@@ -1761,8 +1802,7 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
                     cg_printf(ctx, "%s %s {\n", kw, inner_name);
                     for (size_t j = 0; j < inner_sd->u.struct_def.fields.len; j++) {
                         const AstNode *fj = inner_sd->u.struct_def.fields.data[j];
-                        if (fj && fj->kind == AST_FIELD_DECL &&
-                            fj->u.field_decl.is_comma_cont) continue;
+                        if (field_is_comma_cont(fj)) continue;
                         cg_puts(ctx, "    ");
                         cg_emit_field_group(ctx, &inner_sd->u.struct_def.fields, j);
                     }
@@ -3459,29 +3499,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
             }
             if (vty && vty->kind == AST_TYPE_NAME && vty->u.type_name.name) {
                 const char *vnm = vty->u.type_name.name;
-                const AstNode *vsd = NULL;
-                for (size_t _k = 0; _k < ctx->local_block_stmts->len; _k++) {
-                    const AstNode *_dd = ctx->local_block_stmts->data[_k];
-                    if (_dd && _dd->kind == AST_STRUCT_DEF &&
-                        (_dd->u.struct_def.from_inline_var ||
-                         strncmp(_dd->u.struct_def.name ? _dd->u.struct_def.name : "", "__anon_", 7) == 0) &&
-                        _dd->u.struct_def.name &&
-                        strcmp(_dd->u.struct_def.name, vnm) == 0) {
-                        vsd = _dd; break;
-                    }
-                }
-                if (!vsd && ctx->file_ast) {
-                    for (size_t _k = 0; _k < ctx->file_ast->u.file.decls.len; _k++) {
-                        const AstNode *_dd = ctx->file_ast->u.file.decls.data[_k];
-                        if (_dd && _dd->kind == AST_STRUCT_DEF &&
-                            (_dd->u.struct_def.from_inline_var ||
-                             strncmp(_dd->u.struct_def.name ? _dd->u.struct_def.name : "", "__anon_", 7) == 0) &&
-                            _dd->u.struct_def.name &&
-                            strcmp(_dd->u.struct_def.name, vnm) == 0) {
-                            vsd = _dd; break;
-                        }
-                    }
-                }
+                const AstNode *vsd = cg_find_inline_struct_def(ctx, vnm);
                 if (vsd && vsd->u.struct_def.fields.len > 0) {
                     const char *vkw = vsd->u.struct_def.is_union ? "union" : "struct";
                     bool is_named = strncmp(vnm, "__anon_", 7) != 0;
@@ -3491,7 +3509,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
                     else          cg_printf(ctx, "%s {\n", vkw);
                     for (size_t _j = 0; _j < vsd->u.struct_def.fields.len; _j++) {
                         const AstNode *_fj = vsd->u.struct_def.fields.data[_j];
-                        if (_fj && _fj->kind == AST_FIELD_DECL && _fj->u.field_decl.is_comma_cont) continue;
+                        if (field_is_comma_cont(_fj)) continue;
                         cg_puts(ctx, "  ");
                         cg_emit_field_group(ctx, &vsd->u.struct_def.fields, _j);
                     }
@@ -4157,31 +4175,7 @@ static void cg_block(CgCtx *ctx, const AstNode *block) {
                     }
                     if (_vty && _vty->kind == AST_TYPE_NAME && _vty->u.type_name.name) {
                         const char *_vnm = _vty->u.type_name.name;
-                        const AstNode *_vsd = NULL;
-                        if (ctx->local_block_stmts) {
-                            for (size_t _k = 0; _k < ctx->local_block_stmts->len; _k++) {
-                                const AstNode *_dd = ctx->local_block_stmts->data[_k];
-                                if (_dd && _dd->kind == AST_STRUCT_DEF &&
-                                    (_dd->u.struct_def.from_inline_var ||
-                                     strncmp(_dd->u.struct_def.name ? _dd->u.struct_def.name : "", "__anon_", 7) == 0) &&
-                                    _dd->u.struct_def.name &&
-                                    strcmp(_dd->u.struct_def.name, _vnm) == 0) {
-                                    _vsd = _dd; break;
-                                }
-                            }
-                        }
-                        if (!_vsd && ctx->file_ast) {
-                            for (size_t _k = 0; _k < ctx->file_ast->u.file.decls.len; _k++) {
-                                const AstNode *_dd = ctx->file_ast->u.file.decls.data[_k];
-                                if (_dd && _dd->kind == AST_STRUCT_DEF &&
-                                    (_dd->u.struct_def.from_inline_var ||
-                                     strncmp(_dd->u.struct_def.name ? _dd->u.struct_def.name : "", "__anon_", 7) == 0) &&
-                                    _dd->u.struct_def.name &&
-                                    strcmp(_dd->u.struct_def.name, _vnm) == 0) {
-                                    _vsd = _dd; break;
-                                }
-                            }
-                        }
+                        const AstNode *_vsd = cg_find_inline_struct_def(ctx, _vnm);
                         if (_vsd && _vsd->u.struct_def.fields.len > 0) {
                             const char *_vkw = _vsd->u.struct_def.is_union ? "union" : "struct";
                             bool _is_named = strncmp(_vnm, "__anon_", 7) != 0;
@@ -4191,7 +4185,7 @@ static void cg_block(CgCtx *ctx, const AstNode *block) {
                             else          cg_printf(ctx, "%s {\n", _vkw);
                             for (size_t _j = 0; _j < _vsd->u.struct_def.fields.len; _j++) {
                                 const AstNode *_fj = _vsd->u.struct_def.fields.data[_j];
-                                if (_fj && _fj->kind == AST_FIELD_DECL && _fj->u.field_decl.is_comma_cont) continue;
+                                if (field_is_comma_cont(_fj)) continue;
                                 cg_puts(ctx, "  ");
                                 cg_emit_field_group(ctx, &_vsd->u.struct_def.fields, _j);
                             }
@@ -6311,7 +6305,7 @@ static bool cg_emit_field_maybe_inline(CgCtx *ctx,
         cg_printf(ctx, "%s %s {\n", ikw, tname);
         for (size_t _j = 0; _j < _td->u.struct_def.fields.len; _j++) {
             const AstNode *_f = _td->u.struct_def.fields.data[_j];
-            if (_f && _f->kind == AST_FIELD_DECL && _f->u.field_decl.is_comma_cont) continue;
+            if (field_is_comma_cont(_f)) continue;
             cg_puts(ctx, "        ");
             cg_emit_field_group(ctx, &_td->u.struct_def.fields, _j);
         }
@@ -6432,21 +6426,13 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
             cg_printf(ctx, "typedef %s %s {\n", kw, cname);
             for (size_t i = 0; i < body_sd->u.struct_def.fields.len; i++) {
                 const AstNode *fi = body_sd->u.struct_def.fields.data[i];
-                if (fi && fi->kind == AST_FIELD_DECL &&
-                    fi->u.field_decl.is_comma_cont) continue;
+                if (field_is_comma_cont(fi)) continue;
                 cg_puts(ctx, "    ");
                 if (!cg_emit_field_maybe_inline(ctx, body_sd, &body_sd->u.struct_def.fields, i)) {
                     cg_emit_field_group(ctx, &body_sd->u.struct_def.fields, i);
                 }
             }
-            if (d->u.typedef_decl.gcc_attrs && body_sd->u.struct_def.tail_attrs)
-                cg_printf(ctx, "} %s %s %s;\n", body_sd->u.struct_def.tail_attrs, cname, d->u.typedef_decl.gcc_attrs);
-            else if (body_sd->u.struct_def.tail_attrs)
-                cg_printf(ctx, "} %s %s;\n", body_sd->u.struct_def.tail_attrs, cname);
-            else if (d->u.typedef_decl.gcc_attrs)
-                cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs);
-            else
-                cg_printf(ctx, "} %s;\n", cname);
+            cg_emit_typedef_close(ctx, cname, body_sd->u.struct_def.tail_attrs, d->u.typedef_decl.gcc_attrs);
         } else {
             cg_printf(ctx, "typedef %s %s %s;\n", kw, cname, cname);
         }
@@ -6471,21 +6457,13 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
             else       cg_printf(ctx, "typedef %s {\n", kw);
             for (size_t i = 0; i < target->u.struct_def.fields.len; i++) {
                 const AstNode *fi = target->u.struct_def.fields.data[i];
-                if (fi && fi->kind == AST_FIELD_DECL &&
-                    fi->u.field_decl.is_comma_cont) continue;
+                if (field_is_comma_cont(fi)) continue;
                 cg_puts(ctx, "    ");
                 if (!cg_emit_field_maybe_inline(ctx, target, &target->u.struct_def.fields, i))
                     cg_emit_field_group(ctx, &target->u.struct_def.fields, i);
             }
             {
-                if (d->u.typedef_decl.gcc_attrs && target->u.struct_def.tail_attrs)
-                    cg_printf(ctx, "} %s %s %s;\n", target->u.struct_def.tail_attrs, cname, d->u.typedef_decl.gcc_attrs);
-                else if (target->u.struct_def.tail_attrs)
-                    cg_printf(ctx, "} %s %s;\n", target->u.struct_def.tail_attrs, cname);
-                else if (d->u.typedef_decl.gcc_attrs)
-                    cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs);
-                else
-                    cg_printf(ctx, "} %s;\n", cname);
+                cg_emit_typedef_close(ctx, cname, target->u.struct_def.tail_attrs, d->u.typedef_decl.gcc_attrs);
             }
         } else if (sname) {
             cg_printf(ctx, "typedef %s %s %s;\n", kw, sname, cname);
@@ -6576,8 +6554,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                     cg_printf(ctx, "typedef %s {\n", kw);
                     for (size_t i = 0; i < anon_sd->u.struct_def.fields.len; i++) {
                         const AstNode *fi = anon_sd->u.struct_def.fields.data[i];
-                        if (fi && fi->kind == AST_FIELD_DECL &&
-                            fi->u.field_decl.is_comma_cont) continue;
+                        if (field_is_comma_cont(fi)) continue;
                         cg_puts(ctx, "    ");
                         if (!cg_emit_field_maybe_inline(ctx, anon_sd, &anon_sd->u.struct_def.fields, i))
                             cg_emit_field_group(ctx, &anon_sd->u.struct_def.fields, i);
@@ -6608,21 +6585,13 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                     cg_printf(ctx, "typedef %s {\n", kw);
                     for (size_t i = 0; i < anon_sd->u.struct_def.fields.len; i++) {
                         const AstNode *fi = anon_sd->u.struct_def.fields.data[i];
-                        if (fi && fi->kind == AST_FIELD_DECL &&
-                            fi->u.field_decl.is_comma_cont) continue;
+                        if (field_is_comma_cont(fi)) continue;
                         cg_puts(ctx, "    ");
                         if (!cg_emit_field_maybe_inline(ctx, anon_sd, &anon_sd->u.struct_def.fields, i))
                             cg_emit_field_group(ctx, &anon_sd->u.struct_def.fields, i);
                     }
                     {
-                        if (d->u.typedef_decl.gcc_attrs && anon_sd->u.struct_def.tail_attrs)
-                            cg_printf(ctx, "} %s %s %s;\n", anon_sd->u.struct_def.tail_attrs, cname, d->u.typedef_decl.gcc_attrs);
-                        else if (anon_sd->u.struct_def.tail_attrs)
-                            cg_printf(ctx, "} %s %s;\n", anon_sd->u.struct_def.tail_attrs, cname);
-                        else if (d->u.typedef_decl.gcc_attrs)
-                            cg_printf(ctx, "} %s %s;\n", cname, d->u.typedef_decl.gcc_attrs);
-                        else
-                            cg_printf(ctx, "} %s;\n", cname);
+                        cg_emit_typedef_close(ctx, cname, anon_sd->u.struct_def.tail_attrs, d->u.typedef_decl.gcc_attrs);
                     };
                 } else {
                     /* Empty struct body: emit typedef struct/union {} alias; */
@@ -6798,8 +6767,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                         cg_printf(ctx, "typedef %s %s {\n", kw2, tname);
                         for (size_t i = 0; i < body_sd2->u.struct_def.fields.len; i++) {
                             const AstNode *fi = body_sd2->u.struct_def.fields.data[i];
-                            if (fi && fi->kind == AST_FIELD_DECL &&
-                                fi->u.field_decl.is_comma_cont) continue;
+                            if (field_is_comma_cont(fi)) continue;
                             cg_puts(ctx, "    ");
                             cg_emit_field_group(ctx, &body_sd2->u.struct_def.fields, i);
                         }
@@ -7102,7 +7070,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
                 cg_printf(ctx, "%s {\n", kw);
                 for (size_t _j = 0; _j < inner_sd->u.struct_def.fields.len; _j++) {
                     const AstNode *_fj = inner_sd->u.struct_def.fields.data[_j];
-                    if (_fj && _fj->kind == AST_FIELD_DECL && _fj->u.field_decl.is_comma_cont) continue;
+                    if (field_is_comma_cont(_fj)) continue;
                     cg_puts(ctx, "  ");
                     cg_emit_field_group(ctx, &inner_sd->u.struct_def.fields, _j);
                 }
@@ -7180,7 +7148,7 @@ static void cg_var_c(CgCtx *ctx, const AstNode *d) {
                 cg_printf(ctx, "%s %s {\n", kw, iv_sd->u.struct_def.name);
                 for (size_t _j = 0; _j < iv_sd->u.struct_def.fields.len; _j++) {
                     const AstNode *_fj = iv_sd->u.struct_def.fields.data[_j];
-                    if (_fj && _fj->kind == AST_FIELD_DECL && _fj->u.field_decl.is_comma_cont) continue;
+                    if (field_is_comma_cont(_fj)) continue;
                     cg_puts(ctx, "  ");
                     cg_emit_field_group(ctx, &iv_sd->u.struct_def.fields, _j);
                 }
