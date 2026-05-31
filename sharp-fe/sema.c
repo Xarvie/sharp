@@ -35,6 +35,11 @@ typedef struct {
     size_t       subst_np;
 } SS;
 
+static void sema_require_scalar(SS *ss, const AstNode *node, Type *t, const char *what) {
+    if (!ty_is_scalar(t))
+        FE_ERROR(ss->ctx->diags, node->loc, "%s condition must be scalar", what);
+}
+
 /* =========================================================================
  * Phase 11 sema helper: substitute generic params in a Type*.
  * This mirrors cg.c's subst_type but lives in sema so field-type
@@ -97,8 +102,8 @@ static Type *arith_conv(TyStore *ts, Type *a, Type *b) {
      * Note: TY_VOLATILE does not exist in the type system (volatile is an
      * AST-level qualifier stripped by ty_from_ast); only TY_CONST and TY_ATOMIC need
      * peeling here. */
-    while (a && (a->kind == TY_CONST || a->kind == TY_ATOMIC)) a = ty_unconst(ts, a);
-    while (b && (b->kind == TY_CONST || b->kind == TY_ATOMIC)) b = ty_unconst(ts, b);
+    a = ty_strip_cvq(ts, a);
+    b = ty_strip_cvq(ts, b);
     if (!a || !b) return ts ? ty_int(ts) : a;
     /* double wins */
     if (a->kind == TY_LONGDOUBLE || b->kind == TY_LONGDOUBLE) return ty_longdouble(ts, "long double");
@@ -1040,8 +1045,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
 
     case AST_TERNARY: {
         Type *cond_t = sema_expr(ss, expr->u.ternary.cond);
-        if (!ty_is_scalar(cond_t))
-            FE_ERROR(ss->ctx->diags, expr->loc, "ternary condition must be scalar");
+        sema_require_scalar(ss, expr, cond_t, "ternary");
         Type *a = sema_expr(ss, expr->u.ternary.then_);
         Type *b = sema_expr(ss, expr->u.ternary.else_);
         if (ty_is_arithmetic(a) && ty_is_arithmetic(b))
@@ -1502,8 +1506,7 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
         } else {
             /* Runtime condition — check both branches as usual. */
             Type *ct = sema_expr(ss, cond);
-            if (!ty_is_scalar(ct))
-                FE_ERROR(ss->ctx->diags, stmt->loc, "if condition must be scalar");
+            sema_require_scalar(ss, stmt, ct, "if");
             sema_stmt(ss, stmt->u.if_.then_);
             sema_stmt(ss, stmt->u.if_.else_);
         }
@@ -1512,8 +1515,7 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
 
     case AST_WHILE: {
         Type *ct = sema_expr(ss, stmt->u.while_.cond);
-        if (!ty_is_scalar(ct))
-            FE_ERROR(ss->ctx->diags, stmt->loc, "while condition must be scalar");
+        sema_require_scalar(ss, stmt, ct, "while");
         sema_stmt(ss, stmt->u.while_.body);
         break;
     }
@@ -1524,8 +1526,7 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
         sema_stmt(&inner, stmt->u.for_.init);
         if (stmt->u.for_.cond) {
             Type *ct = sema_expr(&inner, stmt->u.for_.cond);
-            if (!ty_is_scalar(ct))
-                FE_ERROR(ss->ctx->diags, stmt->loc, "for condition must be scalar");
+            sema_require_scalar(ss, stmt, ct, "for");
         }
         if (stmt->u.for_.post) sema_expr(&inner, stmt->u.for_.post);
         sema_stmt(&inner, stmt->u.for_.body);
@@ -1535,8 +1536,7 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
     case AST_DO_WHILE: {
         sema_stmt(ss, stmt->u.do_while.body);
         Type *ct = sema_expr(ss, stmt->u.do_while.cond);
-        if (!ty_is_scalar(ct))
-            FE_ERROR(ss->ctx->diags, stmt->loc, "do-while condition must be scalar");
+        sema_require_scalar(ss, stmt, ct, "do-while");
         break;
     }
 
@@ -2311,7 +2311,7 @@ static int eval_has_operator(SS *ss, const AstNode *expr) {
     if (!t || ty_is_error(t)) return 0;
     /* Defer to instantiation when T still has TY_PARAM. */
     if (ty_contains_param(t)) return -1;
-    while (t && (t->kind == TY_CONST || t->kind == TY_ATOMIC)) t = ty_unconst(ss->ctx->ts, t);
+    t = ty_strip_cvq(ss->ctx->ts, t);
     if (!t || t->kind != TY_STRUCT) return 0;
     AstNode *sd = t->u.struct_.decl;
     if (!sd || !sd->sem_scope) return 0;
@@ -2430,7 +2430,7 @@ static int eval_has_method(SS *ss, const AstNode *expr) {
     if (!t || ty_is_error(t)) return 0;
     /* v0.13: defer to instantiation time when T still has TY_PARAM. */
     if (ty_contains_param(t)) return -1;
-    while (t && (t->kind == TY_CONST || t->kind == TY_ATOMIC)) t = ty_unconst(ss->ctx->ts, t);
+    t = ty_strip_cvq(ss->ctx->ts, t);
     if (!t || t->kind != TY_STRUCT) return 0;
     AstNode *sd = t->u.struct_.decl;
     if (!sd || !sd->sem_scope) return 0;
@@ -2471,7 +2471,7 @@ static int eval_has_field(SS *ss, const AstNode *expr) {
     Type *t = resolve_intrinsic_type_arg(ss, ty_arg);
     if (!t || ty_is_error(t)) return 0;
     if (ty_contains_param(t)) return -1;
-    while (t && (t->kind == TY_CONST || t->kind == TY_ATOMIC)) t = ty_unconst(ss->ctx->ts, t);
+    t = ty_strip_cvq(ss->ctx->ts, t);
     if (!t || t->kind != TY_STRUCT) return 0;
     AstNode *sd = t->u.struct_.decl;
     if (!sd || !sd->sem_scope) return 0;

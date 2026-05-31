@@ -169,6 +169,9 @@ TyPtrPeel ty_peel_ptr(Type *t);
 /** Remove one layer of top-level const.  Returns base if const, else t. */
 Type *ty_unconst(TyStore *ts, Type *t);
 
+/** Strip all top-level const/atomic qualifiers. */
+Type *ty_strip_cvq(TyStore *ts, Type *t);
+
 /** Return the pointee type, or NULL if not a pointer. */
 Type *ty_deref(const Type *t);
 

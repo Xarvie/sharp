@@ -423,6 +423,12 @@ Type *ty_unconst(TyStore *ts, Type *t) {
     return t;
 }
 
+Type *ty_strip_cvq(TyStore *ts, Type *t) {
+    while (t && (t->kind == TY_CONST || t->kind == TY_ATOMIC))
+        t = ty_unconst(ts, t);
+    return t;
+}
+
 Type *ty_deref(const Type *t) {
     if (!t) return NULL;
     if (t->kind == TY_PTR) return t->u.ptr.base;
