@@ -422,6 +422,46 @@ static void skip_balanced_parens(PS *ps) {
     }
 }
 
+static int collect_balanced_call_body(PS *ps, char *buf, int buf_size) {
+    int blen = 0;
+    int depth = 0;
+    while (!ps_at(ps, STOK_EOF)) {
+        SharpTok tk = ps_peek(ps);
+        if (tk.kind == STOK_LPAREN) {
+            depth++;
+            if (blen + (int)tk.len + 1 < buf_size) {
+                memcpy(buf + blen, tk.text, tk.len);
+                blen += tk.len;
+            }
+            ps_advance(ps);
+        } else if (tk.kind == STOK_RPAREN) {
+            if (depth == 0) {
+                blen += snprintf(buf + blen, buf_size - blen, ")");
+                ps_advance(ps);
+                break;
+            }
+            depth--;
+            if (blen + (int)tk.len + 1 < buf_size) {
+                memcpy(buf + blen, tk.text, tk.len);
+                blen += tk.len;
+            }
+            ps_advance(ps);
+        } else {
+            if (blen > 0 && blen + (int)tk.len + 2 < buf_size) {
+                char last = buf[blen - 1];
+                if (last != '(' && last != ',')
+                    buf[blen++] = ' ';
+                memcpy(buf + blen, tk.text, tk.len);
+                blen += tk.len;
+            }
+            ps_advance(ps);
+        }
+    }
+    if (blen >= buf_size) blen = buf_size - 1;
+    buf[blen] = '\0';
+    return blen;
+}
+
 /* Check if a name is a known type (typedef or struct/union tag).
  * Needed because is_type_start must distinguish `Vec<int> vi;` (declaration)
  * from `swap<int>(&x, &y)` (generic function call). */
@@ -4559,52 +4599,10 @@ static AstNode *parse_postfix(PS *ps, AstNode *lhs) {
                  * The generated IDENT node's name holds the complete
                  * `__builtin_offsetof(...)` call text so cg can emit it
                  * without modification. */
-                /* Collect all tokens from '(' up to and including matching ')'. */
                 char buf[512];
-                int blen = 0;
-                /* p100: preserve original spelling (offsetof or __builtin_offsetof).
-                 * gcc -E also preserves it verbatim; the downstream compiler handles
-                 * offsetof via <stddef.h> (or -include stddef.h in the probe script).
-                 * This makes sharpc output token-identical to gcc -E. */
-                blen += snprintf(buf + blen, sizeof buf - blen, "%s(",
-                                 lhs->u.ident.name);
-                ps_advance(ps);  /* eat '(' */
-                int depth = 0;
-                while (!ps_at(ps, STOK_EOF)) {
-                    SharpTok tk = ps_peek(ps);
-                    if (tk.kind == STOK_LPAREN) {
-                        depth++;
-                        if (blen + (int)tk.len + 1 < (int)sizeof buf) {
-                            memcpy(buf + blen, tk.text, tk.len);
-                            blen += tk.len;
-                        }
-                        ps_advance(ps);
-                    } else if (tk.kind == STOK_RPAREN) {
-                        if (depth == 0) {
-                            blen += snprintf(buf + blen, sizeof buf - blen, ")");
-                            ps_advance(ps);
-                            break;
-                        }
-                        depth--;
-                        if (blen + (int)tk.len + 1 < (int)sizeof buf) {
-                            memcpy(buf + blen, tk.text, tk.len);
-                            blen += tk.len;
-                        }
-                        ps_advance(ps);
-                    } else {
-                        /* Add spacing heuristic: add a space before most tokens. */
-                        if (blen > 0 && blen + (int)tk.len + 2 < (int)sizeof buf) {
-                            /* Only add space if last char wasn't '(' or ','. */
-                            char last = buf[blen-1];
-                            if (last != '(' && last != ',')
-                                buf[blen++] = ' ';
-                            memcpy(buf + blen, tk.text, tk.len);
-                            blen += tk.len;
-                        }
-                        ps_advance(ps);
-                    }
-                }
-                buf[blen < (int)sizeof buf ? blen : (int)sizeof buf - 1] = '\0';
+                int blen = snprintf(buf, sizeof buf, "%s(", lhs->u.ident.name);
+                ps_advance(ps);
+                blen += collect_balanced_call_body(ps, buf + blen, (int)sizeof buf - blen);
                 ast_node_free(lhs);
                 lhs = ast_node_new(AST_IDENT, t.loc);
                 lhs->u.ident.name = cpp_xstrndup(buf, blen);
@@ -4621,43 +4619,10 @@ static AstNode *parse_postfix(PS *ps, AstNode *lhs) {
             if (lhs->kind == AST_IDENT &&
                 (strcmp(lhs->u.ident.name, "va_arg") == 0 ||
                  strcmp(lhs->u.ident.name, "__builtin_va_arg") == 0)) {
-                const char *va_name = lhs->u.ident.name;
                 char buf2[512];
-                int blen2 = 0;
-                blen2 += snprintf(buf2 + blen2, sizeof buf2 - blen2,
-                                  "__builtin_va_arg(");
-                ps_advance(ps);  /* eat '(' */
-                int depth2 = 0;
-                while (!ps_at(ps, STOK_EOF)) {
-                    SharpTok tk = ps_peek(ps);
-                    if (tk.kind == STOK_LPAREN) {
-                        depth2++;
-                        if (blen2 + (int)tk.len + 1 < (int)sizeof buf2) {
-                            memcpy(buf2 + blen2, tk.text, tk.len); blen2 += tk.len;
-                        }
-                        ps_advance(ps);
-                    } else if (tk.kind == STOK_RPAREN) {
-                        if (depth2 == 0) {
-                            blen2 += snprintf(buf2 + blen2, sizeof buf2 - blen2, ")");
-                            ps_advance(ps); break;
-                        }
-                        depth2--;
-                        if (blen2 + (int)tk.len + 1 < (int)sizeof buf2) {
-                            memcpy(buf2 + blen2, tk.text, tk.len); blen2 += tk.len;
-                        }
-                        ps_advance(ps);
-                    } else {
-                        if (blen2 > 0 && blen2 + (int)tk.len + 2 < (int)sizeof buf2) {
-                            char last2 = buf2[blen2-1];
-                            if (last2 != '(' && last2 != ',')
-                                buf2[blen2++] = ' ';
-                            memcpy(buf2 + blen2, tk.text, tk.len); blen2 += tk.len;
-                        }
-                        ps_advance(ps);
-                    }
-                }
-                buf2[blen2 < (int)sizeof buf2 ? blen2 : (int)sizeof buf2 - 1] = '\0';
-                (void)va_name;
+                int blen2 = snprintf(buf2, sizeof buf2, "__builtin_va_arg(");
+                ps_advance(ps);
+                blen2 += collect_balanced_call_body(ps, buf2 + blen2, (int)sizeof buf2 - blen2);
                 ast_node_free(lhs);
                 lhs = ast_node_new(AST_IDENT, t.loc);
                 lhs->u.ident.name = cpp_xstrndup(buf2, blen2);
@@ -4671,45 +4636,10 @@ static AstNode *parse_postfix(PS *ps, AstNode *lhs) {
             if (lhs->kind == AST_IDENT &&
                 (strcmp(lhs->u.ident.name, "__builtin_convertvector") == 0 ||
                  strcmp(lhs->u.ident.name, "__builtin_shufflevector") == 0)) {
-                const char *bv_name = lhs->u.ident.name;
                 char buf3[1024];
-                int blen3 = 0;
-                blen3 += snprintf(buf3 + blen3, sizeof buf3 - blen3,
-                                  "%s(", bv_name);
+                int blen3 = snprintf(buf3, sizeof buf3, "%s(", lhs->u.ident.name);
                 ps_advance(ps);
-                int depth3 = 0;
-                while (!ps_at(ps, STOK_EOF)) {
-                    SharpTok tk = ps_peek(ps);
-                    if (tk.kind == STOK_LPAREN) {
-                        depth3++;
-                        if (blen3 + (int)tk.len + 1 < (int)sizeof buf3) {
-                            memcpy(buf3 + blen3, tk.text, tk.len);
-                            blen3 += tk.len;
-                        }
-                        ps_advance(ps);
-                    } else if (tk.kind == STOK_RPAREN) {
-                        if (depth3 == 0) {
-                            blen3 += snprintf(buf3 + blen3, sizeof buf3 - blen3, ")");
-                            ps_advance(ps); break;
-                        }
-                        depth3--;
-                        if (blen3 + (int)tk.len + 1 < (int)sizeof buf3) {
-                            memcpy(buf3 + blen3, tk.text, tk.len);
-                            blen3 += tk.len;
-                        }
-                        ps_advance(ps);
-                    } else {
-                        if (blen3 > 0 && blen3 + (int)tk.len + 2 < (int)sizeof buf3) {
-                            char last3 = buf3[blen3-1];
-                            if (last3 != '(' && last3 != ',')
-                                buf3[blen3++] = ' ';
-                            memcpy(buf3 + blen3, tk.text, tk.len);
-                            blen3 += tk.len;
-                        }
-                        ps_advance(ps);
-                    }
-                }
-                buf3[blen3 < (int)sizeof buf3 ? blen3 : (int)sizeof buf3 - 1] = '\0';
+                blen3 += collect_balanced_call_body(ps, buf3 + blen3, (int)sizeof buf3 - blen3);
                 ast_node_free(lhs);
                 lhs = ast_node_new(AST_IDENT, t.loc);
                 lhs->u.ident.name = cpp_xstrndup(buf3, blen3);

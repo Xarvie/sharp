@@ -195,55 +195,33 @@ static const char *try_find_zig_dir(char *out_buf, size_t buf_size) {
 
 /* Add a zig libc include path (e.g. "any-windows-any", "generic-mingw")
  * to ctx->sys_include_paths. */
-static void add_zig_libc_path(CppCtx *ctx, const char *suffix) {
+static void add_zig_sub_path(CppCtx *ctx, const char *rel) {
+    char zdir[MAX_PATH];
+    if (!try_find_zig_dir(zdir, sizeof zdir)) return;
+    char path[MAX_PATH];
 #ifdef _WIN32
-    char zig_dir[MAX_PATH];
-    if (!try_find_zig_dir(zig_dir, sizeof(zig_dir))) return;
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s\\lib\\libc\\include\\%s", zig_dir, suffix);
-    add_sys_path_if_valid(ctx, path);
+    snprintf(path, sizeof path, "%s\\%s", zdir, rel);
 #else
-    char zig_dir[MAX_PATH];
-    if (!try_find_zig_dir(zig_dir, sizeof(zig_dir))) return;
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s/lib/libc/include/%s", zig_dir, suffix);
-    add_sys_path_if_valid(ctx, path);
+    snprintf(path, sizeof path, "%s/%s", zdir, rel);
 #endif
+    add_sys_path_if_valid(ctx, path);
+}
+
+static void add_zig_libc_path(CppCtx *ctx, const char *suffix) {
+    char rel[MAX_PATH];
+    snprintf(rel, sizeof rel, "lib/libc/include/%s", suffix);
+    add_zig_sub_path(ctx, rel);
 }
 
 /* Add zig's MinGW headers (<zig>/lib/libc/mingw/include). */
 static void add_zig_libc_mingw(CppCtx *ctx) {
-#ifdef _WIN32
-    char zig_dir[MAX_PATH];
-    if (!try_find_zig_dir(zig_dir, sizeof(zig_dir))) return;
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s\\lib\\libc\\mingw\\include", zig_dir);
-    add_sys_path_if_valid(ctx, path);
-#else
-    char zig_dir[MAX_PATH];
-    if (!try_find_zig_dir(zig_dir, sizeof(zig_dir))) return;
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s/lib/libc/mingw/include", zig_dir);
-    add_sys_path_if_valid(ctx, path);
-#endif
+    add_zig_sub_path(ctx, "lib/libc/mingw/include");
 }
 
 /* Add zig's builtin include (<zig>/lib/include) for compiler headers
  * like <mm_malloc.h>, <__stdarg_va_copy.h>, etc. */
 static void add_zig_lib_include(CppCtx *ctx) {
-#ifdef _WIN32
-    char zig_dir[MAX_PATH];
-    if (!try_find_zig_dir(zig_dir, sizeof(zig_dir))) return;
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s\\lib\\include", zig_dir);
-    add_sys_path_if_valid(ctx, path);
-#else
-    char zig_dir[MAX_PATH];
-    if (!try_find_zig_dir(zig_dir, sizeof(zig_dir))) return;
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s/lib/include", zig_dir);
-    add_sys_path_if_valid(ctx, path);
-#endif
+    add_zig_sub_path(ctx, "lib/include");
 }
 
 /* ======================================================================== */

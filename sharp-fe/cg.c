@@ -275,9 +275,7 @@ static bool cg_emit_linemarker(CgCtx *ctx, CppLoc loc) {
 
     cgb_push(&ctx->out, '\n');
     cgb_puts(&ctx->out, "#line ");
-    char lbuf[16];
-    snprintf(lbuf, sizeof lbuf, "%d", loc.line);
-    cgb_puts(&ctx->out, lbuf);
+    cgb_printf(&ctx->out, "%d", loc.line);
     cgb_puts(&ctx->out, " \"");
     cg_escape_filename(ctx, abs_file);
     cgb_puts(&ctx->out, "\"\n");
@@ -326,6 +324,22 @@ static void cg_printf(CgCtx *ctx, const char *fmt, ...) {
     va_end(ap);
 }
 
+static void cg_emit_int_lit(CgCtx *ctx, const AstNode *lit) {
+    if (lit->u.int_lit.is_longlong)
+        cg_printf(ctx, lit->u.int_lit.is_unsigned ? "%lluULL" : "%lldLL",
+                  (unsigned long long)lit->u.int_lit.val);
+    else if (lit->u.int_lit.is_long)
+        cg_printf(ctx, lit->u.int_lit.is_unsigned ? "%luUL" : "%ldL",
+                  (unsigned long)lit->u.int_lit.val);
+    else if (lit->u.int_lit.is_unsigned) {
+        if ((uint64_t)lit->u.int_lit.val <= 0xFFFFFFFFULL)
+            cg_printf(ctx, "%uU", (unsigned)lit->u.int_lit.val);
+        else
+            cg_printf(ctx, "%lluULL", (unsigned long long)lit->u.int_lit.val);
+    } else
+        cg_printf(ctx, "%lld", (long long)lit->u.int_lit.val);
+}
+
 /* =========================================================================
  * Type generation
  * (Outputs the C declaration prefix; name is added separately)
@@ -357,7 +371,6 @@ static bool ast_type_has_volatile(const AstNode *ty) {
             { ty = ty->u.type_ptr.base; continue; }
         return false;
     }
-    return false;
 }
 
 /* ast_type_is_flat_emittable -- true when the AST type node can be emitted
@@ -1489,24 +1502,11 @@ static void cg_const_expr(CgCtx *ctx, const AstNode *e) {
     if (!e) { cg_puts(ctx, "0"); return; }
     switch (e->kind) {
     case AST_INT_LIT:
-        /* Prefer the original source spelling (hex, octal, decimal, suffixes)
-         * so that the output is token-identical to the input.  The parsed
-         * numeric value is the fallback when orig_text is not available. */
         if (e->u.int_lit.orig_text) {
             cg_puts(ctx, e->u.int_lit.orig_text);
-        } else if (e->u.int_lit.is_longlong)
-            cg_printf(ctx, e->u.int_lit.is_unsigned ? "%lluULL" : "%lldLL",
-                      (unsigned long long)e->u.int_lit.val);
-        else if (e->u.int_lit.is_long)
-            cg_printf(ctx, e->u.int_lit.is_unsigned ? "%luUL" : "%ldL",
-                      (unsigned long)e->u.int_lit.val);
-        else if (e->u.int_lit.is_unsigned)
-            if ((uint64_t)e->u.int_lit.val <= 0xFFFFFFFFULL)
-                cg_printf(ctx, "%uU", (unsigned int)e->u.int_lit.val);
-            else
-                cg_printf(ctx, "%lluULL", (unsigned long long)e->u.int_lit.val);
-        else
-            cg_printf(ctx, "%lld", (long long)e->u.int_lit.val);
+        } else {
+            cg_emit_int_lit(ctx, e);
+        }
         break;
     case AST_IDENT:
         /* If inside a struct method body, implicit struct field access
@@ -2140,33 +2140,11 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
     switch (expr->kind) {
 
     case AST_INT_LIT:
-        /* C3: in C mode use the original token text to preserve hex/octal
-         * form and suffixes exactly as the user wrote them. */
         if (expr->u.int_lit.orig_text) {
             cg_puts(ctx, expr->u.int_lit.orig_text);
             break;
         }
-        /* emit integer literals with their original type suffix so
-         * that arithmetic uses the correct width.  Critically, a plain `U`
-         * literal (e.g. `2654435761U`) must remain `unsigned int` -- not be
-         * widened to `unsigned long long` -- so that `uint32_t * uint32_t`
-         * multiplication truncates to 32 bits as the author intended (lz4
-         * hash functions depend on this property). */
-        if (expr->u.int_lit.is_longlong)
-            cg_printf(ctx, expr->u.int_lit.is_unsigned ? "%lluULL" : "%lldLL",
-                      (unsigned long long)expr->u.int_lit.val);
-        else if (expr->u.int_lit.is_long)
-            cg_printf(ctx, expr->u.int_lit.is_unsigned ? "%luUL" : "%ldL",
-                      (unsigned long)expr->u.int_lit.val);
-        else if (expr->u.int_lit.is_unsigned)
-            /* val fits in uint32_t → `U` suffix (unsigned int);
-             * otherwise fall back to `ULL` to avoid silent truncation. */
-            if ((uint64_t)expr->u.int_lit.val <= 0xFFFFFFFFULL)
-                cg_printf(ctx, "%uU", (unsigned int)expr->u.int_lit.val);
-            else
-                cg_printf(ctx, "%lluULL", (unsigned long long)expr->u.int_lit.val);
-        else
-            cg_printf(ctx, "%lld", (long long)expr->u.int_lit.val);
+        cg_emit_int_lit(ctx, expr);
         break;
     case AST_FLOAT_LIT: {
         /* C3: in C mode use the original token text to preserve float
@@ -4889,16 +4867,12 @@ static void cg_struct(CgCtx *ctx, const AstNode *sd) {
      * branch -- collision case emits `struct X` instead of plain `X`).
      * The pass-1 forward decl emitted `struct X;` rather than a
      * typedef in this case, so just emit the body. */
-    bool collision = false;
-    (void)collision;
     if (ctx->file_scope) {
         Symbol *sym = scope_lookup_local(ctx->file_scope, sname);
         for (; sym; sym = sym->next) {
             if (strcmp(sym->name, sname) != 0) continue;
-            if (sym->kind == SYM_FUNC || sym->kind == SYM_VAR) {
-                collision = true;
+            if (sym->kind == SYM_FUNC || sym->kind == SYM_VAR)
                 break;
-            }
         }
     }
 

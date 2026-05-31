@@ -18,6 +18,12 @@ static Type *ty_peel_to_struct(Type *t) {
     return NULL;
 }
 
+static bool is_comparison_op(SharpTokKind op) {
+    return op == STOK_EQEQ || op == STOK_BANGEQ ||
+           op == STOK_LT   || op == STOK_GT ||
+           op == STOK_LTEQ || op == STOK_GTEQ;
+}
+
 static Symbol *find_extension_method(Scope *file_scope,
                                       const char *struct_name,
                                       const char *method_name) {
@@ -536,9 +542,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
             ru_raw && ru_raw->kind == TY_PARAM &&
             strcmp(lu_raw->u.param.name, ru_raw->u.param.name) == 0) {
             /* Both operands are the same generic param T — allow any op. */
-            if (op == STOK_EQEQ || op == STOK_BANGEQ ||
-                op == STOK_LT   || op == STOK_GT ||
-                op == STOK_LTEQ || op == STOK_GTEQ)
+            if (is_comparison_op(op))
                 return ty_int(ts);
             if (op == STOK_PLUS || op == STOK_MINUS ||
                 op == STOK_STAR || op == STOK_SLASH ||
@@ -548,9 +552,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
     }
 
     /* Comparison → int */
-    if (op == STOK_EQEQ || op == STOK_BANGEQ ||
-        op == STOK_LT   || op == STOK_GT      ||
-        op == STOK_LTEQ || op == STOK_GTEQ) {
+    if (is_comparison_op(op)) {
         /* suppress cascade errors — when either operand has an
          * error type (e.g. result of calling a function-pointer variable
          * whose return type could not be resolved by sema), the comparison
