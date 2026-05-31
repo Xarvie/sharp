@@ -410,6 +410,16 @@ static void rollback_diags(PS *ps, size_t save_len) {
     }
 }
 
+typedef struct { size_t pos; int pending_close; size_t diag_len; } PsSave;
+static PsSave ps_save(const PS *ps) {
+    return (PsSave){ ps->pos, ps->pending_close, ps->diags ? ps->diags->len : 0 };
+}
+static void ps_restore(PS *ps, PsSave s) {
+    ps->pos = s.pos;
+    ps->pending_close = s.pending_close;
+    rollback_diags(ps, s.diag_len);
+}
+
 static void skip_balanced_parens(PS *ps) {
     int depth = 0;
     while (!ps_at(ps, STOK_EOF)) {
@@ -791,23 +801,13 @@ static bool eat_attribute_specifiers(PS *ps, char **out_attrs) {
  * pending_close: how many extra '>' are available from a split '>>'.
  * Returns true + fills args on success, false (no advance) on failure. */
 static bool parse_generic_args(PS *ps, AstVec *args) {
-    /* expect '<' */
     if (!ps_at(ps, STOK_LT)) return false;
-    size_t save_pos = ps->pos;
-    int save_pending = ps->pending_close;
-    /* Snapshot diagnostics length so we can roll back any errors emitted
-     * during the speculative parse_type() inside this trial. */
-    size_t save_diag_len = ps->diags ? ps->diags->len : 0;
-    ps_advance(ps);  /* consume '<' */
+    PsSave sv = ps_save(ps);
+    ps_advance(ps);
 
     for (;;) {
-        /* empty arg list '<>' not valid; must have at least one type */
         if (ps_at(ps, STOK_GT) || ps_at(ps, STOK_EOF)) break;
 
-        /* Cheap pre-check: only attempt parse_type() if the next token can
-         * actually start a type.  This prevents `i < 5` from being mis-
-         * parsed as a generic-arg list (which would otherwise produce a
-         * spurious "expected type, got '5'" diagnostic). */
         SharpTokKind k = ps_peek(ps).kind;
         bool ok_start = (k == STOK_CONST  || k == STOK_STRUCT || k == STOK_CLASS ||
                          k == STOK_VOID   || k == STOK_INT    ||
@@ -819,35 +819,27 @@ static bool parse_generic_args(PS *ps, AstVec *args) {
         if (!ok_start) break;
 
         AstNode *arg = parse_type(ps);
-        if (!arg) { ps->pos = save_pos; astvec_free(args); return false; }
+        if (!arg) { ps_restore(ps, sv); astvec_free(args); return false; }
         astvec_push(args, arg);
 
         if (ps_at(ps, STOK_COMMA)) { ps_advance(ps); continue; }
 
-        /* close: '>' or '>>' (split) */
         if (ps_at(ps, STOK_GT)) { ps_advance(ps); return true; }
         if (ps_at(ps, STOK_GTGT)) {
-            /* Phase 3 P1.8: split '>>'.
-             * One '>' closes this level; one goes to ps->pending_close. */
             ps_advance(ps);
             ps->pending_close++;
             return true;
         }
-        /* Consume a '>' left over from an enclosing '>>' split. */
         if (ps->pending_close > 0) {
             ps->pending_close--;
             return true;
         }
-        break;  /* unexpected token — bail */
+        break;
     }
-    /* rollback on failure */
-    ps->pos = save_pos;
-    ps->pending_close = save_pending;
+    ps_restore(ps, sv);
     for (size_t i = 0; i < args->len; i++) ast_node_free(args->data[i]);
     astvec_free(args);
     *args = (AstVec){0};
-    /* Roll back any diagnostics emitted during the failed trial parse. */
-    rollback_diags(ps, save_diag_len);
     return false;
 }
 
@@ -3478,12 +3470,12 @@ static AstNode *parse_top_decl(PS *ps) {
     /* S2: union — symmetric with struct.  `union Tag { ... };` or
      * `union Tag;` here, otherwise fall through to the declarator path. */
     if (t.kind == STOK_UNION) {
-        size_t save = ps->pos;
+        PsSave sv = ps_save(ps);
         ps_advance(ps);
         if (ps_at(ps, STOK_IDENT)) {
             ps_advance(ps);
             SharpTokKind ahead = ps_peek(ps).kind;
-            ps->pos = save;
+            ps_restore(ps, sv);
             if (ahead == STOK_LBRACE || ahead == STOK_SEMI) {
                 AstNode *sd = parse_struct_def(ps);
                 eat_attribute_specifiers(ps, NULL);
@@ -3509,13 +3501,9 @@ static AstNode *parse_top_decl(PS *ps) {
                 return sd;
             }
         } else {
-            ps->pos = save;
+            ps_restore(ps, sv);
             AstNode *sd = parse_struct_def(ps);
             eat_attribute_specifiers(ps, NULL);
-            /* C: anonymous union body may be followed by variable declarators:
-             *   union { Uint64 u64; double d; } inf = { 0x7ff...ULL };
-             * After the union body, check for declarators.
-             * Same BUG-004 guard as anonymous struct. */
             if (!next_ident_starts_new_decl(ps) &&
                 (ps_at(ps, STOK_IDENT) || ps_at(ps, STOK_STAR) ||
                 ps_at(ps, STOK_LPAREN))) {
@@ -3533,9 +3521,8 @@ static AstNode *parse_top_decl(PS *ps) {
         }
     }
 
-    /* `struct Tag { ... }` / `class Tag { ... }` at top level */
     if (t.kind == STOK_STRUCT || t.kind == STOK_CLASS) {
-        size_t save = ps->pos;
+        PsSave sv = ps_save(ps);
         ps_advance(ps);
         if (ps_at(ps, STOK_IDENT)) {
             ps_advance(ps);
@@ -3554,69 +3541,39 @@ static AstNode *parse_top_decl(PS *ps) {
                 }
             }
             SharpTokKind ahead = ps_peek(ps).kind;
-            ps->pos = save;
+            ps_restore(ps, sv);
             if (ahead == STOK_LBRACE || ahead == STOK_SEMI) {
                 AstNode *sd = parse_struct_def(ps);
                 eat_attribute_specifiers(ps, NULL);
-                /* C: struct body may be followed by variable declarators:
-                 *   struct { int a; } s = {1};
-                 *   struct Tag t, *p;
-                 * After the struct body, check for declarators.
-                 * BUG-004 fix: skip if the next IDENT is a typedef name
-                 * followed by another IDENT — that pattern is the start of
-                 * a NEW top-level declaration, not a declarator for this struct.
-                 * E.g. `struct P { } P make() {}` must NOT treat `P` as a
-                 * variable name; `P make` is a new function declaration.
-                 * Similarly, `VecC operator+(VecC a, struct VecS b)` after
-                 * a class/struct body must NOT treat `VecC` as a declarator;
-                 * `TypedefName operator` is the start of a free-function
-                 * operator definition returning a class type. */
                 if (!next_ident_starts_new_decl(ps) &&
                     (ps_at(ps, STOK_IDENT) || ps_at(ps, STOK_STAR) ||
                     ps_at(ps, STOK_LPAREN))) {
-                    /* Push the struct def to pending_decls so it gets
-                     * emitted to the file's decl list. */
                     astvec_push(&ps->pending_decls, sd);
-                    /* Build a TYPE_NAME referring to the struct we just parsed. */
                     AstNode *ty = ast_node_new(AST_TYPE_NAME, sd->loc);
                     ty->u.type_name.name = cpp_xstrdup(sd->u.struct_def.name);
-                    /* Parse variable declarators using the struct type as base. */
                     DeclSpecs vds = {0};
                     vds.base_ty = ty;
                     vds.loc = sd->loc;
                     AstNode *vd = parse_init_declarator_list(ps, &vds, /*stmt_wrap=*/false);
-                    /* Return the var decl as the primary result so the
-                     * caller sees a proper declaration. */
                     return vd ? vd : sd;
                 }
                 ps_match(ps, STOK_SEMI);
                 return sd;
             }
         } else {
-            ps->pos = save;
+            ps_restore(ps, sv);
             AstNode *sd = parse_struct_def(ps);
             eat_attribute_specifiers(ps, NULL);
-            /* C: anonymous struct body may be followed by variable declarators:
-             *   struct { int a; int b; int c; } s = {1, 2, 3};
-             * After the struct body, check for declarators.
-             * BUG-004 fix: same guard as tagged struct — skip if next IDENT
-             * is a typedef name followed by another IDENT (new declaration). */
             if (!next_ident_starts_new_decl(ps) &&
                 (ps_at(ps, STOK_IDENT) || ps_at(ps, STOK_STAR) ||
                 ps_at(ps, STOK_LPAREN))) {
-                /* Push the struct def to pending_decls so it gets
-                 * emitted to the file's decl list. */
                 astvec_push(&ps->pending_decls, sd);
-                /* Build a TYPE_NAME referring to the struct we just parsed. */
                 AstNode *ty = ast_node_new(AST_TYPE_NAME, sd->loc);
                 ty->u.type_name.name = cpp_xstrdup(sd->u.struct_def.name);
-                /* Parse variable declarators using the struct type as base. */
                 DeclSpecs vds = {0};
                 vds.base_ty = ty;
                 vds.loc = sd->loc;
                 AstNode *vd = parse_init_declarator_list(ps, &vds, /*stmt_wrap=*/false);
-                /* Return the var decl as the primary result so the
-                 * caller sees a proper declaration. */
                 return vd ? vd : sd;
             }
             ps_match(ps, STOK_SEMI);
@@ -3631,9 +3588,9 @@ static AstNode *parse_top_decl(PS *ps) {
      * generic type without declaring a variable.  Parsed into a clean
      * AST_EXTERN_INST node (no sentinel string hacks). */
     if (t.kind == STOK_EXTERN && ps_peek2(ps).kind == STOK_STRUCT) {
-        size_t save = ps->pos;
-        ps_advance(ps);  /* consume extern */
-        ps_advance(ps);  /* consume struct */
+        PsSave sv = ps_save(ps);
+        ps_advance(ps);
+        ps_advance(ps);
         if (ps_at(ps, STOK_IDENT)) {
             AstNode *ty = parse_type(ps);
             if (ps_match(ps, STOK_SEMI)) {
@@ -3643,17 +3600,16 @@ static AstNode *parse_top_decl(PS *ps) {
             }
             ast_node_free(ty);
         }
-        ps->pos = save;
+        ps_restore(ps, sv);
     }
 
-    /* `extern swap<int>;` — function explicit instantiation (AST_EXTERN_INST). */
     if (t.kind == STOK_EXTERN && ps_peek2(ps).kind == STOK_IDENT &&
         ps_peek3(ps).kind == STOK_LT) {
-        size_t save = ps->pos;
+        PsSave sv = ps_save(ps);
         ps_advance(ps);
-        size_t sv2 = ps->pos;
+        PsSave sv2 = ps_save(ps);
         ps_advance(ps);
-        ps->pos = sv2;
+        ps_restore(ps, sv2);
         AstNode *ty = parse_type(ps);
         if (ps_match(ps, STOK_SEMI)) {
             AstNode *ei = ast_node_new(AST_EXTERN_INST, t.loc);
@@ -3661,7 +3617,7 @@ static AstNode *parse_top_decl(PS *ps) {
             return ei;
         }
         ast_node_free(ty);
-        ps->pos = save;
+        ps_restore(ps, sv);
     }
 
     if (!is_type_start(ps)) {
@@ -3678,39 +3634,28 @@ static AstNode *parse_top_decl(PS *ps) {
          * The generic params are registered as typedef-names so parse_decl_specifiers
          * can recognise T as a type. */
         if (ps_at(ps, STOK_LT)) {
-            size_t save_pos = ps->pos;
-            size_t save_diag_len = ps->diags ? ps->diags->len : 0;
-            int save_pending = ps->pending_close;
+            PsSave sv = ps_save(ps);
             AstVec tmp_params = {0};
             parse_generic_params(ps, &tmp_params);
 
             bool is_gfunc_prefix = false;
             bool is_ext_prefix = false;
             if (tmp_params.len > 0 && !ps_at(ps, STOK_EOF)) {
-                /* Must be followed by a type then IDENT + '('.
-                 * The type may be a generic type like `vec<T>`,
-                 * so we can't just peek 2 tokens ahead.  Instead
-                 * do a speculative parse: register generic params
-                 * as typedefs, parse one DeclSpecs, and check if
-                 * the next tokens are IDENT + '('. */
                 for (size_t gi = 0; gi < tmp_params.len; gi++) {
                     AstNode *gp = tmp_params.data[gi];
                     if (gp && gp->kind == AST_GENERIC_PARAM && gp->u.generic_param.name)
                         td_add(&ps->typedefs, gp->u.generic_param.name);
                 }
                 if (is_type_start(ps)) {
-                    size_t save2 = ps->pos;
-                    size_t save_diag2 = ps->diags ? ps->diags->len : 0;
+                    PsSave sv2 = ps_save(ps);
                     DeclSpecs probe = parse_decl_specifiers(ps);
                     if (!probe.empty && probe.base_ty &&
                         ps_at(ps, STOK_IDENT)) {
                         if (ps_peek2(ps).kind == STOK_LPAREN) {
                             is_gfunc_prefix = true;
                         } else if (ps_peek2(ps).kind == STOK_LT) {
-                            /* Check extension method: <T> Ret Class<T>.method(...)
-                             * Peek past IDENT<T,...> to find '.' */
-                            size_t p = ps->pos + 1; /* skip IDENT */
-                            p++; /* skip '<' */
+                            size_t p = ps->pos + 1;
+                            p++;
                             int gd = 1;
                             while (p < ps->ntoks && gd > 0) {
                                 SharpTokKind pk = ps->toks[p].kind;
@@ -3721,13 +3666,11 @@ static AstNode *parse_top_decl(PS *ps) {
                                 p++;
                             }
                             if (p < ps->ntoks && ps->toks[p].kind == STOK_DOT)
-                                is_ext_prefix = true; /* extension method */
+                                is_ext_prefix = true;
                         }
                     }
-                    ps->pos = save2;
-                    rollback_diags(ps, save_diag2);
+                    ps_restore(ps, sv2);
                 }
-                /* Clean up the typedefs we just added for probing */
                 for (size_t gi = 0; gi < tmp_params.len; gi++) {
                     AstNode *gp = tmp_params.data[gi];
                     if (gp && gp->kind == AST_GENERIC_PARAM && gp->u.generic_param.name)
@@ -3736,7 +3679,6 @@ static AstNode *parse_top_decl(PS *ps) {
             }
 
             if (is_gfunc_prefix || is_ext_prefix) {
-                /* Register generic params so return type can use them */
                 for (size_t gi = 0; gi < tmp_params.len; gi++) {
                     AstNode *gp = tmp_params.data[gi];
                     if (gp && gp->kind == AST_GENERIC_PARAM && gp->u.generic_param.name)
@@ -3744,9 +3686,6 @@ static AstNode *parse_top_decl(PS *ps) {
                 }
 
                 if (is_ext_prefix) {
-                    /* Extension method with <T> prefix: <K,V> Map<K,V> Map<K,V>.make(...)
-                     * try_ext_method handles the rest; generic params already registered
-                     * as typedefs above. Free tmp_params since finish_func re-parses them. */
                     astvec_free(&tmp_params);
                     goto try_ext_method;
                 }
@@ -3762,16 +3701,12 @@ static AstNode *parse_top_decl(PS *ps) {
                     fn->u.func_def.is_thread_local = ds.is_thread_local;
                     fn->u.func_def.gcc_attrs = ds.gcc_attrs;
                     ds.gcc_attrs = NULL;
-                    /* Copy generic params to the function node */
                     astvec_free(&fn->u.func_def.generic_params);
                     fn->u.func_def.generic_params = tmp_params;
                     return fn;
                 }
 
-                /* Rollback */
-                ps->pos = save_pos;
-                ps->pending_close = save_pending;
-                rollback_diags(ps, save_diag_len);
+                ps_restore(ps, sv);
                 for (size_t gi = 0; gi < tmp_params.len; gi++) {
                     AstNode *gp = tmp_params.data[gi];
                     if (gp && gp->kind == AST_GENERIC_PARAM && gp->u.generic_param.name)
@@ -3779,9 +3714,7 @@ static AstNode *parse_top_decl(PS *ps) {
                 }
                 astvec_free(&tmp_params);
             } else {
-                ps->pos = save_pos;
-                ps->pending_close = save_pending;
-                rollback_diags(ps, save_diag_len);
+                ps_restore(ps, sv);
                 astvec_free(&tmp_params);
             }
         }
@@ -3800,8 +3733,7 @@ static AstNode *parse_top_decl(PS *ps) {
      * for the IDENT . IDENT pattern to detect and handle this case. */
     try_ext_method:
     {
-        size_t save_pos;
-        size_t save_diag;
+        PsSave em_sv;
         int depth;
         const char *cname;
         size_t cname_len;
@@ -3809,8 +3741,7 @@ static AstNode *parse_top_decl(PS *ps) {
         bool is_ext;
         bool is_ext_op;
 
-        save_pos   = ps->pos;
-        save_diag  = ps->diags ? ps->diags->len : 0;
+        em_sv      = ps_save(ps);
         depth      = 0;
         cname      = NULL;
         cname_len  = 0;
@@ -3819,7 +3750,7 @@ static AstNode *parse_top_decl(PS *ps) {
         is_ext_op  = false;
 
         /* Scan forward at depth 0 to find IDENT . IDENT( or IDENT . operator+( */
-        for (size_t i = save_pos; i < ps->ntoks; i++) {
+        for (size_t i = em_sv.pos; i < ps->ntoks; i++) {
             SharpTokKind k = ps->toks[i].kind;
             if (k == STOK_LT || k == STOK_LPAREN || k == STOK_LBRACKET) depth++;
             else if (k == STOK_GT || k == STOK_RPAREN || k == STOK_RBRACKET) {
@@ -3883,7 +3814,7 @@ static AstNode *parse_top_decl(PS *ps) {
 
             /* Check if first token == class name (return type same as class name).
              * In this case we must NOT remove it from the typedef set. */
-            SharpTok first_tok = ps->toks[save_pos];
+            SharpTok first_tok = ps->toks[em_sv.pos];
             bool rtype_eq_cname = (first_tok.kind == STOK_IDENT &&
                                     cname_len == first_tok.len &&
                                     memcmp(cname, first_tok.text, cname_len) == 0);
@@ -4013,10 +3944,8 @@ static AstNode *parse_top_decl(PS *ps) {
              * the return type uses generic params not in the typedef
              * set (e.g. `K* HashMap<K,V>.get(this)`).
              * Consume the return type manually up to the class name. */
-            if (cname_tok > save_pos) {
-                /* Restore position and rebuild return type */
-                ps->pos = save_pos;
-                rollback_diags(ps, save_diag);
+            if (cname_tok > em_sv.pos) {
+                ps_restore(ps, em_sv);
 
                 AstNode *ret_ty = NULL;
                 while (ps->pos < cname_tok && !ps_at(ps, STOK_EOF)) {
@@ -4039,14 +3968,11 @@ static AstNode *parse_top_decl(PS *ps) {
                 }
             }
 
-            /* Restore on failure */
-            ps->pos = save_pos;
-            rollback_diags(ps, save_diag);
+            ps_restore(ps, em_sv);
         }
     }
 
-    size_t ds_save_pos = ps->pos;
-    size_t ds_save_diag = ps->diags ? ps->diags->len : 0;
+    PsSave ds_sv = ps_save(ps);
     DeclSpecs ds = parse_decl_specifiers(ps);
     if (ds.empty || !ds.base_ty) {
         ps_error(ps, t.loc, "missing declaration specifier");
@@ -4105,8 +4031,7 @@ static AstNode *parse_top_decl(PS *ps) {
             ast_node_free(ds.base_ty);
             free(ds.gcc_attrs);
             memset(&ds, 0, sizeof ds);
-            ps->pos = ds_save_pos;
-            rollback_diags(ps, ds_save_diag);
+            ps_restore(ps, ds_sv);
             goto try_ext_method;
         }
 
@@ -4924,17 +4849,13 @@ static AstNode *parse_primary(PS *ps) {
         }
         /* heuristic: if inner is a type, this is either a cast or a
          * compound literal (S4) — a `(Type){ init-list }` expression. */
-        size_t save = ps->pos;
-        /* GCC allows `(__attribute__(...) type)` casts.  Consume any
-         * leading attributes BEFORE setting the save point, so that a
-         * failed cast rollback does not re-expose the attributes to the
-         * expression parser (which cannot handle them). */
+        PsSave sv_cast = ps_save(ps);
         bool had_leading_attr = false;
         while (ps_at(ps, STOK_ATTRIBUTE)) {
             eat_attribute_specifiers(ps, NULL);
             had_leading_attr = true;
         }
-        if (had_leading_attr) save = ps->pos;  /* update save past attrs */
+        if (had_leading_attr) sv_cast = ps_save(ps);
         if (is_type_start(ps)) {
             AstNode *ty = parse_type(ps);
             if (ps_at(ps, STOK_RPAREN)) {
@@ -4957,7 +4878,7 @@ static AstNode *parse_primary(PS *ps) {
             }
             /* not a cast — rollback */
             ast_node_free(ty);
-            ps->pos = save;
+            ps_restore(ps, sv_cast);
         }
         AstNode *inner = parse_expr(ps);
         ps_expect(ps, STOK_RPAREN, "closing ')'");
@@ -5160,16 +5081,14 @@ static AstNode *parse_primary(PS *ps) {
             SharpTok nxt  = ps_peek(ps);    /* '{' */
             (void)nxt;
             /* We do a simple lookahead-2 check */
-            size_t save2 = ps->pos;
-            ps_advance(ps); /* consume '{' */
-            /* struct literal: starts with .field = ... (C-style designated init) */
+            PsSave sv_lit = ps_save(ps);
+            ps_advance(ps);
             if (ps_at(ps, STOK_DOT) || ps_at(ps, STOK_RBRACE)) {
                 if (ps_at(ps, STOK_DOT)) {
-                    ps_advance(ps); /* '.' */
+                    ps_advance(ps);
                     if (ps_at(ps, STOK_IDENT) && ps_peek2(ps).kind == STOK_EQ) {
-                        /* yes, struct literal */
-                        ps->pos = save2; /* back to '{' */
-                        ps_advance(ps); /* consume '{' */
+                        ps_restore(ps, sv_lit);
+                        ps_advance(ps);
                         AstNode *sl = ast_node_new(AST_STRUCT_LIT, t.loc);
                         AstNode *ty = ast_node_new(AST_TYPE_NAME, t.loc);
                         ty->u.type_name.name = cpp_xstrndup(t.text, t.len);
@@ -5190,9 +5109,9 @@ static AstNode *parse_primary(PS *ps) {
                     }
                 }
                 /* empty braces or not a struct literal — rollback */
-                ps->pos = save2;
+                ps_restore(ps, sv_lit);
             } else {
-                ps->pos = save2;
+                ps_restore(ps, sv_lit);
             }
         }
 
@@ -5207,8 +5126,7 @@ static AstNode *parse_primary(PS *ps) {
          *   (b) IDENT<args>.method / ->method     → carrier then postfix
          *   (c) IDENT<args>{ .field=val, ... }    → AST_STRUCT_LIT      */
         if (ps_at(ps, STOK_LT)) {
-            size_t save2    = ps->pos;
-            size_t save_diag = ps->diags ? ps->diags->len : 0;
+            PsSave sv_gen = ps_save(ps);
             AstVec type_args = {0};
 
             if (parse_generic_args(ps, &type_args)) {
@@ -5282,8 +5200,7 @@ static AstNode *parse_primary(PS *ps) {
                 astvec_free(&type_args);
             }
             /* parse_generic_args failed — roll back */
-            ps->pos = save2;
-            rollback_diags(ps, save_diag);
+            ps_restore(ps, sv_gen);
         }
 
         return parse_postfix(ps, id);
@@ -5753,32 +5670,27 @@ static AstNode *parse_stmt(PS *ps) {
          * forward declaration — build AST_FUNC_DEF with no body instead. */
         {
             char *_fname = NULL;
-            size_t _save = ps->pos;
-            /* Clone base_ty so parse_declarator can consume it without
-             * invalidating ds.base_ty for the fallback path. */
+            PsSave _sv = ps_save(ps);
             AstNode *_base_clone = ast_clone_type(ds.base_ty);
             AstNode *_fty = parse_declarator(ps, _base_clone, &_fname);
             if (_fty && _fty->kind == AST_TYPE_FUNC && _fname &&
                 ds.storage != SC_TYPEDEF &&
                 ps_at(ps, STOK_SEMI)) {
-                /* It's a local function prototype */
                 AstNode *fn = build_func_def_from_decl(_fty, _fname, t.loc);
                 fn->u.func_def.storage   = ds.storage;
                 fn->u.func_def.is_inline = ds.is_inline;
-                fn->u.func_def.is_constexpr = ds.is_constexpr; /* C23 */
+                fn->u.func_def.is_constexpr = ds.is_constexpr;
                 fn->u.func_def.gcc_attrs = ds.gcc_attrs;
                 ds.gcc_attrs = NULL;
-                ps_advance(ps);  /* consume ';' */
+                ps_advance(ps);
                 AstNode *wrap = ast_node_new(AST_DECL_STMT, t.loc);
                 wrap->u.decl_stmt.decl = fn;
-                free(ds.gcc_attrs);  /* already NULL, safe */
+                free(ds.gcc_attrs);
                 return wrap;
             }
-            /* Not a function prototype — rewind and fall through to
-             * parse_init_declarator_list which re-parses from the save. */
-            ast_node_free(_fty);   /* frees _base_clone too (it's owned) */
+            ast_node_free(_fty);
             free(_fname);
-            ps->pos = _save;
+            ps_restore(ps, _sv);
         }
         return parse_init_declarator_list(ps, &ds, /*stmt_wrap=*/true);
     }
