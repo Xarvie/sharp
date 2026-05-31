@@ -326,6 +326,11 @@ static void  sema_block(SS *ss, AstNode *block, Scope *block_scope);
  * Expression sema
  * ====================================================================== */
 
+static bool ty_is_struct_value(TyStore *ts, Type *t) {
+    Type *u = ty_unconst(ts, t);
+    return u && u->kind == TY_STRUCT;
+}
+
 static Type *sema_binop(SS *ss, AstNode *expr) {
     SharpTokKind op = expr->u.binop.op;
     Type *lt = sema_expr(ss, expr->u.binop.lhs);
@@ -361,8 +366,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
      * struct type" even though the operands are pointers. */
     {
         Type *lt_unconst = ty_unconst(ts, lt);
-        bool lhs_is_struct_value =
-            lt_unconst && lt_unconst->kind == TY_STRUCT;
+        bool lhs_is_struct_value = ty_is_struct_value(ts, lt);
         const char *op_nm = lhs_is_struct_value ? op_overload_name(op) : NULL;
         if (op_nm) {
             Scope *ss_s = struct_scope_of(ts, lt, ss->scope);
@@ -585,11 +589,7 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
         if (ty_is_vector(ot)) return ot;
         /* Check for unary operator overload on struct type (spec §运算符重载).
          * Lookup order: (1) struct method operator-() (2) free operator-(T). */
-        if (ot && (ot->kind == TY_STRUCT ||
-                   (ot->kind == TY_CONST && ot->u.const_.base &&
-                    ot->u.const_.base->kind == TY_STRUCT) ||
-                   (ot->kind == TY_ATOMIC && ot->u.atomic.base &&
-                    ot->u.atomic.base->kind == TY_STRUCT))) {
+        if (ty_is_struct_value(ts, ot)) {
             Type *ot_unc = ty_unconst(ts, ot);
             const char *op_nm = (op == STOK_MINUS) ? "operator-" : "operator+";
             /* (1) struct scope */
@@ -1411,6 +1411,16 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
         t = ty_int(ts);
         break;
 
+    case AST_INIT_LIST:
+        for (size_t i = 0; i < expr->u.init_list.items.len; i++)
+            sema_expr(ss, expr->u.init_list.items.data[i]);
+        t = ty_error(ts);
+        break;
+    case AST_DESIGNATED_INIT:
+        sema_expr(ss, expr->u.designated_init.value);
+        t = ty_error(ts);
+        break;
+
     default:
         t = ty_error(ts);
         break;
@@ -1584,6 +1594,9 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
     case AST_COMPUTED_GOTO:
         sema_expr(ss, stmt->u.computed_goto.target);
         break;
+    case AST_CASE:
+        if (stmt->u.case_.value) sema_expr(ss, stmt->u.case_.value);
+        break;
     case AST_SWITCH: {
         sema_expr(ss, stmt->u.switch_.cond);
         sema_stmt(ss, stmt->u.switch_.body);
@@ -1687,6 +1700,15 @@ static bool recv_object_is_const(Type *t) {
     return false;
 }
 
+static bool sema_require_arrow(SS *ss, const AstNode *expr, Type *recv_t) {
+    Type *base = ty_unconst(ss->ctx->ts, recv_t);
+    if (!base || !ty_is_pointer(base)) {
+        FE_ERROR(ss->ctx->diags, expr->loc, "'->' requires pointer operand");
+        return false;
+    }
+    return true;
+}
+
 /* Sema for field access: recv.field or recv->field */
 static Type *sema_field_access_expr(SS *ss, AstNode *expr) {
     TyStore *ts = ss->ctx->ts;
@@ -1695,13 +1717,7 @@ static Type *sema_field_access_expr(SS *ss, AstNode *expr) {
     const char *field = expr->u.field_access.field;
 
     /* Validate arrow: recv must be a pointer. */
-    if (arrow) {
-        Type *base = ty_unconst(ts, recv_t);
-        if (!base || !ty_is_pointer(base)) {
-            FE_ERROR(ss->ctx->diags, expr->loc, "'->' requires pointer operand");
-            return ty_error(ts);
-        }
-    }
+    if (arrow && !sema_require_arrow(ss, expr, recv_t)) return ty_error(ts);
 
     /* Check if recv is a type name (associated function call context). */
     if (expr->u.field_access.recv->kind == AST_IDENT) {
@@ -1841,13 +1857,7 @@ static Type *sema_method_call_expr(SS *ss, AstNode *expr) {
     }
 
     /* Validate arrow: recv must be a pointer. */
-    if (arrow) {
-        Type *base = ty_unconst(ts, recv_t);
-        if (!base || !ty_is_pointer(base)) {
-            FE_ERROR(ss->ctx->diags, expr->loc, "'->' requires pointer operand");
-            return ty_error(ts);
-        }
-    }
+    if (arrow && !sema_require_arrow(ss, expr, recv_t)) return ty_error(ts);
 
     /* Look up method in struct scope. */
     Symbol *msym = struct_member(ts, recv_t, method, ss->ctx->file_scope);
@@ -2269,6 +2279,11 @@ static StructArgResult resolve_struct_type_arg(SS *ss, const AstNode *ty_arg) {
  *   ==  → BINOP(dummy, STOK_EQEQ, dummy)   (dummy = IDENT("?") or INT_LIT(0))
  * We extract the operator from whatever AST node the parser produced.
  */
+static Scope *scope_find_file_scope(Scope *s) {
+    while (s && s->kind != SCOPE_FILE) s = s->parent;
+    return s;
+}
+
 static int eval_has_operator(SS *ss, const AstNode *expr) {
     if (!expr || expr->u.at_intrinsic.args.len < 2) return 0;
     AstNode *type_arg = expr->u.at_intrinsic.args.data[0];
@@ -2314,8 +2329,7 @@ static int eval_has_operator(SS *ss, const AstNode *expr) {
     if (ss->ctx && ss->ctx->file_scope && sr.type->u.struct_.name) {
         /* Walk up to SCOPE_FILE — during specialization re-eval,
          * ctx->file_scope may be a function-local scope. */
-        Scope *fs = ss->ctx->file_scope;
-        while (fs && fs->kind != SCOPE_FILE) fs = fs->parent;
+        Scope *fs = scope_find_file_scope(ss->ctx->file_scope);
         if (fs) {
             Symbol *es = find_extension_method(fs, sr.type->u.struct_.name, opname);
             if (es && es->decl && es->decl->kind == AST_FUNC_DEF &&
@@ -2419,8 +2433,7 @@ static int eval_has_method(SS *ss, const AstNode *expr) {
         /* Walk up to the SCOPE_FILE scope — during generic
          * specialization, ss->ctx->file_scope may be a function-local
          * scope rather than the actual file scope. */
-        Scope *fs = ss->ctx->file_scope;
-        while (fs && fs->kind != SCOPE_FILE) fs = fs->parent;
+        Scope *fs = scope_find_file_scope(ss->ctx->file_scope);
         if (fs) {
             Symbol *es = find_extension_method(fs, sr.type->u.struct_.name, name);
             if (es && es->decl && es->decl->kind == AST_FUNC_DEF)

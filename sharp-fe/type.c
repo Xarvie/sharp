@@ -425,24 +425,19 @@ Type *ty_strip_cvq(TyStore *ts, Type *t) {
     return t;
 }
 
+static Type *ty_deref_inner(Type *inner) {
+    if (!inner) return NULL;
+    if (inner->kind == TY_PTR)   return inner->u.ptr.base;
+    if (inner->kind == TY_ARRAY) return inner->u.array.base;
+    return NULL;
+}
+
 Type *ty_deref(const Type *t) {
     if (!t) return NULL;
     if (t->kind == TY_PTR) return t->u.ptr.base;
     if (t->kind == TY_ARRAY) return t->u.array.base;
-    if (t->kind == TY_CONST) {
-        if (!t->u.const_.base) return NULL;
-        if (t->u.const_.base->kind == TY_PTR)
-            return t->u.const_.base->u.ptr.base;
-        if (t->u.const_.base->kind == TY_ARRAY)
-            return t->u.const_.base->u.array.base;
-    }
-    if (t->kind == TY_ATOMIC) {
-        if (!t->u.atomic.base) return NULL;
-        if (t->u.atomic.base->kind == TY_PTR)
-            return t->u.atomic.base->u.ptr.base;
-        if (t->u.atomic.base->kind == TY_ARRAY)
-            return t->u.atomic.base->u.array.base;
-    }
+    if (t->kind == TY_CONST)  return ty_deref_inner(t->u.const_.base);
+    if (t->kind == TY_ATOMIC) return ty_deref_inner(t->u.atomic.base);
     return NULL;
 }
 
