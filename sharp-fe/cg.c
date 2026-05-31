@@ -307,6 +307,13 @@ static void cg_emit_typedef_close(CgCtx *ctx, const char *cname,
         cg_printf(ctx, "} %s;\n", cname);
 }
 
+static void cg_emit_typedef_semi(CgCtx *ctx, const char *gcc_attrs) {
+    if (gcc_attrs)
+        cg_printf(ctx, " %s;\n", gcc_attrs);
+    else
+        cg_puts(ctx, ";\n");
+}
+
 static inline bool field_is_comma_cont(const AstNode *n) {
     return n && n->kind == AST_FIELD_DECL && n->u.field_decl.is_comma_cont;
 }
@@ -2833,8 +2840,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
                 /* For PTR(FUNC(ret=PTR(FUNC))) doubly-nested function pointer
                  * casts, use ty_from_ast (not sema's cast_t which may be wrong)
                  * so cg_type gets the correct nested structure. */
-            if (pb && pb->kind == TY_PTR && pb->u.ptr.base &&
-                pb->u.ptr.base->kind == TY_FUNC) {
+            if (ty_is_func_ptr(pb)) {
                 const Type *ret = pb->u.ptr.base->u.func.ret;
                 while (ret && ret->kind == TY_PTR) ret = ret->u.ptr.base;
                 if (ret && ret->kind == TY_FUNC) {
@@ -6558,10 +6564,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                             cg_const_expr(ctx, ptr->u.type_array.size);
                         }
                         cg_puts(ctx, "]");
-                        if (d->u.typedef_decl.gcc_attrs)
-                            cg_printf(ctx, " %s;\n", d->u.typedef_decl.gcc_attrs);
-                        else
-                            cg_puts(ctx, ";\n");
+                        cg_emit_typedef_semi(ctx, d->u.typedef_decl.gcc_attrs);
                     } else if (target->kind == AST_TYPE_ARRAY &&
                                target->u.type_array.base &&
                                target->u.type_array.base->kind == AST_TYPE_PTR) {
@@ -6603,24 +6606,17 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                             if (afp && !afn->u.type_func.params_unspecified)
                                 cg_puts(ctx, "void");
                             cg_puts(ctx, ")");
-                            if (d->u.typedef_decl.gcc_attrs)
-                                cg_printf(ctx, " %s;\n", d->u.typedef_decl.gcc_attrs);
-                            else
-                                cg_puts(ctx, ";\n");
+                            cg_emit_typedef_semi(ctx, d->u.typedef_decl.gcc_attrs);
                         } else {
                             /* Fallback: not a fnptr array, emit normally */
                             cg_type_from_ast(ctx, target);
-                            if (d->u.typedef_decl.gcc_attrs)
-                                cg_printf(ctx, " %s %s;\n", cname, d->u.typedef_decl.gcc_attrs);
-                            else
-                                cg_printf(ctx, " %s;\n", cname);
+                            cg_printf(ctx, " %s", cname);
+                            cg_emit_typedef_semi(ctx, d->u.typedef_decl.gcc_attrs);
                         }
                     } else {
                         cg_type_from_ast(ctx, target);
-                        if (d->u.typedef_decl.gcc_attrs)
-                            cg_printf(ctx, " %s %s;\n", cname, d->u.typedef_decl.gcc_attrs);
-                        else
-                            cg_printf(ctx, " %s;\n", cname);
+                        cg_printf(ctx, " %s", cname);
+                        cg_emit_typedef_semi(ctx, d->u.typedef_decl.gcc_attrs);
                     }
                 }
             } else {
@@ -6628,10 +6624,7 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                 if (t) {
                     cg_puts(ctx, "typedef ");
                     cg_decl(ctx, t, cname);
-                    if (d->u.typedef_decl.gcc_attrs)
-                        cg_printf(ctx, " %s;\n", d->u.typedef_decl.gcc_attrs);
-                    else
-                        cg_puts(ctx, ";\n");
+                    cg_emit_typedef_semi(ctx, d->u.typedef_decl.gcc_attrs);
                 }
             }
         }

@@ -616,8 +616,7 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
          * PTR(FUNC), so `&io_fclose` must NOT add another PTR layer.
          * For regular lvalues (variables, fields) the normal PTR wrap
          * is correct. */
-        if (ot && ot->kind == TY_PTR && ot->u.ptr.base &&
-            ot->u.ptr.base->kind == TY_FUNC) {
+        if (ty_is_func_ptr(ot)) {
             return ot;   /* already PTR(FUNC) — address-of function is a no-op */
         }
         return ty_ptr(ts, ot);   /* & lvalue → T* */
