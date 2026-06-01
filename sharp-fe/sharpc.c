@@ -106,10 +106,9 @@ static char *sharp_find_std_dir(void) {
         exe_dir[dirlen] = '\0';
     }
 
-    /* Candidate paths to try */
     const char *candidates[] = {
-        "std",      /* <exe_dir>/std/ */
-        "../std",   /* <exe_dir>/../std/ */
+        "std",
+        "../std",
     };
 
     for (int i = 0; i < 2; i++) {
@@ -125,6 +124,43 @@ static char *sharp_find_std_dir(void) {
         if (stat(candidate, &st) == 0 && S_ISDIR(st.st_mode)) {
 #endif
             return strdup(candidate);
+        }
+    }
+
+    {
+        char dir[4096];
+        size_t dlen = strlen(exe_dir);
+        if (dlen < sizeof(dir)) {
+            memcpy(dir, exe_dir, dlen);
+            dir[dlen] = '\0';
+            for (int depth = 0; depth < 6; depth++) {
+                char *sep = NULL;
+#ifdef _WIN32
+                {
+                    const char *bs = strrchr(dir, '\\');
+                    const char *fs = strrchr(dir, '/');
+                    sep = (bs > fs) ? bs : fs;
+                }
+#else
+                sep = strrchr(dir, '/');
+#endif
+                if (!sep) break;
+                size_t plen = (size_t)(sep - dir);
+                char candidate[4096];
+                int n = snprintf(candidate, sizeof(candidate),
+                                "%.*s/std", (int)plen, dir);
+                if (n > 0 && (size_t)n < sizeof(candidate)) {
+#ifdef _WIN32
+                    DWORD attr = GetFileAttributesA(candidate);
+                    if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
+#else
+                    struct stat st_up;
+                    if (stat(candidate, &st_up) == 0 && S_ISDIR(st_up.st_mode))
+#endif
+                        return strdup(candidate);
+                }
+                dir[plen] = '\0';
+            }
         }
     }
 

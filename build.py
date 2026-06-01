@@ -14,6 +14,7 @@ import subprocess
 import sys
 import os
 import platform as _plat
+import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -116,12 +117,22 @@ def link_exe(objs, out_rel, extra_flags=None):
     run(cmd, capture_output=True, text=True)
 
 
+def deploy_to_env(exe_path):
+    env_bin = ROOT.parent / "env" / "sharpc" / "bin"
+    if env_bin.is_dir():
+        dst = env_bin / exe_path.name
+        shutil.copy2(str(exe_path), str(dst))
+        print(f"  CP {exe_path.name} -> {dst}")
+
+
 def build_sharpc():
     print("[build] sharpc")
     objs = [compile_obj(s) for s in SHARPC_SOURCES]
     name = "sharpc" + EXE_EXT
     link_exe(objs, name)
-    return BUILD_DIR / name
+    exe = BUILD_DIR / name
+    deploy_to_env(exe)
+    return exe
 
 
 def build_probe_cpp():

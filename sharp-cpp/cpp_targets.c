@@ -216,10 +216,9 @@ static const char *find_zig_exe(void)
         return g_sess.zig_exe[0] ? g_sess.zig_exe : NULL;
     g_sess.zig_found = 1;
 
-    /* Priority 1: resolve self exe path, look for zig nearby */
     char exe_path[MAX_PATH];
     DWORD exe_len = GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
-    
+
     if (exe_len > 0 && exe_len < sizeof(exe_path)) {
         char *last_sep = NULL;
         {
@@ -230,27 +229,22 @@ static const char *find_zig_exe(void)
         if (last_sep) {
             size_t dirlen = (size_t)(last_sep - exe_path);
 
-            /* Priority 1a: {sharp_bin}\\zig.exe */
             if (dirlen + 9 < sizeof(g_sess.zig_exe)) {
                 memcpy(g_sess.zig_exe, exe_path, dirlen);
                 memcpy(g_sess.zig_exe + dirlen, "\\zig.exe", 9);
-                
                 DWORD a = GetFileAttributesA(g_sess.zig_exe);
                 if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY))
                     return g_sess.zig_exe;
             }
 
-            /* Priority 1a2: {sharp_bin}\\zig\\zig.exe */
             if (dirlen + 13 < sizeof(g_sess.zig_exe)) {
                 memcpy(g_sess.zig_exe, exe_path, dirlen);
                 memcpy(g_sess.zig_exe + dirlen, "\\zig\\zig.exe", 13);
-                
                 DWORD a1b = GetFileAttributesA(g_sess.zig_exe);
                 if (a1b != INVALID_FILE_ATTRIBUTES && !(a1b & FILE_ATTRIBUTE_DIRECTORY))
                     return g_sess.zig_exe;
             }
 
-            /* Priority 1b: {sharp_bin}\\..\\zig\\zig.exe */
             if (dirlen >= 1) {
                 char parent_dir[MAX_PATH];
                 memcpy(parent_dir, exe_path, dirlen);
@@ -266,23 +260,45 @@ static const char *find_zig_exe(void)
                     if (pdirlen + 13 < sizeof(g_sess.zig_exe)) {
                         memcpy(g_sess.zig_exe, parent_dir, pdirlen);
                         memcpy(g_sess.zig_exe + pdirlen, "\\zig\\zig.exe", 13);
-                        
                         DWORD a2 = GetFileAttributesA(g_sess.zig_exe);
                         if (a2 != INVALID_FILE_ATTRIBUTES && !(a2 & FILE_ATTRIBUTE_DIRECTORY))
                             return g_sess.zig_exe;
                     }
                 }
             }
+
+            {
+                char dir[MAX_PATH];
+                memcpy(dir, exe_path, dirlen);
+                dir[dirlen] = '\0';
+                for (int depth = 0; depth < 6; depth++) {
+                    char *sep = NULL;
+                    {
+                        char *bs = strrchr(dir, '\\');
+                        char *fs = strrchr(dir, '/');
+                        sep = (bs > fs) ? bs : fs;
+                    }
+                    if (!sep) break;
+                    size_t plen = (size_t)(sep - dir);
+                    char cand[MAX_PATH];
+                    if (plen + 13 < sizeof(cand)) {
+                        memcpy(cand, dir, plen);
+                        memcpy(cand + plen, "\\zig\\zig.exe", 13);
+                        DWORD a3 = GetFileAttributesA(cand);
+                        if (a3 != INVALID_FILE_ATTRIBUTES && !(a3 & FILE_ATTRIBUTE_DIRECTORY)) {
+                            memcpy(g_sess.zig_exe, cand, plen + 13);
+                            return g_sess.zig_exe;
+                        }
+                    }
+                    dir[plen] = '\0';
+                }
+            }
         }
     }
 
-    /* Priority 2: PATH search */
-    
     if (SearchPathA(NULL, "zig.exe", NULL, sizeof(g_sess.zig_exe), g_sess.zig_exe, NULL))
         return g_sess.zig_exe;
 
-    /* Fallback: common install locations */
-    
     const char *fallbacks[] = {
         "C:\\Program Files\\zig\\zig.exe",
         "C:\\zig\\zig.exe",
@@ -295,7 +311,7 @@ static const char *find_zig_exe(void)
             return g_sess.zig_exe;
         }
     }
-    
+
     return NULL;
 }
 
@@ -311,7 +327,6 @@ static const char *find_zig_exe(void)
         return g_sess.zig_exe[0] ? g_sess.zig_exe : NULL;
     g_sess.zig_found = 1;
 
-    /* Priority 1: resolve self exe path, look for zig nearby */
     char exe_path[4096];
     ssize_t exe_len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
     if (exe_len > 0 && (size_t)exe_len < sizeof(exe_path)) {
@@ -320,7 +335,6 @@ static const char *find_zig_exe(void)
         if (last_sep) {
             size_t dirlen = (size_t)(last_sep - exe_path);
 
-            /* Priority 1a: {sharp_bin}/zig */
             if (dirlen + 5 < sizeof(g_sess.zig_exe)) {
                 memcpy(g_sess.zig_exe, exe_path, dirlen);
                 memcpy(g_sess.zig_exe + dirlen, "/zig", 5);
@@ -330,7 +344,6 @@ static const char *find_zig_exe(void)
                     return g_sess.zig_exe;
             }
 
-            /* Priority 1a2: {sharp_bin}/zig/zig */
             if (dirlen + 9 < sizeof(g_sess.zig_exe)) {
                 memcpy(g_sess.zig_exe, exe_path, dirlen);
                 memcpy(g_sess.zig_exe + dirlen, "/zig/zig", 9);
@@ -340,7 +353,6 @@ static const char *find_zig_exe(void)
                     return g_sess.zig_exe;
             }
 
-            /* Priority 1b: {sharp_bin}/../zig/zig */
             if (dirlen >= 1) {
                 char parent_dir[4096];
                 memcpy(parent_dir, exe_path, dirlen);
@@ -358,10 +370,32 @@ static const char *find_zig_exe(void)
                     }
                 }
             }
+
+            {
+                char dir[4096];
+                memcpy(dir, exe_path, dirlen);
+                dir[dirlen] = '\0';
+                for (int depth = 0; depth < 6; depth++) {
+                    char *sep = strrchr(dir, '/');
+                    if (!sep) break;
+                    size_t plen = (size_t)(sep - dir);
+                    char cand[4096];
+                    if (plen + 9 < sizeof(cand)) {
+                        memcpy(cand, dir, plen);
+                        memcpy(cand + plen, "/zig/zig", 9);
+                        struct stat st_up;
+                        if (stat(cand, &st_up) == 0 && !S_ISDIR(st_up.st_mode) &&
+                            access(cand, X_OK) == 0) {
+                            memcpy(g_sess.zig_exe, cand, plen + 9);
+                            return g_sess.zig_exe;
+                        }
+                    }
+                    dir[plen] = '\0';
+                }
+            }
         }
     }
 
-    /* Priority 2: PATH environment variable */
     const char *path_env = getenv("PATH");
     if (path_env) {
         const char *start = path_env;
