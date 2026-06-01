@@ -797,9 +797,18 @@ static Type *typeof_eval_expr(TyStore *ts, AstNode *expr, Scope *scope) {
     }
 }
 
+static Type *ty_from_ast_depth(TyStore *ts, const AstNode *node,
+                               Scope *scope, FeDiagArr *diags, int depth);
+
 Type *ty_from_ast(TyStore *ts, const AstNode *node,
                   Scope *scope, FeDiagArr *diags) {
+    return ty_from_ast_depth(ts, node, scope, diags, 0);
+}
+
+Type *ty_from_ast_depth(TyStore *ts, const AstNode *node,
+                        Scope *scope, FeDiagArr *diags, int depth) {
     if (!node) return ty_error(ts);
+    if (depth > 64) return ty_error(ts);
 
     switch (node->kind) {
     case AST_TYPE_VOID:  return ty_void(ts);
@@ -807,22 +816,22 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
     // AST_TYPE_AUTO already covers error path
 
     case AST_TYPE_CONST: {
-        Type *base = ty_from_ast(ts, node->u.type_const.base, scope, diags);
+        Type *base = ty_from_ast_depth(ts, node->u.type_const.base, scope, diags, depth + 1);
         return ty_const(ts, base);
     }
     case AST_TYPE_VOLATILE: {
-        return ty_from_ast(ts, node->u.type_volatile.base, scope, diags);
+        return ty_from_ast_depth(ts, node->u.type_volatile.base, scope, diags, depth + 1);
     }
     case AST_TYPE_ATOMIC: {
-        Type *base = ty_from_ast(ts, node->u.type_atomic.base, scope, diags);
+        Type *base = ty_from_ast_depth(ts, node->u.type_atomic.base, scope, diags, depth + 1);
         return ty_atomic(ts, base);
     }
     case AST_TYPE_PTR: {
-        Type *base = ty_from_ast(ts, node->u.type_ptr.base, scope, diags);
+        Type *base = ty_from_ast_depth(ts, node->u.type_ptr.base, scope, diags, depth + 1);
         return ty_ptr(ts, base);
     }
     case AST_TYPE_ARRAY: {
-        Type *base = ty_from_ast(ts, node->u.type_array.base, scope, diags);
+        Type *base = ty_from_ast_depth(ts, node->u.type_array.base, scope, diags, depth + 1);
         int64_t sz = -1;
         if (node->u.type_array.size)
             sz = eval_array_size(ts, node->u.type_array.size, scope);
@@ -843,7 +852,7 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
             AstNode *first_field = node->u.struct_def.fields.data[0];
             if (first_field && first_field->kind == AST_FIELD_DECL &&
                 first_field->u.field_decl.type)
-                return ty_from_ast(ts, first_field->u.field_decl.type, scope, diags);
+                return ty_from_ast_depth(ts, first_field->u.field_decl.type, scope, diags, depth + 1);
         }
         bool has_body = (node->u.struct_def.fields.len > 0 ||
                          node->u.struct_def.methods.len > 0);
@@ -921,7 +930,7 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
                 const char *td_attrs = sym->decl->u.typedef_decl.gcc_attrs;
                 if (td_attrs && strstr(td_attrs, "vector_size")) {
                     const AstNode *target = sym->decl->u.typedef_decl.target;
-                    Type *elem = target ? ty_from_ast(ts, target, scope, NULL)
+                    Type *elem = target ? ty_from_ast_depth(ts, target, scope, NULL, depth + 1)
                                         : ty_int(ts);
                     int count = 0;
                     const char *vs = strstr(td_attrs, "vector_size");
@@ -1007,7 +1016,7 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
                 sym->decl->u.struct_def.fields.len > 0) {
                 AstNode *f0 = sym->decl->u.struct_def.fields.data[0];
                 if (f0 && f0->kind == AST_FIELD_DECL && f0->u.field_decl.type)
-                    return ty_from_ast(ts, f0->u.field_decl.type, scope, diags);
+                    return ty_from_ast_depth(ts, f0->u.field_decl.type, scope, diags, depth + 1);
             }
             /* Preserve generic params so subst_type can substitute later. */
             if (sym->decl && sym->decl->kind == AST_STRUCT_DEF &&
@@ -1053,7 +1062,7 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
     }
 
     case AST_TYPE_FUNC: {
-        Type *ret = ty_from_ast(ts, node->u.type_func.ret, scope, diags);
+        Type *ret = ty_from_ast_depth(ts, node->u.type_func.ret, scope, diags, depth + 1);
         size_t np = node->u.type_func.params.len;
         Type **params = np ? malloc(np * sizeof *params) : NULL;
         if (np && !params) abort();
@@ -1073,7 +1082,7 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
             if (pi && pi->kind == AST_PARAM_DECL) {
                 ty_node = pi->u.param_decl.type;
             }
-            params[real_np++] = ty_from_ast(ts, ty_node, scope, diags);
+            params[real_np++] = ty_from_ast_depth(ts, ty_node, scope, diags, depth + 1);
         }
         Type *t = ty_func(ts, ret, params, real_np,
                           has_vararg, node->u.type_func.params_unspecified);

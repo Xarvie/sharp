@@ -291,6 +291,7 @@ static const char *find_zig_exe(void)
         DWORD a = GetFileAttributesA(fallbacks[k]);
         if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) {
             strncpy(g_sess.zig_exe, fallbacks[k], sizeof(g_sess.zig_exe) - 1);
+            g_sess.zig_exe[sizeof(g_sess.zig_exe) - 1] = '\0';
             return g_sess.zig_exe;
         }
     }
@@ -391,6 +392,7 @@ static const char *find_zig_exe(void)
         if (stat(fallbacks[k], &st3) == 0 && !S_ISDIR(st3.st_mode) &&
             access(fallbacks[k], X_OK) == 0) {
             strncpy(g_sess.zig_exe, fallbacks[k], sizeof(g_sess.zig_exe) - 1);
+            g_sess.zig_exe[sizeof(g_sess.zig_exe) - 1] = '\0';
             return g_sess.zig_exe;
         }
     }

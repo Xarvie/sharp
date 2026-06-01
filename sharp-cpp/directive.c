@@ -902,6 +902,7 @@ static void handle_undef(CppState *st, TokList *line, CppLoc loc) {
 static void handle_if_common(CppState *st, bool condition, CppLoc loc) {
     if (st->cond_depth >= COND_STACK_MAX) {
         emit_diag(st, CPP_DIAG_FATAL, loc, "#if nesting too deep");
+        st->cond_depth++;
         return;
     }
     /* Capture parent liveness BEFORE pushing the new frame — in_live_branch()

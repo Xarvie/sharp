@@ -7007,9 +7007,11 @@ static bool ast_uses_to_cstr(const AstNode *n) {
                (n->u.if_.then_ && ast_uses_to_cstr(n->u.if_.then_)) ||
                (n->u.if_.else_ && ast_uses_to_cstr(n->u.if_.else_));
     case AST_WHILE:
-    case AST_DO_WHILE:
         return (n->u.while_.cond && ast_uses_to_cstr(n->u.while_.cond)) ||
                (n->u.while_.body && ast_uses_to_cstr(n->u.while_.body));
+    case AST_DO_WHILE:
+        return (n->u.do_while.cond && ast_uses_to_cstr(n->u.do_while.cond)) ||
+               (n->u.do_while.body && ast_uses_to_cstr(n->u.do_while.body));
     case AST_FOR:
         return (n->u.for_.init && ast_uses_to_cstr(n->u.for_.init)) ||
                (n->u.for_.cond && ast_uses_to_cstr(n->u.for_.cond)) ||
@@ -7026,6 +7028,25 @@ static bool ast_uses_to_cstr(const AstNode *n) {
             if (ast_uses_to_cstr(n->u.block.stmts.data[i])) return true;
         break;
     }
+    case AST_STRUCT_LIT: {
+        for (size_t i = 0; i < n->u.struct_lit.field_vals.len; i++)
+            if (ast_uses_to_cstr(n->u.struct_lit.field_vals.data[i])) return true;
+        break;
+    }
+    case AST_COMPOUND_LIT:
+        return ast_uses_to_cstr(n->u.compound_lit.init);
+    case AST_DESIGNATED_INIT:
+        return n->u.designated_init.value && ast_uses_to_cstr(n->u.designated_init.value);
+    case AST_STMT_EXPR:
+        return n->u.stmt_expr.block && ast_uses_to_cstr(n->u.stmt_expr.block);
+    case AST_GENERIC_EXPR: {
+        if (n->u.generic_expr.controlling && ast_uses_to_cstr(n->u.generic_expr.controlling)) return true;
+        for (size_t i = 0; i < n->u.generic_expr.associations.len; i++)
+            if (ast_uses_to_cstr(n->u.generic_expr.associations.data[i])) return true;
+        break;
+    }
+    case AST_GENERIC_ASSOC:
+        return n->u.generic_assoc.value && ast_uses_to_cstr(n->u.generic_assoc.value);
     default:
         break;
     }

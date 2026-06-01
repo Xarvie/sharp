@@ -1215,11 +1215,15 @@ static Value eval_expr(EvalCtx *ec) {
             then_val = eval_expr(ec);
             ec_accept(ec, ":");
             ec->suppress_diag = true;
+            bool saved_error = ec->had_error;
             else_val = eval_expr(ec);
+            ec->had_error = saved_error;
             ec->suppress_diag = prev_supp;
         } else {
             ec->suppress_diag = true;
+            bool saved_error = ec->had_error;
             then_val = eval_expr(ec);
+            ec->had_error = saved_error;
             ec->suppress_diag = prev_supp;
             ec_accept(ec, ":");
             else_val = eval_expr(ec);
