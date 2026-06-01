@@ -287,7 +287,13 @@ def tokenize(text: str) -> List[str]:
 PROBES_DIR_NAME = "c_superset_probes"
 UNIT_DIR_NAME = "unit"
 SPECIAL_DIR_NAME = "special"
-# Flags required for cross-compile probes
+
+ALL_TARGETS = [
+    "x86_64-linux-gnu",
+    "x86_64-windows-gnu",
+    "aarch64-macos",
+]
+
 CROSS_COMPILE_ARGS = ["--target", "x86_64-linux-gnu"]
 
 
@@ -992,112 +998,144 @@ def main():
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--dump-fail", action="store_true",
                         help="Save raw -E output for failed files")
-    parser.add_argument("--target", default=None,
-                        help="Override target triple (e.g. x86_64-linux-gnu, x86_64-windows-gnu)")
+    parser.add_argument("--target", default="all",
+                        help="Target triple(s): 'all' for all x86_64 targets, "
+                             "or a specific triple (e.g. x86_64-linux-gnu)")
 
     args = parser.parse_args()
 
-    global _override_target
-    _override_target = args.target
+    if args.target == "all":
+        targets = ALL_TARGETS
+    else:
+        targets = [args.target]
 
     script_dir = Path(__file__).resolve().parent
 
     sharpc_path, build_info = ensure_sharpc(script_dir, args.sharpc)
     print(f"[build] sharpc = {sharpc_path} ({build_info})")
 
-    # Find zig for compile+run phase
     project_root = find_project_root(script_dir)
     zig_path = _find_zig(project_root) if project_root else None
     if not zig_path:
         raise SystemExit("ERROR: cannot find zig (checked project's zig/ and PATH)")
     print(f"[build] zig    = {zig_path}")
 
-    total_pass = total_fail = total_error = 0
-    results: Dict = {}
+    grand_pass = grand_fail = grand_error = 0
+    grand_results: Dict = {}
 
-    # ── 超集探针代码生成测试 (C + SP) ──
-    print()
-    print("[sp] Running ALL superset probe tests (C + SP codegen) ...")
-    sp_pass, sp_fail, sp_error, sp_files = run_all_probe_tests(
-        script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
-    )
-    results["sp"] = {
-        "pass": sp_pass, "fail": sp_fail, "error": sp_error,
-        "files": {k: list(v) for k, v in sp_files.items()}
-    }
-    total_pass  += sp_pass
-    total_fail  += sp_fail
-    total_error += sp_error
+    for target_idx, target in enumerate(targets):
+        global _override_target
+        _override_target = target
 
-    if not args.verbose:
-        total_tests = sp_pass + sp_fail + sp_error
-        print(f"  {sp_pass}/{total_tests} passed, {sp_fail} failed, {sp_error} errors")
+        if len(targets) > 1:
+            print()
+            print("=" * 60)
+            print(f"  Target: {target}  ({target_idx + 1}/{len(targets)})")
+            print("=" * 60)
 
-    # ── Bugs 测试 (bugs/) ──
-    print()
-    print("[bugs] Running bug regression tests (codegen + runtime) ...")
-    bugs_pass, bugs_fail, bugs_error, bugs_files = run_bugs_tests(
-        script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
-    )
-    results["bugs"] = {
-        "pass": bugs_pass, "fail": bugs_fail, "error": bugs_error,
-        "files": {k: list(v) for k, v in bugs_files.items()}
-    }
-    total_pass  += bugs_pass
-    total_fail  += bugs_fail
-    total_error += bugs_error
+        total_pass = total_fail = total_error = 0
+        results: Dict = {}
 
-    if not args.verbose:
-        total_bt = bugs_pass + bugs_fail + bugs_error
-        print(f"  {bugs_pass}/{total_bt} passed, {bugs_fail} failed, {bugs_error} errors")
+        print()
+        print("[sp] Running ALL superset probe tests (C + SP codegen) ...")
+        sp_pass, sp_fail, sp_error, sp_files = run_all_probe_tests(
+            script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
+        )
+        results["sp"] = {
+            "pass": sp_pass, "fail": sp_fail, "error": sp_error,
+            "files": {k: list(v) for k, v in sp_files.items()}
+        }
+        total_pass  += sp_pass
+        total_fail  += sp_fail
+        total_error += sp_error
 
-    # ── Unit 测试 (unit/) ──
-    print()
-    print("[unit] Running unit tests (codegen + runtime) ...")
-    unit_pass, unit_fail, unit_error, unit_files = run_unit_tests(
-        script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
-    )
-    results["unit"] = {
-        "pass": unit_pass, "fail": unit_fail, "error": unit_error,
-        "files": {k: list(v) for k, v in unit_files.items()}
-    }
-    total_pass  += unit_pass
-    total_fail  += unit_fail
-    total_error += unit_error
+        if not args.verbose:
+            total_tests = sp_pass + sp_fail + sp_error
+            print(f"  {sp_pass}/{total_tests} passed, {sp_fail} failed, {sp_error} errors")
 
-    if not args.verbose:
-        total_ut = unit_pass + unit_fail + unit_error
-        print(f"  {unit_pass}/{total_ut} passed, {unit_fail} failed, {unit_error} errors")
+        print()
+        print("[bugs] Running bug regression tests (codegen + runtime) ...")
+        bugs_pass, bugs_fail, bugs_error, bugs_files = run_bugs_tests(
+            script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
+        )
+        results["bugs"] = {
+            "pass": bugs_pass, "fail": bugs_fail, "error": bugs_error,
+            "files": {k: list(v) for k, v in bugs_files.items()}
+        }
+        total_pass  += bugs_pass
+        total_fail  += bugs_fail
+        total_error += bugs_error
 
-    # ── Cross-compile / special probes ──
-    print()
-    print("[sp] Running special cross-compile probe tests ...")
-    sc_pass, sc_fail, sc_error, sc_files = run_special_probe_tests(
-        script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
-    )
-    total_pass  += sc_pass
-    total_fail  += sc_fail
-    total_error += sc_error
+        if not args.verbose:
+            total_bt = bugs_pass + bugs_fail + bugs_error
+            print(f"  {bugs_pass}/{total_bt} passed, {bugs_fail} failed, {bugs_error} errors")
 
-    if not args.verbose:
-        total_sc = sc_pass + sc_fail + sc_error
-        print(f"  {sc_pass}/{total_sc} passed, {sc_fail} failed, {sc_error} errors")
+        print()
+        print("[unit] Running unit tests (codegen + runtime) ...")
+        unit_pass, unit_fail, unit_error, unit_files = run_unit_tests(
+            script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
+        )
+        results["unit"] = {
+            "pass": unit_pass, "fail": unit_fail, "error": unit_error,
+            "files": {k: list(v) for k, v in unit_files.items()}
+        }
+        total_pass  += unit_pass
+        total_fail  += unit_fail
+        total_error += unit_error
 
-    # ── 汇总输出 ──
-    if args.json:
-        print(json.dumps(results, indent=2))
-    else:
+        if not args.verbose:
+            total_ut = unit_pass + unit_fail + unit_error
+            print(f"  {unit_pass}/{total_ut} passed, {unit_fail} failed, {unit_error} errors")
+
+        print()
+        print("[sp] Running special cross-compile probe tests ...")
+        sc_pass, sc_fail, sc_error, sc_files = run_special_probe_tests(
+            script_dir, str(sharpc_path), zig_path, args.verbose, args.timeout, args.jobs
+        )
+        total_pass  += sc_pass
+        total_fail  += sc_fail
+        total_error += sc_error
+
+        if not args.verbose:
+            total_sc = sc_pass + sc_fail + sc_error
+            print(f"  {sc_pass}/{total_sc} passed, {sc_fail} failed, {sc_error} errors")
+
         total_files = total_pass + total_fail + total_error
+        if len(targets) > 1:
+            print()
+            print(f"  [{target}] {total_pass}/{total_files} passed", end="")
+            if total_fail:
+                print(f", {total_fail} failed", end="")
+            if total_error:
+                print(f", {total_error} errors", end="")
+            print()
+
+        grand_pass  += total_pass
+        grand_fail  += total_fail
+        grand_error += total_error
+        grand_results[target] = results
+
+    if args.json:
+        print(json.dumps(grand_results, indent=2))
+    else:
+        grand_total = grand_pass + grand_fail + grand_error
         print()
         print("=" * 60)
-        print(f"  Total: {total_pass}/{total_files} passed")
-        if total_fail:
-            print(f"         {total_fail} failed")
-        if total_error:
-            print(f"         {total_error} errors")
+        if len(targets) > 1:
+            for t in targets:
+                t_res = grand_results.get(t, {})
+                t_pass = sum(v.get("pass", 0) for v in t_res.values())
+                t_total = sum(v.get("pass", 0) + v.get("fail", 0) + v.get("error", 0) for v in t_res.values())
+                print(f"  [{t}] {t_pass}/{t_total} passed")
+            print()
+        print(f"  Total: {grand_pass}/{grand_total} passed")
+        if grand_fail:
+            print(f"         {grand_fail} failed")
+        if grand_error:
+            print(f"         {grand_error} errors")
         print("=" * 60)
 
-    return 0 if (total_fail == 0 and total_error == 0) else 1
+    return 0 if (grand_fail == 0 and grand_error == 0) else 1
 
 
 if __name__ == "__main__":
