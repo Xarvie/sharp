@@ -296,6 +296,8 @@ static char *make_tmp_name(const char *prefix, const char *suffix) {
 
     static unsigned counter = 0;
     const char *base = strrchr(prefix, '\\');
+    const char *base2 = strrchr(prefix, '/');
+    base = (base2 && (!base || base2 > base)) ? base2 : base;
     base = base ? base + 1 : prefix;
     const char *dot = strrchr(base, '.');
     size_t baselen = dot ? (size_t)(dot - base) : strlen(base);
@@ -310,14 +312,114 @@ static char *make_tmp_name(const char *prefix, const char *suffix) {
 
 /* ── Run external command (gcc/ld/zig cc) ────────────────────────────
  *
- * Uses system() + file redirect to avoid pipe-inheritance deadlock.
- * zig cc spawns sub-processes (compiler_rt) that inherit pipe handles;
- * with system(), all output goes through a temp file — no pipes.      */
+ * Windows: CreateProcess with stderr redirect to temp file.
+ * Unix: fork/exec with stderr redirect to temp file.                */
 static int run_cmd(const char **argv) {
-    /* Estimate total command line length */
+    if (!argv || !argv[0]) return -1;
+
+#ifdef _WIN32
+    char err_path[512];
+    const char *tmp = getenv("TEMP");
+    if (!tmp) tmp = ".";
+    snprintf(err_path, sizeof(err_path), "%s\\sharpc_err_%lu_%lu.tmp",
+             tmp, (unsigned long)GetCurrentProcessId(),
+             (unsigned long)GetCurrentThreadId());
+
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    HANDLE hErr = CreateFileA(err_path, GENERIC_WRITE, 0, &sa,
+                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hErr == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "sharpc: cannot create temp error file %s\n", err_path);
+        return -1;
+    }
+
+    STARTUPINFOA si = {0};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = hErr;
+
+    if (!g_sess.verbose) {
+        si.hStdOutput = hErr;
+    }
+
+    size_t cmdlen = 0;
+    for (int i = 0; argv[i]; i++)
+        cmdlen += strlen(argv[i]) * 2 + 4;
+    char *cmdline = malloc(cmdlen + 1);
+    if (!cmdline) { CloseHandle(hErr); return -1; }
+    size_t pos = 0;
+    for (int i = 0; argv[i]; i++) {
+        if (i > 0) cmdline[pos++] = ' ';
+        const char *a = argv[i];
+        int needs_q = (a[0] == '\0' || strpbrk(a, " \t\n\"\\") != NULL);
+        if (!needs_q) {
+            size_t alen = strlen(a);
+            memcpy(cmdline + pos, a, alen);
+            pos += alen;
+        } else {
+            cmdline[pos++] = '"';
+            for (const char *p = a; *p; p++) {
+                if (*p == '"') {
+                    cmdline[pos++] = '\\';
+                    cmdline[pos++] = '"';
+                } else if (*p == '\\') {
+                    cmdline[pos++] = '\\';
+                    cmdline[pos++] = '\\';
+                } else {
+                    cmdline[pos++] = *p;
+                }
+            }
+            cmdline[pos++] = '"';
+        }
+    }
+    cmdline[pos] = '\0';
+
+    if (g_sess.verbose)
+        fprintf(stderr, "[sharpc] %s\n", cmdline);
+
+    PROCESS_INFORMATION pi = {0};
+    BOOL ok = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE,
+                             0, NULL, NULL, &si, &pi);
+    free(cmdline);
+    CloseHandle(hErr);
+
+    if (!ok) {
+        fprintf(stderr, "sharpc: CreateProcess failed (error %lu)\n",
+                GetLastError());
+        remove(err_path);
+        return -1;
+    }
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    if (exitCode != 0) {
+        FILE *ef = fopen(err_path, "r");
+        if (ef) {
+            char buf[4096];
+            while (fgets(buf, sizeof(buf), ef))
+                fputs(buf, stderr);
+            fclose(ef);
+        }
+    }
+    remove(err_path);
+    return (int)exitCode;
+
+#else
+    char err_path[512];
+    const char *tmp = getenv("TMPDIR");
+    if (!tmp) tmp = "/tmp";
+    snprintf(err_path, sizeof(err_path), "%s/sharpc_err_%d_%lu.tmp",
+             tmp, (int)getpid(), (unsigned long)pthread_self());
+
     size_t total = 0;
     for (int i = 0; argv[i]; i++)
-        total += strlen(argv[i]) * 2 + 4; /* room for quoting + space */
+        total += strlen(argv[i]) * 2 + 4;
 
     char *cmd = malloc(total);
     if (!cmd) return -1;
@@ -326,10 +428,7 @@ static int run_cmd(const char **argv) {
     for (int i = 0; argv[i]; i++) {
         if (i > 0) cmd[pos++] = ' ';
         const char *a = argv[i];
-
-        /* Check if argument needs shell quoting */
         int needs_q = (a[0] == '\0' || strpbrk(a, " \t\n\"'$`\\*?[]{}|&;()<>#!~") != NULL);
-
         if (!needs_q) {
             size_t alen = strlen(a);
             if (pos + alen >= total) {
@@ -341,9 +440,6 @@ static int run_cmd(const char **argv) {
             memcpy(cmd + pos, a, alen);
             pos += alen;
         } else {
-            /* Single-quote the argument. The only character that can't
-             * appear inside single quotes is a single quote itself.
-             * Handle it by ending the quote, inserting \', and restarting. */
             if (pos + 1 >= total) {
                 total = total * 2 + 32;
                 char *nc = realloc(cmd, total);
@@ -353,8 +449,7 @@ static int run_cmd(const char **argv) {
             cmd[pos++] = '\'';
             for (const char *p = a; *p; p++) {
                 if (*p == '\'') {
-                    /* end current quote, emit escaped quote, start new quote */
-                    size_t need = 4; /* '\'' */
+                    size_t need = 4;
                     if (pos + need >= total) {
                         total = (pos + need) * 2 + 32;
                         char *nc = realloc(cmd, total);
@@ -386,27 +481,12 @@ static int run_cmd(const char **argv) {
     }
     cmd[pos] = '\0';
 
-    /* Temp file for stderr (per-thread unique) */
-    char err_path[512];
-#ifdef _WIN32
-    const char *tmp = getenv("TEMP");
-    if (!tmp) tmp = ".";
-    snprintf(err_path, sizeof(err_path), "%s\\sharpc_err_%lu_%lu.tmp",
-             tmp, (unsigned long)GetCurrentProcessId(),
-             (unsigned long)GetCurrentThreadId());
-#else
-    const char *tmp = getenv("TMPDIR");
-    if (!tmp) tmp = "/tmp";
-    snprintf(err_path, sizeof(err_path), "%s/sharpc_err_%d_%lu.tmp",
-             tmp, (int)getpid(), (unsigned long)pthread_self());
-#endif
-
     char *full = malloc(pos + 512);
     if (!full) { free(cmd); return -1; }
     if (g_sess.verbose)
         snprintf(full, pos + 512, "%s 2> \"%s\"", cmd, err_path);
     else
-        snprintf(full, pos + 512, "%s > NUL 2> \"%s\"", cmd, err_path);
+        snprintf(full, pos + 512, "%s > /dev/null 2> \"%s\"", cmd, err_path);
 
     int rc = system(full);
 
@@ -423,6 +503,7 @@ static int run_cmd(const char **argv) {
     free(full);
     free(cmd);
     return rc;
+#endif
 }
 
 /* ── Zig cc invocation helpers ──────────────────────────────────────
@@ -645,7 +726,7 @@ static void usage(FILE *out) {
 "  -pipe               use pipes between compilation stages\n"
 "\n"
 "Misc:\n"
-"  --target <triple>   install target macros (default: x86_64-linux-gnu)\n"
+"  --target <triple>   install target macros (default: host triple)\n"
 "  -v                  verbose: print commands\n"
 "  --help / -h         show this help\n", out);
 }

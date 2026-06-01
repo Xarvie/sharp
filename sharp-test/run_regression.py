@@ -372,10 +372,59 @@ def _cleanup_files(*paths: str) -> None:
 
 def _find_zig(project_root: Path) -> Optional[str]:
     """Find zig binary: project's zig/ first, then PATH."""
-    candidate = project_root / "zig" / "zig"
-    if candidate.is_file():
-        return str(candidate)
+    for name in ("zig.exe", "zig"):
+        candidate = project_root / "zig" / name
+        if candidate.is_file():
+            return str(candidate)
     return find_file_in_path("zig", os.environ.get("PATH", ""))
+
+
+def _target_ref_tag() -> Optional[str]:
+    """Return the target triple tag for reference file lookup.
+    Mirrors sharpc's default target selection logic."""
+    if sys.platform == "win32":
+        return "x86_64-windows-gnu"
+    if sys.platform == "darwin":
+        return "aarch64-macos"
+    if sys.platform.startswith("linux"):
+        return "x86_64-linux-gnu"
+    return None
+
+
+def _resolve_ref_path(sp_path: str) -> Optional[str]:
+    """Resolve the reference file path for a given source file.
+
+    Looks for target-specific reference first in a target subdirectory
+    (<dir>/<target>/<basename>.ref.i), then falls back to generic
+    (<dir>/<basename>.ref.i). Returns None if no ref exists.
+    """
+    tag = _target_ref_tag()
+    if tag:
+        sp_dir = os.path.dirname(sp_path)
+        sp_base = os.path.basename(sp_path)
+        target_ref = os.path.join(sp_dir, tag, sp_base[:-3] + ".ref.i")
+        if os.path.isfile(target_ref):
+            return target_ref
+    generic_ref = sp_path[:-3] + ".ref.i"
+    if os.path.isfile(generic_ref):
+        return generic_ref
+    return None
+
+
+def _resolve_src_path(src_path: str) -> str:
+    """Resolve the source file path, preferring target-specific overrides.
+
+    If <dir>/<target>/<basename> exists, return that; otherwise return
+    the original src_path unchanged.
+    """
+    tag = _target_ref_tag()
+    if tag:
+        src_dir = os.path.dirname(src_path)
+        src_base = os.path.basename(src_path)
+        target_src = os.path.join(src_dir, tag, src_base)
+        if os.path.isfile(target_src):
+            return target_src
+    return src_path
 
 
 def _compare_gen_with_ref(tmp_out: str, ref_path: str) -> Tuple[int, str]:
@@ -470,7 +519,7 @@ def test_sp_probe(sp_path: str, sharpc_path: str, ref_path: Optional[str] = None
     if not ok:
         _cleanup_files(tmp_out)
         return 2, err
-    if ref_path and os.path.isfile(ref_path):
+    if ref_path:
         rc, detail = _compare_gen_with_ref(tmp_out, ref_path)
         if rc != 0:
             _cleanup_files(tmp_out)
@@ -554,15 +603,15 @@ def run_all_probe_tests(
 
         # A: C 探针 + standalone SP
         c_futures: Dict = {
-            ex.submit(test_c_probe, str(probes_dir / f), sharpc_path, zig_path, timeout): f
+            ex.submit(test_c_probe, _resolve_src_path(str(probes_dir / f)), sharpc_path, zig_path, timeout): f
             for f in c_files
         }
 
         standalone_futures: Dict = {
             ex.submit(
                 test_sp_probe,
-                str(probes_dir / f), sharpc_path,
-                str(probes_dir / f"{f[:-3]}.ref.i"),
+                _resolve_src_path(str(probes_dir / f)), sharpc_path,
+                _resolve_ref_path(str(probes_dir / f)),
                 zig_path,
                 timeout
             ): f
@@ -786,12 +835,12 @@ def run_unit_tests(
 
     def test_unit_sp(rel_path: str) -> Tuple[int, str]:
         sp_path = str(base_dir / rel_path)
-        ref_path = sp_path[:-3] + ".ref.i"
+        ref_path = _resolve_ref_path(sp_path)
         ok, tmp_out, err = _run_sharpc_codegen(sp_path, sharpc_path, zig_path, timeout)
         if not ok:
             return 2, err
 
-        if os.path.isfile(ref_path):
+        if ref_path:
             rc, detail = _compare_gen_with_ref(tmp_out, ref_path)
             if rc != 0:
                 _cleanup_files(tmp_out)

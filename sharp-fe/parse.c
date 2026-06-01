@@ -489,8 +489,60 @@ static int collect_balanced_call_body(PS *ps, char *buf, int buf_size) {
 /* Check if a name is a known type (typedef or struct/union tag).
  * Needed because is_type_start must distinguish `Vec<int> vi;` (declaration)
  * from `swap<int>(&x, &y)` (generic function call). */
+static bool is_known_builtin_typename(const char *name) {
+    if (!name) return false;
+    if (!strcmp(name, "__bf16")) return true;
+    if (!strcmp(name, "__m128")) return true;
+    if (!strcmp(name, "__m128i")) return true;
+    if (!strcmp(name, "__m128d")) return true;
+    if (!strcmp(name, "__m256")) return true;
+    if (!strcmp(name, "__m256i")) return true;
+    if (!strcmp(name, "__m256d")) return true;
+    if (!strcmp(name, "__m512")) return true;
+    if (!strcmp(name, "__m512i")) return true;
+    if (!strcmp(name, "__m512d")) return true;
+    if (!strcmp(name, "__m512bh")) return true;
+    if (!strcmp(name, "__m128bh")) return true;
+    if (!strcmp(name, "__m256bh")) return true;
+    if (!strcmp(name, "__v2df")) return true;
+    if (!strcmp(name, "__v4sf")) return true;
+    if (!strcmp(name, "__v4si")) return true;
+    if (!strcmp(name, "__v8hi")) return true;
+    if (!strcmp(name, "__v16qi")) return true;
+    if (!strcmp(name, "__v2di")) return true;
+    if (!strcmp(name, "__v4di")) return true;
+    if (!strcmp(name, "__v8sf")) return true;
+    if (!strcmp(name, "__v8si")) return true;
+    if (!strcmp(name, "__v16hi")) return true;
+    if (!strcmp(name, "__v32qi")) return true;
+    if (!strcmp(name, "__m64")) return true;
+    if (!strcmp(name, "__int64")) return true;
+    if (!strcmp(name, "__int32")) return true;
+    if (!strcmp(name, "__int16")) return true;
+    if (!strcmp(name, "__int8")) return true;
+    if (!strncmp(name, "__m128_", 7)) return true;
+    if (!strncmp(name, "__m256_", 7)) return true;
+    if (!strncmp(name, "__m512_", 7)) return true;
+    if (!strcmp(name, "_Float16")) return true;
+    if (!strcmp(name, "_Float32")) return true;
+    if (!strcmp(name, "_Float64")) return true;
+    if (!strcmp(name, "_Float32x")) return true;
+    if (!strcmp(name, "_Float64x")) return true;
+    if (!strcmp(name, "_Float128")) return true;
+    if (!strcmp(name, "_Float128x")) return true;
+    if (!strcmp(name, "__float128")) return true;
+    if (!strcmp(name, "__float80")) return true;
+    if (!strcmp(name, "__cfloat128")) return true;
+    if (!strcmp(name, "_Decimal32")) return true;
+    if (!strcmp(name, "_Decimal64")) return true;
+    if (!strcmp(name, "_Decimal128")) return true;
+    return false;
+}
+
 static bool name_is_known_type(PS *ps, const char *name, size_t len) {
     if (td_has_n(&ps->typedefs, name, len))
+        return true;
+    if (is_known_builtin_typename(name))
         return true;
     for (size_t i = 0; i < ps->pending_decls.len; i++) {
         AstNode *pd = ps->pending_decls.data[i];
@@ -532,6 +584,7 @@ static bool is_type_start(PS *ps) {
     case STOK__NORETURN: case STOK__ALIGNAS: case STOK__THREAD_LOCAL:
     /* C23: constexpr can lead a declaration */
     case STOK_CONSTEXPR:
+    case STOK__EXTENSION__:
         return true;
     case STOK_CONST: case STOK_STRUCT: case STOK_UNION: case STOK_ENUM: case STOK_CLASS:
     case STOK_VOID:  case STOK_INT:   case STOK_CHAR:  case STOK_LONG:
@@ -540,24 +593,17 @@ static bool is_type_start(PS *ps) {
     case STOK_AUTO:
         return true;
     case STOK_IDENT:
-        /* IDENT IDENT          → user type, var name (Buffer buf)
-         * IDENT *              → user type, pointer (Buffer *p)
-         * IDENT operator …     → free-function operator
-         * IDENT < TYPE-LIKE …  → generic type (Vec<int>, Pair<K,V>)
-         * IDENT )              → only when IDENT is a typedef name —
-         *                        this is the cast `(typedef_name)expr`
-         *                        form.  Without the typedef-set probe
-         *                        we'd misparse `(x)y` where x is just
-         *                        a variable.  The typedef set is
-         *                        populated as parse encounters typedef
-         *                        declarations earlier in the same TU.
-         *
-         * The `<` case must distinguish generic types from comparisons
-         * like `i < 5`.  Heuristic: the token after `<` must look like
-         * the start of a type — a primitive-type keyword, IDENT, or
-         * `const`.  Numeric literals, `(`, etc. fall through. */
         if (k2 == STOK_IDENT || k2 == STOK_STAR || k2 == STOK_OPERATOR)
             return true;
+        {
+            SharpTok t = ps_peek(ps);
+            char _nbuf[64];
+            size_t _nl = t.len < sizeof _nbuf - 1 ? t.len : sizeof _nbuf - 1;
+            memcpy(_nbuf, t.text, _nl);
+            _nbuf[_nl] = '\0';
+            if (is_known_builtin_typename(_nbuf))
+                return true;
+        }
         /* IDENT < TYPE-LIKE … → generic type (Vec<int>, Pair<K,V>).
          * Distinguish from comparisons: the token after '<' must look
          * like the start of a type, AND the IDENT must be a known typedef.
@@ -576,9 +622,12 @@ static bool is_type_start(PS *ps) {
         }
         if (k2 == STOK_RPAREN) {
             SharpTok t = ps_peek(ps);
-            /* An explicit typedef alias (e.g. from `typedef struct
-             * { ... } Foo;`) is always safe as a cast target —
-             * `(Foo)expr` is a valid C cast. */
+            char _namebuf[64];
+            size_t _nlen = t.len < sizeof _namebuf - 1 ? t.len : sizeof _namebuf - 1;
+            memcpy(_namebuf, t.text, _nlen);
+            _namebuf[_nlen] = '\0';
+            if (is_known_builtin_typename(_namebuf))
+                return true;
             if (td_has_n(&ps->typedef_aliases, t.text, t.len))
                 return true;
             /* A bare struct/union/enum tag with no explicit typedef
@@ -1503,6 +1552,15 @@ static AstNode *tspec_resolve(PS *ps, TSpec *ts, CppLoc loc) {
             free(out->u.type_name.name);
             out->u.type_name.name = new_nm;
         }
+        if (ts->saw_complex &&
+            out->kind == AST_TYPE_NAME && out->u.type_name.name) {
+            size_t nlen = strlen(out->u.type_name.name);
+            char *cn = malloc(9 + nlen + 1);
+            memcpy(cn, "_Complex ", 9);
+            memcpy(cn + 9, out->u.type_name.name, nlen + 1);
+            free(out->u.type_name.name);
+            out->u.type_name.name = cn;
+        }
         return out;
     }
     if (ts->saw_void) {
@@ -1895,6 +1953,11 @@ static DeclSpecs parse_decl_specifiers(PS *ps) {
 
     for (;;) {
         SharpTok t = ps_peek(ps);
+
+        if (t.kind == STOK__EXTENSION__) {
+            ps_advance(ps);
+            continue;
+        }
 
         /* Storage-class specifier — at most one allowed. */
         StorageClass new_sc = SC_NONE;
@@ -2307,6 +2370,20 @@ static bool dd_paren_is_subdeclarator(const PS *ps) {
             }
         }
         if (ps_peek_at(ps, pi).kind == STOK_STAR) return true;
+        if (ps_peek_at(ps, pi).kind == STOK_IDENT) {
+            int ni = pi + 1;
+            if (ps_peek_at(ps, ni).kind == STOK_RPAREN) {
+                int ni2 = ni + 1;
+                SharpTokKind nk = ni2 < ps->ntoks ? ps_peek_at(ps, ni2).kind : STOK_EOF;
+                switch (nk) {
+                case STOK_LPAREN: case STOK_LBRACKET:
+                case STOK_SEMI:   case STOK_COMMA:
+                case STOK_EQ:     case STOK_LBRACE:
+                    return true;
+                default: break;
+                }
+            }
+        }
         attr_ptr_done:;
     }
     if (k2 == STOK_IDENT) {
@@ -2926,7 +3003,10 @@ static AstNode *parse_struct_def(PS *ps) {
                 field_ty && field_ty->kind == AST_TYPE_NAME &&
                 field_ty->u.type_name.name &&
                 strncmp(field_ty->u.type_name.name, "__anon_", 7) == 0;
-            if (is_anon_aggregate) {
+            bool is_struct_union_type =
+                field_ty && field_ty->kind == AST_TYPE_NAME &&
+                field_ty->u.type_name.is_struct_tag;
+            if (is_anon_aggregate || is_struct_union_type) {
                 char synth[40];
                 snprintf(synth, sizeof synth,
                          "__anon_field_%u", ps->anon_struct_counter++);
@@ -3431,6 +3511,14 @@ static AstNode *parse_top_decl(PS *ps) {
      * annotate the following declaration so CG can re-emit in C mode. */
     bool has_extension = (t.kind == STOK__EXTENSION__);
     if (has_extension) ps_advance(ps);
+
+    if (ps_at(ps, STOK_SEMI)) {
+        ps_advance(ps);
+        AstNode *n = ast_node_new(AST_GCC_VERBATIM, ps_peek(ps).loc);
+        n->u.gcc_verbatim.text = cpp_xstrndup(";", 1);
+        n->u.gcc_verbatim.is_stmt = false;
+        return n;
+    }
 
     /* `_Static_assert(cond, "msg");` at file scope.
      * C7: preserve as AST_GCC_VERBATIM so C mode can emit it faithfully.
@@ -4520,6 +4608,17 @@ static AstNode *parse_postfix(PS *ps, AstNode *lhs) {
                 ast_node_free(lhs);
                 lhs = ast_node_new(AST_IDENT, t.loc);
                 lhs->u.ident.name = cpp_xstrndup(buf3, blen3);
+                continue;
+            }
+            if (lhs->kind == AST_IDENT &&
+                strcmp(lhs->u.ident.name, "__builtin_bit_cast") == 0) {
+                char buf4[1024];
+                int blen4 = snprintf(buf4, sizeof buf4, "__builtin_bit_cast(");
+                ps_advance(ps);
+                blen4 += collect_balanced_call_body(ps, buf4 + blen4, (int)sizeof buf4 - blen4);
+                ast_node_free(lhs);
+                lhs = ast_node_new(AST_IDENT, t.loc);
+                lhs->u.ident.name = cpp_xstrndup(buf4, blen4);
                 continue;
             }
             AstNode *c = ast_node_new(AST_CALL, t.loc);

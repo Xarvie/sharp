@@ -72,7 +72,7 @@ static inline void fe_emit_diag(FeDiagArr *diags, CppDiagLevel level,
  * ====================================================================== */
 
 struct SharpCtx {
-    char *target;     /* heap-allocated target triple, default x86_64-linux-gnu */
+    char *target;     /* heap-allocated target triple, defaults to host */
     /* Phase 1+: lex state, intern table, etc. */
 };
 

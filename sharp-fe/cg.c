@@ -1860,10 +1860,15 @@ static void cg_field_decl_from_ast(CgCtx *ctx, const AstNode *fd) {
             }
             if (inner_sd && inner_sd->u.struct_def.fields.len > 0) {
                 if (inner_sd->u.struct_def.name &&
-                    strncmp(inner_sd->u.struct_def.name, "__anon_", 7) != 0) {
+                    strncmp(inner_sd->u.struct_def.name, "__anon_", 7) != 0 &&
+                    !inner_sd->u.struct_def.from_inline_typedef) {
                     /* Named nested struct is emitted standalone by
                      * cg_emit_decl_sharp — fall through so the field uses
-                     * a tag-name reference instead of an inline body. */
+                     * a tag-name reference instead of an inline body.
+                     * Exception: when from_inline_typedef is true,
+                     * cg_emit_decl_sharp skips it, so we must emit the
+                     * body inline here (e.g. union __WIDL_... inside a
+                     * typedef struct). */
                 } else {
                     const char *kw = struct_kw(inner_sd);
                     cg_printf(ctx, "%s %s {\n", kw, inner_name);

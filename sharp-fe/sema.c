@@ -912,6 +912,29 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                         }
                     }
                 }
+                if (strncmp(name, "__builtin_bit_cast(", 19) == 0) {
+                    const char *tn = name + 19;
+                    while (*tn == ' ') tn++;
+                    const char *comma2 = strchr(tn, ',');
+                    if (comma2) {
+                        size_t tlen = (size_t)(comma2 - tn);
+                        while (tlen > 0 && tn[tlen-1] == ' ') tlen--;
+                        if (tlen > 0) {
+                            char tbuf[128]; snprintf(tbuf, sizeof tbuf, "%.*s", (int)tlen, tn);
+                            Symbol *vsym = scope_lookup_type(ss->scope, tbuf);
+                            if (vsym && vsym->decl &&
+                                vsym->decl->kind == AST_TYPEDEF_DECL) {
+                                t = ty_from_ast(ts, vsym->decl->u.typedef_decl.target,
+                                                ss->scope, NULL);
+                                break;
+                            }
+                            Type *prim = ty_from_name(ts, tbuf);
+                            if (prim) { t = prim; break; }
+                            t = ty_struct_type(ts, tbuf, NULL, 0, NULL);
+                            break;
+                        }
+                    }
+                }
                 t = ty_int(ts);
                 break;
             }
@@ -1523,10 +1546,17 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
                     "non-void function must return a value");
         } else {
             Type *vt = sema_expr(ss, stmt->u.return_.value);
-            if (ty_is_void(ret))
-                FE_ERROR(ss->ctx->diags, stmt->loc,
-                    "void function cannot return a value");
-            else {
+            bool is_void_ret = ty_is_void(ret) || ty_is_error(ret);
+            if (is_void_ret) {
+                bool is_builtin_return = stmt->u.return_.value &&
+                    stmt->u.return_.value->kind == AST_CALL &&
+                    stmt->u.return_.value->u.call.callee->kind == AST_IDENT &&
+                    is_gcc_builtin_name(stmt->u.return_.value->u.call.callee->u.ident.name);
+                bool is_void_expr = vt && ty_is_void(vt);
+                if (!is_builtin_return && !is_void_expr)
+                    FE_ERROR(ss->ctx->diags, stmt->loc,
+                        "void function cannot return a value");
+            } else {
                 /* C 6.8.6.4: the value is converted as if by assignment
                  * to an object having the unqualified version of the
                  * function's return type.  Strip top-level const on

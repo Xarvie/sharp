@@ -67,6 +67,8 @@ static bool ty_compound_eq(const Type *a, const Type *b) {
         return true;
     case TY_ENUM:
         return a->u.enum_.name == b->u.enum_.name;
+    case TY_LONGDOUBLE:
+        return a->u.longdouble.name == b->u.longdouble.name;
     case TY_VECTOR:
         return a->u.vector.elem  == b->u.vector.elem &&
                a->u.vector.count == b->u.vector.count &&
@@ -171,9 +173,10 @@ Type *ty_float(TyStore *ts)    { return &ts->prims[TY_FLOAT]; }
 Type *ty_double(TyStore *ts)   { return &ts->prims[TY_DOUBLE]; }
 
 Type *ty_longdouble(TyStore *ts, const char *name) {
+    const char *iname = ts_intern_str(ts, name);
     return ts_intern(ts, (Type){
         .kind = TY_LONGDOUBLE,
-        .u.longdouble = { name }
+        .u.longdouble = { iname }
     });
 }
 
@@ -521,14 +524,28 @@ Type *ty_from_name(TyStore *ts, const char *name) {
         !strcmp(name,"signed long long")||
         !strcmp(name,"signed long long int"))        return ty_longlong(ts);
     if (!strcmp(name,"unsigned long long")||
-        !strcmp(name,"unsigned long long int"))      return ty_ulonglong(ts);
+        !strcmp(name,"unsigned long long int")||
+        !strcmp(name,"long long unsigned")||
+        !strcmp(name,"long long unsigned int"))      return ty_ulonglong(ts);
+    if (!strcmp(name,"__int64")||
+        !strcmp(name,"signed __int64"))              return ty_longlong(ts);
+    if (!strcmp(name,"unsigned __int64"))            return ty_ulonglong(ts);
+    if (!strcmp(name,"__int32")||
+        !strcmp(name,"signed __int32"))              return ty_int(ts);
+    if (!strcmp(name,"unsigned __int32"))            return ty_uint(ts);
+    if (!strcmp(name,"__int16")||
+        !strcmp(name,"signed __int16"))              return ty_short(ts);
+    if (!strcmp(name,"unsigned __int16"))            return ty_ushort(ts);
+    if (!strcmp(name,"__int8")||
+        !strcmp(name,"signed __int8"))               return ty_char(ts);
+    if (!strcmp(name,"unsigned __int8"))             return ty_uchar(ts);
     if (!strcmp(name,"long double"))                 return ty_longdouble(ts, "long double");
     /* C99 _Complex types — we model them as their underlying float/double
      * type. The _Complex qualifier is preserved in the name string so the
      * C code generator can emit it correctly. */
-    if (!strcmp(name,"_Complex float"))              return ty_float(ts);
-    if (!strcmp(name,"_Complex double"))             return ty_double(ts);
-    if (!strcmp(name,"_Complex long double"))        return ty_longdouble(ts, "long double");
+    if (!strcmp(name,"_Complex float"))              return ty_longdouble(ts, "_Complex float");
+    if (!strcmp(name,"_Complex double"))             return ty_longdouble(ts, "_Complex double");
+    if (!strcmp(name,"_Complex long double"))        return ty_longdouble(ts, "_Complex long double");
     /* GCC/Clang extended-precision floating-point types.
      * We model them as TY_LONGDOUBLE with their original name so that
      * cg_type emits the name verbatim (e.g. __float128, not long double). */
@@ -544,6 +561,16 @@ Type *ty_from_name(TyStore *ts, const char *name) {
     if (!strcmp(name,"_Float32x"))                   return ty_double(ts);
     if (!strcmp(name,"_Float16"))                    return ty_longdouble(ts, "_Float16");
     if (!strcmp(name,"__bf16"))                      return ty_longdouble(ts, "__bf16");
+    if (!strcmp(name,"_Complex _Float16"))           return ty_longdouble(ts, "_Complex _Float16");
+    if (!strcmp(name,"_Complex __bf16"))             return ty_longdouble(ts, "_Complex __bf16");
+    if (!strcmp(name,"_Complex __float128"))         return ty_longdouble(ts, "_Complex __float128");
+    if (!strcmp(name,"_Complex _Float128"))          return ty_longdouble(ts, "_Complex _Float128");
+    if (!strcmp(name,"_Complex _Float64"))           return ty_longdouble(ts, "_Complex _Float64");
+    if (!strcmp(name,"_Complex _Float32"))           return ty_longdouble(ts, "_Complex _Float32");
+    if (!strcmp(name,"_Complex _Float64x"))          return ty_longdouble(ts, "_Complex _Float64x");
+    if (!strcmp(name,"_Complex _Float32x"))          return ty_longdouble(ts, "_Complex _Float32x");
+    if (!strcmp(name,"_Complex _Float128x"))         return ty_longdouble(ts, "_Complex _Float128x");
+    if (!strcmp(name,"_Complex __float80"))          return ty_longdouble(ts, "_Complex __float80");
     /* Decimal floats — model as their underlying float/double for now */
     if (!strcmp(name,"_Decimal32"))                  return ty_float(ts);
     if (!strcmp(name,"_Decimal64"))                  return ty_double(ts);
@@ -564,8 +591,18 @@ static const char * const KNOWN_NAMES[] = {
     "long unsigned", "long unsigned int",
     "long long", "long long int", "signed long long", "signed long long int",
     "unsigned long long", "unsigned long long int",
+    "long long unsigned", "long long unsigned int",
+    "__int64", "signed __int64", "unsigned __int64",
+    "__int32", "signed __int32", "unsigned __int32",
+    "__int16", "signed __int16", "unsigned __int16",
+    "__int8", "signed __int8", "unsigned __int8",
     "long double",
     "_Complex float", "_Complex double", "_Complex long double",
+    "_Complex _Float16", "_Complex __bf16",
+    "_Complex __float128", "_Complex _Float128",
+    "_Complex _Float64", "_Complex _Float32",
+    "_Complex _Float64x", "_Complex _Float32x",
+    "_Complex _Float128x", "_Complex __float80",
     "__float128", "_Float128", "_Float128x",
     "__float80", "__cfloat128",
     "_Float64x", "_Float64", "_Float32", "_Float32x",
@@ -902,6 +939,7 @@ Type *ty_from_ast_depth(TyStore *ts, const AstNode *node,
             Symbol *ssym = scope_lookup_struct_tag(scope, name);
             if (ssym && ssym->decl)
                 return ty_struct_type(ts, name, NULL, 0, ssym->decl);
+            return ty_struct_type(ts, name, NULL, 0, NULL);
         }
         /* Look up in scope. */
         Symbol *sym = scope ? scope_lookup_type(scope, name) : NULL;
