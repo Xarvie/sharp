@@ -74,6 +74,8 @@ static bool ty_compound_eq(const Type *a, const Type *b) {
     case TY_FUNC:
         if (a->u.func.ret    != b->u.func.ret)    return false;
         if (a->u.func.nparams != b->u.func.nparams) return false;
+        if (a->u.func.is_vararg != b->u.func.is_vararg) return false;
+        if (a->u.func.params_unspecified != b->u.func.params_unspecified) return false;
         for (size_t i = 0; i < a->u.func.nparams; i++)
             if (a->u.func.params[i] != b->u.func.params[i]) return false;
         return true;
@@ -193,9 +195,10 @@ Type *ty_atomic(TyStore *ts, Type *base) {
     if (base->kind == TY_ATOMIC) return base; /* _Atomic(_Atomic(T)) == _Atomic(T) */
     return ts_intern(ts, (Type){ .kind = TY_ATOMIC, .u.atomic = { base } });
 }
-Type *ty_func(TyStore *ts, Type *ret, Type **params, size_t nparams) {
+Type *ty_func(TyStore *ts, Type *ret, Type **params, size_t nparams,
+              bool is_vararg, bool params_unspecified) {
     return ts_intern(ts, (Type){ .kind = TY_FUNC,
-        .u.func = { ret, params, nparams } });
+        .u.func = { ret, params, nparams, is_vararg, params_unspecified } });
 }
 Type *ty_struct_type(TyStore *ts, const char *name,
                      Type **args, size_t nargs, AstNode *decl) {
@@ -263,6 +266,8 @@ Type *ty_enum_type(TyStore *ts, const char *name, AstNode *decl) {
     Type candidate = { .kind = TY_ENUM, .u.enum_ = { iname, decl } };
     for (size_t i = 0; i < ts->compound_len; i++) {
         if (ty_compound_eq(ts->compound[i], &candidate)) {
+            if (decl && !ts->compound[i]->u.enum_.decl)
+                ts->compound[i]->u.enum_.decl = decl;
             return ts->compound[i];
         }
     }
@@ -637,13 +642,31 @@ static int64_t eval_array_size(TyStore *ts, const AstNode *expr,
         int64_t r = eval_array_size(ts, expr->u.binop.rhs, scope);
         if (l < 0 || r < 0) return -1;
         switch (expr->u.binop.op) {
-        case STOK_PLUS:    return l + r;
-        case STOK_MINUS:   return l - r;
-        case STOK_STAR:    return l * r;
-        case STOK_SLASH:   return r != 0 ? l / r : -1;
-        case STOK_PERCENT: return r != 0 ? l % r : -1;
-        case STOK_LTLT:    return (r >= 0 && r < 64) ? l << r : -1;
-        case STOK_GTGT:    return (r >= 0 && r < 64) ? l >> r : -1;
+        case STOK_PLUS:
+            if (l > 0 && r > 0 && l > INT64_MAX - r) return -1;
+            return l + r;
+        case STOK_MINUS:
+            if (l < 0 && r > 0 && l < INT64_MIN + r) return -1;
+            return l - r;
+        case STOK_STAR:
+            if (l > 0 && r > 0 && l > INT64_MAX / r) return -1;
+            if (l < 0 && r > 0 && l < INT64_MIN / r) return -1;
+            if (l > 0 && r < 0 && r < INT64_MIN / l) return -1;
+            if (l < 0 && r < 0 && l < INT64_MAX / r) return -1;
+            return l * r;
+        case STOK_SLASH:
+            if (r == 0 || (l == INT64_MIN && r == -1)) return -1;
+            return l / r;
+        case STOK_PERCENT:
+            if (r == 0 || (l == INT64_MIN && r == -1)) return -1;
+            return l % r;
+        case STOK_LTLT:
+            if (l < 0 || r < 0 || r >= 64) return -1;
+            if (l > INT64_MAX >> r) return -1;
+            return l << r;
+        case STOK_GTGT:
+            if (r < 0 || r >= 64) return -1;
+            return l >> r;
         default:           return -1;
         }
     }
@@ -1052,10 +1075,8 @@ Type *ty_from_ast(TyStore *ts, const AstNode *node,
             }
             params[real_np++] = ty_from_ast(ts, ty_node, scope, diags);
         }
-        Type *t = ty_func(ts, ret, params, real_np);
-        t->u.func.is_vararg          = has_vararg;
-        /* C8: preserve the (void) vs () distinction from the AST. */
-        t->u.func.params_unspecified = node->u.type_func.params_unspecified;
+        Type *t = ty_func(ts, ret, params, real_np,
+                          has_vararg, node->u.type_func.params_unspecified);
         free(params);
         return t;
     }
@@ -1253,9 +1274,8 @@ Type *ty_subst(TyStore *ts, Type *t,
             }
         }
         if (!changed) { free(params); return t; }
-        Type *r = ty_func(ts, ret, params, t->u.func.nparams);
-        r->u.func.is_vararg = t->u.func.is_vararg;
-        r->u.func.params_unspecified = t->u.func.params_unspecified;
+        Type *r = ty_func(ts, ret, params, t->u.func.nparams,
+                          t->u.func.is_vararg, t->u.func.params_unspecified);
         free(params);
         return r;
     }

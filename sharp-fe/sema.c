@@ -1074,7 +1074,7 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                         ? ty_from_ast(ts, fn_decl->u.func_def.ret_type,
                                       ss->scope, NULL)
                         : ty_void(ts);
-                    Type *fn = ty_func(ts, ret, NULL, 0);
+                    Type *fn = ty_func(ts, ret, NULL, 0, false, false);
                     t = ty_ptr(ts, fn);
                 } else {
                     t = ty_ptr(ts, ty_void(ts));  /* generic fn ptr */

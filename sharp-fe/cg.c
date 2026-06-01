@@ -323,13 +323,17 @@ static void cg_printf(CgCtx *ctx, const char *fmt, ...) {
 }
 
 static void cg_emit_int_lit(CgCtx *ctx, const AstNode *lit) {
-    if (lit->u.int_lit.is_longlong)
-        cg_printf(ctx, lit->u.int_lit.is_unsigned ? "%lluULL" : "%lldLL",
-                  (unsigned long long)lit->u.int_lit.val);
-    else if (lit->u.int_lit.is_long)
-        cg_printf(ctx, lit->u.int_lit.is_unsigned ? "%luUL" : "%ldL",
-                  (unsigned long)lit->u.int_lit.val);
-    else if (lit->u.int_lit.is_unsigned) {
+    if (lit->u.int_lit.is_longlong) {
+        if (lit->u.int_lit.is_unsigned)
+            cg_printf(ctx, "%lluULL", (unsigned long long)lit->u.int_lit.val);
+        else
+            cg_printf(ctx, "%lldLL", (long long)lit->u.int_lit.val);
+    } else if (lit->u.int_lit.is_long) {
+        if (lit->u.int_lit.is_unsigned)
+            cg_printf(ctx, "%luUL", (unsigned long)lit->u.int_lit.val);
+        else
+            cg_printf(ctx, "%ldL", (long)lit->u.int_lit.val);
+    } else if (lit->u.int_lit.is_unsigned) {
         if ((uint64_t)lit->u.int_lit.val <= 0xFFFFFFFFULL)
             cg_printf(ctx, "%uU", (unsigned)lit->u.int_lit.val);
         else
@@ -2775,7 +2779,7 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
             size_t snr_len = strlen(idx_sn_raw);
             for (size_t b = 0; b < ctx->file_scope->nbuckets; b++) {
                 for (Symbol *es = ctx->file_scope->buckets[b];
-                     es && es != (Symbol*)1; es = es->next) {
+                     es; es = es->next) {
                 if (es->kind != SYM_FUNC || !es->decl) continue;
                 if (es->decl->kind != AST_FUNC_DEF) continue;
                 if (!es->decl->u.func_def.is_operator) continue;
@@ -3515,7 +3519,7 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
                 if (base_ast)
                     cg_type_from_ast(ctx, (AstNode *)base_ast);
                 else if (!base_t || ty_is_error(base_t))
-                    cg_type_from_ast(ctx, (AstNode *)base_ast);
+                    cg_puts(ctx, "void");
                 else
                     cg_type(ctx, base_t);
                 cg_printf(ctx, " %s", vd->u.var_decl.name);
@@ -3849,15 +3853,17 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
             AstNode *init = stmt->u.for_.init;
             if (init->kind == AST_DECL_STMT) {
                 AstNode *vd = init->u.decl_stmt.decl;
-                Type *t = vd->sem_type;
-                if (!t || ty_is_error(t))
-                    t = vd->u.var_decl.type
-                      ? ty_from_ast(ctx->ts, vd->u.var_decl.type, cg_type_scope(ctx), NULL)
-                      : ty_int(ctx->ts);
-                cg_decl(ctx, t, vd->u.var_decl.name);
-                if (vd->u.var_decl.init) {
-                    cg_puts(ctx, " = ");
-                    cg_expr(ctx, vd->u.var_decl.init);
+                if (vd && vd->kind == AST_VAR_DECL) {
+                    Type *t = vd->sem_type;
+                    if (!t || ty_is_error(t))
+                        t = vd->u.var_decl.type
+                          ? ty_from_ast(ctx->ts, vd->u.var_decl.type, cg_type_scope(ctx), NULL)
+                          : ty_int(ctx->ts);
+                    cg_decl(ctx, t, vd->u.var_decl.name);
+                    if (vd->u.var_decl.init) {
+                        cg_puts(ctx, " = ");
+                        cg_expr(ctx, vd->u.var_decl.init);
+                    }
                 }
             } else if (init->kind == AST_BLOCK) {
                 /* Compound init: multi-variable for-init
@@ -3868,20 +3874,22 @@ static void cg_stmt(CgCtx *ctx, const AstNode *stmt,
                     AstNode *sd = init->u.block.stmts.data[i];
                     if (sd->kind == AST_DECL_STMT) {
                         AstNode *vd = sd->u.decl_stmt.decl;
-                        Type *t = vd->sem_type;
-                        if (!t || ty_is_error(t))
-                            t = vd->u.var_decl.type
-                              ? ty_from_ast(ctx->ts, vd->u.var_decl.type,
-                                            cg_type_scope(ctx), NULL)
-                              : ty_int(ctx->ts);
-                        if (i == 0)
-                            cg_decl(ctx, t, vd->u.var_decl.name);
-                        else
-                            cg_emit_comma_cont_declarator(ctx,
-                                vd->u.var_decl.type, vd->u.var_decl.name);
-                        if (vd->u.var_decl.init) {
-                            cg_puts(ctx, " = ");
-                            cg_expr(ctx, vd->u.var_decl.init);
+                        if (vd && vd->kind == AST_VAR_DECL) {
+                            Type *t = vd->sem_type;
+                            if (!t || ty_is_error(t))
+                                t = vd->u.var_decl.type
+                                  ? ty_from_ast(ctx->ts, vd->u.var_decl.type,
+                                                cg_type_scope(ctx), NULL)
+                                  : ty_int(ctx->ts);
+                            if (i == 0)
+                                cg_decl(ctx, t, vd->u.var_decl.name);
+                            else
+                                cg_emit_comma_cont_declarator(ctx,
+                                    vd->u.var_decl.type, vd->u.var_decl.name);
+                            if (vd->u.var_decl.init) {
+                                cg_puts(ctx, " = ");
+                                cg_expr(ctx, vd->u.var_decl.init);
+                            }
                         }
                     }
                 }
@@ -5119,7 +5127,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
             size_t snr_len = strlen(sn_raw);
             for (size_t b = 0; b < ctx->file_scope->nbuckets; b++) {
                 for (Symbol *es = ctx->file_scope->buckets[b];
-                     es && es != (Symbol*)1; es = es->next) {
+                     es; es = es->next) {
                     if (es->kind != SYM_FUNC || !es->decl) continue;
                     if (es->decl->kind != AST_FUNC_DEF) continue;
                     if (!es->decl->u.func_def.is_operator) continue;
@@ -5209,7 +5217,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                 if (ctx->file_scope) {
                     Scope *fs = ctx->file_scope;
                     for (size_t b = 0; b < fs->nbuckets; b++) {
-                        for (Symbol *es = fs->buckets[b]; es && es != (Symbol*)1; es = es->next) {
+                        for (Symbol *es = fs->buckets[b]; es; es = es->next) {
                             if (es->kind != SYM_FUNC || !es->decl) continue;
                             if (es->decl->kind != AST_FUNC_DEF) continue;
                             const AstNode *efn = es->decl;
@@ -5322,7 +5330,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
                 const char *mname = expr->u.method_call.method;
                 Scope *fs = ctx->file_scope;
                 for (size_t b = 0; b < fs->nbuckets; b++) {
-                    for (Symbol *es = fs->buckets[b]; es && es != (Symbol*)1;
+                    for (Symbol *es = fs->buckets[b]; es;
                          es = es->next) {
                         if (es->kind != SYM_FUNC || !es->decl) continue;
                         if (es->decl->kind != AST_FUNC_DEF) continue;
@@ -5406,7 +5414,7 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
         size_t snr_len = strlen(sn_raw);
         for (size_t b = 0; b < ctx->file_scope->nbuckets; b++) {
             for (Symbol *es = ctx->file_scope->buckets[b];
-                 es && es != (Symbol*)1; es = es->next) {
+                 es; es = es->next) {
             if (es->kind != SYM_FUNC || !es->decl) continue;
             if (es->decl->kind != AST_FUNC_DEF) continue;
             if (!es->decl->u.func_def.is_operator) continue;
@@ -5556,6 +5564,19 @@ static void cg_collect_stmt(CgCtx *ctx, const AstNode *stmt) {
         break;
     case AST_LABEL:
         break;
+    case AST_TYPEDEF_DECL: {
+        if (stmt->u.typedef_decl.target && stmt->u.typedef_decl.target->sem_type)
+            cg_collect_type(ctx, stmt->u.typedef_decl.target->sem_type);
+        break;
+    }
+    case AST_STRUCT_DEF: {
+        for (size_t i = 0; i < stmt->u.struct_def.fields.len; i++) {
+            AstNode *f = stmt->u.struct_def.fields.data[i];
+            if (f && f->u.field_decl.type && f->u.field_decl.type->sem_type)
+                cg_collect_type(ctx, f->u.field_decl.type->sem_type);
+        }
+        break;
+    }
     default: break;
     }
 }
@@ -5681,11 +5702,16 @@ static void cg_emit_spec_func(CgCtx *ctx, const AstNode *fn,
      * method dispatch falls through to verbatim emission. */
     sema_func_template_body(ctx->ts, fscope, NULL, (AstNode*)fn);
 
-    /* Install substitution context. */
+    /* Save and install substitution context. */
+    const char **saved_gp_names = ctx->gp_names;
+    Type **saved_gp_vals = ctx->gp_vals;
+    size_t saved_ngp = ctx->ngp;
+    Scope *saved_spec_scope = ctx->spec_scope;
+
     ctx->gp_names  = pnames;
     ctx->gp_vals   = pvals;
     ctx->ngp       = np;
-    ctx->spec_scope = fscope;  /* cg_type_scope() will use this for T resolution */
+    ctx->spec_scope = fscope;
 
     /* Return type */
     Type *ret_t = ty_from_ast(ctx->ts, fn->u.func_def.ret_type, fscope, NULL);
@@ -5715,11 +5741,11 @@ static void cg_emit_spec_func(CgCtx *ctx, const AstNode *fn,
     ctx->cur_fn_ret = NULL;
     cg_nl(ctx);
 
-    /* Clear substitution context. */
-    ctx->gp_names  = NULL;
-    ctx->gp_vals   = NULL;
-    ctx->ngp       = 0;
-    ctx->spec_scope = NULL;
+    /* Restore substitution context. */
+    ctx->gp_names  = saved_gp_names;
+    ctx->gp_vals   = saved_gp_vals;
+    ctx->ngp       = saved_ngp;
+    ctx->spec_scope = saved_spec_scope;
 }
 
 /* =========================================================================
@@ -6114,20 +6140,10 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
      * use the type annotation stored by sema to emit faithfully. */
     if (!target) {
         Type *t = (Type *)d->sem_type;
-        if (!t) t = ty_from_ast(ctx->ts, NULL, cg_type_scope(ctx), NULL);
-        /* Fall back: look in the typedef declaration's own loc.
-         * Actually: if sema didn't annotate, use the DeclSpec-derived type.
-         * For safety, check if there's a known primitive from alias lookup. */
-        if (!t) {
-            /* try scope lookup */
-            Symbol *sym = ctx->file_scope
-                ? scope_lookup(ctx->file_scope, alias) : NULL;
-            if (sym && sym->decl && sym->decl == d) {
-                /* The symbol IS this typedef; we need to find the type
-                 * another way.  Use ty_from_name on common primitives. */
-            }
+        if (!t || ty_is_error(t)) {
+            t = ty_from_name(ctx->ts, alias);
         }
-        if (t) {
+        if (t && !ty_is_error(t)) {
             cg_puts(ctx, "typedef ");
             cg_decl(ctx, t, cname);
             cg_puts(ctx, ";\n");
@@ -6630,10 +6646,10 @@ static void cg_emit_func_params_ast(CgCtx *ctx, const AstNode *fn_ast) {
         const char    *pnm = (p->kind == AST_PARAM_DECL)
                              ? p->u.param_decl.name : NULL;
         bool emitted = pty && cg_decl_ast(ctx, pty, pnm);
-        if (!emitted) {
+        if (!emitted && pty) {
             Type *pt = ty_from_ast(ctx->ts, (AstNode*)pty,
                                    cg_type_scope(ctx), NULL);
-            if (pt) cg_decl(ctx, pt, pnm);
+            if (pt && !ty_is_error(pt)) cg_decl(ctx, pt, pnm);
         }
     }
     if (first && !fn_ast->u.type_func.params_unspecified)
@@ -6958,6 +6974,32 @@ static bool ast_uses_to_cstr(const AstNode *n) {
             if (ast_uses_to_cstr(n->u.call.args.data[i])) return true;
         break;
     }
+    case AST_METHOD_CALL: {
+        if (n->u.method_call.recv && ast_uses_to_cstr(n->u.method_call.recv)) return true;
+        for (size_t i = 0; i < n->u.method_call.args.len; i++)
+            if (ast_uses_to_cstr(n->u.method_call.args.data[i])) return true;
+        break;
+    }
+    case AST_FIELD_ACCESS:
+        return ast_uses_to_cstr(n->u.field_access.recv);
+    case AST_INDEX:
+        return ast_uses_to_cstr(n->u.index_.base) || ast_uses_to_cstr(n->u.index_.index);
+    case AST_CAST:
+        return ast_uses_to_cstr(n->u.cast.operand);
+    case AST_COMMA:
+        return ast_uses_to_cstr(n->u.comma.lhs) || ast_uses_to_cstr(n->u.comma.rhs);
+    case AST_INIT_LIST: {
+        for (size_t i = 0; i < n->u.init_list.items.len; i++)
+            if (ast_uses_to_cstr(n->u.init_list.items.data[i])) return true;
+        break;
+    }
+    case AST_SIZEOF:
+        return n->u.sizeof_.operand && ast_uses_to_cstr(n->u.sizeof_.operand);
+    case AST_SWITCH:
+        return (n->u.switch_.cond && ast_uses_to_cstr(n->u.switch_.cond)) ||
+               (n->u.switch_.body && ast_uses_to_cstr(n->u.switch_.body));
+    case AST_DEFER:
+        return n->u.defer_.body && ast_uses_to_cstr(n->u.defer_.body);
     case AST_RETURN:
         return n->u.return_.value && ast_uses_to_cstr(n->u.return_.value);
     case AST_IF:

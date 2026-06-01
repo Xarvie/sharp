@@ -130,7 +130,8 @@ Type *ty_ptr(TyStore *ts, Type *base);
 Type *ty_array(TyStore *ts, Type *base, int64_t size);
 Type *ty_const(TyStore *ts, Type *base);
 Type *ty_atomic(TyStore *ts, Type *base);
-Type *ty_func(TyStore *ts, Type *ret, Type **params, size_t nparams);
+Type *ty_func(TyStore *ts, Type *ret, Type **params, size_t nparams,
+              bool is_vararg, bool params_unspecified);
 Type *ty_struct_type(TyStore *ts, const char *name,
                      Type **args, size_t nargs, AstNode *decl);
 Type *ty_enum_type(TyStore *ts, const char *name, AstNode *decl);

@@ -737,6 +737,7 @@ static void attrs_append_tokens(char **out, const PS *ps,
     }
     if (chunk_len == 0) return;
     char *buf = malloc(chunk_len + 1);
+    if (!buf) abort();
     size_t off = 0;
     for (size_t i = from; i < to; i++) {
         memcpy(buf + off, ps->toks[i].text, ps->toks[i].len);
@@ -830,7 +831,12 @@ static bool parse_generic_args(PS *ps, AstVec *args) {
         if (!ok_start) break;
 
         AstNode *arg = parse_type(ps);
-        if (!arg) { ps_restore(ps, sv); astvec_free(args); return false; }
+        if (!arg) {
+            for (size_t i = 0; i < args->len; i++) ast_node_free(args->data[i]);
+            ps_restore(ps, sv);
+            astvec_free(args);
+            return false;
+        }
         astvec_push(args, arg);
 
         if (ps_at(ps, STOK_COMMA)) { ps_advance(ps); continue; }
@@ -2124,6 +2130,7 @@ static DeclSpecs parse_decl_specifiers(PS *ps) {
     }
 
     AstNode *base = tspec_resolve(ps, &ts, ds.loc);
+    free((void *)ts.signed_kw);
     if (ds.is_const && ds.is_volatile) {
         /* Preserve qualifier order:
          * `const volatile T` → CONST(VOLATILE(T)) → emits `const volatile T`
@@ -2798,7 +2805,7 @@ static AstNode *parse_struct_def(PS *ps) {
             size_t old_len = strlen(struct_leading_attrs);
             size_t new_len = strlen(attr_text);
             char *merged = malloc(old_len + 1 + new_len + 1);
-            memcpy(merged, struct_leading_attrs, old_len);
+            if (!merged) abort();
             merged[old_len] = ' ';
             memcpy(merged + old_len + 1, attr_text, new_len + 1);
             free(attr_text);
@@ -3217,6 +3224,7 @@ static AstNode *parse_init_declarator_list(PS *ps, const DeclSpecs *ds, bool stm
                         _pd->u.struct_def.from_inline_var = false;
                 }
                 ps_advance(ps);   /* eat `;` */
+                free(var_gcc_attrs);
                 return NULL;
             }
             ps_error(ps, vloc, "declaration is missing a name");
@@ -4208,8 +4216,14 @@ static AstNode *parse_top_decl(PS *ps) {
             AstNode *target = full_ty;
             while (target && (target->kind == AST_TYPE_CONST ||
                               target->kind == AST_TYPE_PTR ||
-                              target->kind == AST_TYPE_VOLATILE))
-                target = target->u.type_const.base;
+                              target->kind == AST_TYPE_VOLATILE)) {
+                switch (target->kind) {
+                case AST_TYPE_CONST:    target = target->u.type_const.base; break;
+                case AST_TYPE_PTR:      target = target->u.type_ptr.base; break;
+                case AST_TYPE_VOLATILE: target = target->u.type_volatile.base; break;
+                default:                target = NULL; break;
+                }
+            }
             if (target && target->kind == AST_STRUCT_DEF && target->u.struct_def.is_union)
                 target->u.struct_def.is_transparent_union = true;
             if (full_ty && full_ty->kind == AST_TYPE_NAME)
@@ -4265,7 +4279,7 @@ static AstNode *parse_top_decl(PS *ps) {
         vd->u.var_decl.gcc_attrs          = top_gcc_attrs;
         vd->u.var_decl.gcc_attrs_trailing  = trailing_decl_attr;
         vd->u.var_decl.fmt |= (ds.fmt & FMTF_ATTRS_LEADING); /* p43 */
-        (void)top_trailing_attrs_saved;  /* var trailing attrs via ps->last_decl_attr */
+        free(top_trailing_attrs_saved);
         if (ps_match(ps, STOK_EQ)) {
             vd->u.var_decl.init = ps_at(ps, STOK_LBRACE)
                                 ? parse_init_list(ps)

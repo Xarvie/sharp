@@ -84,8 +84,9 @@ struct Scope {
     Scope     *parent;              /* NULL for SCOPE_GLOBAL               */
     AstNode   *owner;               /* struct/func decl that owns this scope*/
 
-    /* Open-addressing (linear-probing) symbol hash table.
-     * buckets[i] is NULL for empty slots, (Symbol*)1 for tombstones.
+    /* Chained symbol hash table.
+     * Each bucket is a singly-linked list of Symbol nodes.
+     * buckets[i] is NULL for empty slots.
      * Invariant: nbuckets is always a power of two.
      * Load factor kept below 0.75; resized 2x when threshold is hit.     */
     Symbol   **buckets;

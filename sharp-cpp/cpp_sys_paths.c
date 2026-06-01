@@ -376,8 +376,10 @@ static char *run_command_and_capture(const char *cmd) {
     fseek(fp, 0, SEEK_END);
     long len = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    
-    char *buf = cpp_xmalloc(len + 1);
+
+    if (len < 0) { fclose(fp); return NULL; }
+
+    char *buf = cpp_xmalloc((size_t)len + 1);
     
     fread(buf, 1, len, fp);
     buf[len] = '\0';

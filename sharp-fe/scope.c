@@ -991,7 +991,6 @@ Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
                     const char *check_name = sname;
                     unsigned h = sym_hash(check_name) & (fs->nbuckets - 1);
                     for (Symbol *nxt = tsym->next; nxt; nxt = nxt->next) {
-                        if (nxt == (Symbol*)1) continue;
                         if (strcmp(nxt->name, sname) == 0 &&
                             nxt->decl && nxt->decl->kind == AST_STRUCT_DEF) {
                             FE_ERROR(diags, d->loc,
@@ -1100,7 +1099,7 @@ Symbol *find_extension_method(Scope *file_scope, const char *struct_name,
                               const char *method_name) {
     if (!file_scope || !struct_name || !method_name) return NULL;
     for (size_t i = 0; i < file_scope->nbuckets; i++) {
-        for (Symbol *s = file_scope->buckets[i]; s && s != (Symbol*)1; s = s->next) {
+        for (Symbol *s = file_scope->buckets[i]; s; s = s->next) {
             if (s->kind != SYM_FUNC || !s->decl) continue;
             if (s->decl->kind != AST_FUNC_DEF) continue;
             if (!s->decl->u.func_def.struct_name) continue;
