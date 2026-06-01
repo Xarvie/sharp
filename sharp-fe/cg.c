@@ -37,7 +37,6 @@ struct CgCtx {
     const AstVec  *local_block_stmts;/* block stmts for local struct lookup */
     const char    *cur_struct;   /* struct name being emitted (mangling)    */
     const AstNode *cur_struct_def;/* struct AST node for field lookup       */
-    Scope         *cur_fn_scope; /* current function scope for ident lookup */
 
     /* ── Group C: Generic specialization ───────────────────────────── */
     /* Active substitution context (set while emitting one specialization) */
@@ -1647,34 +1646,6 @@ static void cg_const_expr(CgCtx *ctx, const AstNode *e) {
         }
         break;
     case AST_IDENT:
-        /* If inside a struct method body, implicit struct field access
-         * must be emitted as `this->count`.  However, if the identifier
-         * resolves to a parameter or local variable (shadowing the field),
-         * emit it as-is — Sharp has no implicit `this`. */
-        if (ctx->cur_struct_def && e->u.ident.name) {
-            if (ctx->cur_fn_scope) {
-                Symbol *sym = scope_lookup_value(ctx->cur_fn_scope,
-                                                 e->u.ident.name);
-                if (sym && (sym->kind == SYM_PARAM || sym->kind == SYM_VAR)) {
-                    cg_puts(ctx, e->u.ident.name);
-                    break;
-                }
-            }
-            const AstNode *sd = ctx->cur_struct_def;
-            int matched = 0;
-            for (size_t i = 0; i < sd->u.struct_def.fields.len; i++) {
-                const AstNode *f = sd->u.struct_def.fields.data[i];
-                if (f && f->kind == AST_FIELD_DECL &&
-                    f->u.field_decl.name &&
-                    strcmp(f->u.field_decl.name, e->u.ident.name) == 0) {
-                    cg_puts(ctx, "this->");
-                    cg_puts(ctx, e->u.ident.name);
-                    matched = 1;
-                    break;
-                }
-            }
-            if (matched) break;
-        }
         cg_puts(ctx, e->u.ident.name ? e->u.ident.name : "0");
         break;
     case AST_PAREN:   /* C8 */
@@ -2283,32 +2254,6 @@ static void cg_expr(CgCtx *ctx, const AstNode *expr) {
         break;
     }
     case AST_IDENT:
-        /* Implicit `this->field` inside struct method bodies.
-         * But if the identifier resolves to a param or local, emit as-is. */
-        if (ctx->cur_struct_def && expr->u.ident.name) {
-            if (ctx->cur_fn_scope) {
-                Symbol *sym = scope_lookup_value(ctx->cur_fn_scope,
-                                                 expr->u.ident.name);
-                if (sym && (sym->kind == SYM_PARAM || sym->kind == SYM_VAR)) {
-                    cg_puts(ctx, expr->u.ident.name);
-                    break;
-                }
-            }
-            const AstNode *sd = ctx->cur_struct_def;
-            int matched = 0;
-            for (size_t i = 0; i < sd->u.struct_def.fields.len; i++) {
-                const AstNode *f = sd->u.struct_def.fields.data[i];
-                if (f && f->kind == AST_FIELD_DECL &&
-                    f->u.field_decl.name &&
-                    strcmp(f->u.field_decl.name, expr->u.ident.name) == 0) {
-                    cg_puts(ctx, "this->");
-                    cg_puts(ctx, expr->u.ident.name);
-                    matched = 1;
-                    break;
-                }
-            }
-            if (matched) break;
-        }
         cg_puts(ctx, expr->u.ident.name);
         break;
 
@@ -4241,10 +4186,9 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
     if (fn->u.func_def.generic_params.len > 0) return;
 
     /* Set cur_struct/cur_struct_def for struct method bodies so that
-     * implicit `this->field` accesses are emitted correctly. */
+     * method name mangling uses the struct name correctly. */
     const char *prev_st = ctx->cur_struct;
     const AstNode *prev_sd = ctx->cur_struct_def;
-    Scope *prev_fs = ctx->cur_fn_scope;
     if (sname && ctx->file_scope) {
         ctx->cur_struct = sname;
         Symbol *ss = scope_lookup_type(ctx->file_scope, sname);
@@ -4257,7 +4201,6 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
             }
         }
     }
-    ctx->cur_fn_scope = fn->sem_scope;
 
     cg_emit_linemarker(ctx, fn->loc);
     StorageClass sc = fn->u.func_def.storage;
@@ -4700,7 +4643,6 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
         ctx->cur_struct = prev_st;
         ctx->cur_struct_def = prev_sd;
     }
-    ctx->cur_fn_scope = prev_fs;
 }
 
 /* =========================================================================

@@ -58,7 +58,7 @@ typedef enum {
     /* ── Sharp keywords ─────────────────────────────────────────────────── */
     STOK_DEFER,      /* 'defer'    — Sharp scope-exit statement            */
     STOK_OPERATOR,   /* 'operator' — Sharp operator-overload introducer    */
-    STOK_THIS,       /* 'this'     — Sharp implicit receiver               */
+    STOK_THIS,       /* 'this'     — Sharp explicit receiver parameter     */
     STOK_CLASS,      /* 'class'    — Sharp class (struct + methods + auto-typedef) */
     STOK_CONSTEXPR,  /* 'constexpr' — C23 compile-time constant specifier  */
     STOK_EXTERN_STRUCT, /* parse-layer sentinel, not produced by lex       */

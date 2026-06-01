@@ -937,8 +937,53 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
              * #define strdup(p) Curl_cstrdup(p)), the original name used as
              * an rvalue isn't found in scope.  void* lets cast expressions
              * like (FnType)strdup type-check; cc resolves the actual name. */
-            FE_WARNING(ss->ctx->diags, expr->loc, "undefined name '%s'", name);
-            t = ty_ptr(ts, ty_void(ts));
+            /* Check if the undefined name matches a struct field —
+             * likely a bare field name used without 'this->'. */
+            bool is_field_hint = false;
+            if (ss->ctx && ss->ctx->file_scope) {
+                Scope *fs = ss->ctx->file_scope;
+                for (Scope *sc = ss->scope; sc; sc = sc->parent) {
+                    if (sc->kind != SCOPE_FUNC) continue;
+                    for (Symbol *s = sc->buckets[0]; s; s = s->next) {
+                        if (s->kind == SYM_PARAM && strcmp(s->name, "this") == 0 && s->decl) {
+                            AstNode *fn = s->decl;
+                            const char *sname = fn && fn->kind == AST_FUNC_DEF
+                                ? fn->u.func_def.struct_name : NULL;
+                            if (sname) {
+                                Symbol *tsym = scope_lookup_type(fs, sname);
+                                for (Symbol *t = tsym; t; t = t->next) {
+                                    if (t->kind == SYM_TYPE && t->decl &&
+                                        t->decl->kind == AST_STRUCT_DEF) {
+                                        for (size_t fi = 0;
+                                             fi < t->decl->u.struct_def.fields.len;
+                                             fi++) {
+                                            AstNode *f = t->decl->u.struct_def.fields.data[fi];
+                                            if (f && f->kind == AST_FIELD_DECL &&
+                                                f->u.field_decl.name &&
+                                                strcmp(f->u.field_decl.name, name) == 0) {
+                                                is_field_hint = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if (is_field_hint) break;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    if (is_field_hint) break;
+                }
+            }
+            if (is_field_hint) {
+                FE_ERROR(ss->ctx->diags, expr->loc,
+                    "use 'this->%s' instead of bare '%s' "
+                    "(Sharp has no implicit this)", name, name);
+                t = ty_error(ts);
+            } else {
+                FE_WARNING(ss->ctx->diags, expr->loc, "undefined name '%s'", name);
+                t = ty_ptr(ts, ty_void(ts));
+            }
         } else {
             AstNode *decl = sym->decl;
             switch (sym->kind) {
@@ -1047,17 +1092,12 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
                 FE_ERROR(ss->ctx->diags, expr->loc, "'%s' is a type, not a value", name);
                 t = ty_error(ts);
                 break;
-            case SYM_FIELD: {
-                /* Plain field name used inside a struct method body --
-                 * implicit `this->field` access.  Resolve the field type. */
-                AstNode *fd = sym->decl;
-                if (fd && fd->kind == AST_FIELD_DECL && fd->u.field_decl.type) {
-                    t = ty_from_ast(ts, fd->u.field_decl.type,
-                                    ss->scope, ss->ctx->diags);
-                }
-                if (!t) t = ty_int(ts);
+            case SYM_FIELD:
+                FE_ERROR(ss->ctx->diags, expr->loc,
+                    "use 'this->%s' instead of bare '%s' "
+                    "(Sharp has no implicit this)", name, name);
+                t = ty_error(ts);
                 break;
-            }
             default:
                 t = ty_error(ts);
                 break;

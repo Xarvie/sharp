@@ -673,11 +673,8 @@ static void build_func(Scope *parent, AstNode *fn, FeDiagArr *diags) {
             scope_define(fs, SYM_PARAM, p->u.param_decl.name, p, diags);
     }
 
-    /* Implicit 'this' for methods (functions inside a SCOPE_STRUCT).
-     * Skip if 'this' is already registered (extension methods declare
-     * 'this' explicitly in the parameter list). */
-    if (parent->kind == SCOPE_STRUCT && !scope_lookup_local(fs, "this"))
-        scope_define(fs, SYM_PARAM, "this", fn, diags);
+    /* Sharp requires explicit 'this' parameter in method definitions.
+     * No implicit 'this' injection. */
 
     /* Recurse into body.  We do NOT call build_block(fs, body) because
      * build_block always wants to create its own SCOPE_BLOCK; the
@@ -1054,11 +1051,10 @@ Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
                     d->u.func_def.params.data[0] = tp2;
                 after_this_inject:;
                 }
-                /* Extension method: use the struct's scope as parent so that
-                 * unqualified field names (e.g. `count` in `this->count`)
-                 * resolve correctly via scope traversal: func → struct → file. */
-                Scope *struct_scope = tsym->decl->sem_scope;
-                build_func(struct_scope ? struct_scope : fs, d, diags);
+                /* Extension method: build with file scope as parent.
+                 * Sharp has no implicit this, so struct fields are NOT
+                 * visible as bare names inside method bodies. */
+                build_func(fs, d, diags);
             } else {
                 /* Free function: build with file scope as parent */
                 build_func(fs, d, diags);
