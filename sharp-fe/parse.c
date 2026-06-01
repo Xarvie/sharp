@@ -4677,17 +4677,23 @@ static AstNode *parse_init_list(PS *ps) {
                         memcpy(chain + clen, nm2.text, nm2.len); clen += nm2.len;
                     }
                 } else if (ps_at(ps, STOK_LBRACKET)) {
-                    /* collect [...] verbatim */
-                    ps_advance(ps);  /* '[' */
-                    chain[clen++] = '[';
-                    while (!ps_at(ps, STOK_RBRACKET) && !ps_at(ps, STOK_EOF)) {
-                        SharpTok xt = ps_advance(ps);
-                        if (clen + (int)xt.len < (int)sizeof chain - 2) {
-                            memcpy(chain + clen, xt.text, xt.len); clen += xt.len;
+                    ps_advance(ps);
+                    if (clen + 2 < (int)sizeof chain) {
+                        chain[clen++] = '[';
+                        while (!ps_at(ps, STOK_RBRACKET) && !ps_at(ps, STOK_EOF)) {
+                            SharpTok xt = ps_advance(ps);
+                            if (clen + (int)xt.len < (int)sizeof chain - 2) {
+                                memcpy(chain + clen, xt.text, xt.len); clen += xt.len;
+                            }
                         }
+                        if (ps_at(ps, STOK_RBRACKET)) ps_advance(ps);
+                        if (clen + 1 < (int)sizeof chain)
+                            chain[clen++] = ']';
+                    } else {
+                        while (!ps_at(ps, STOK_RBRACKET) && !ps_at(ps, STOK_EOF))
+                            ps_advance(ps);
+                        if (ps_at(ps, STOK_RBRACKET)) ps_advance(ps);
                     }
-                    if (ps_at(ps, STOK_RBRACKET)) ps_advance(ps);
-                    chain[clen++] = ']';
                 } else break;
             }
             chain[clen] = '\0';
@@ -4795,8 +4801,8 @@ static AstNode *typeof_parse_primary(SharpTok *tokens, int ntoks, int *pos) {
     case STOK_LPAREN: {
         (*pos)++;
         n = typeof_parse_expr(tokens, ntoks, pos);
-        if (!n || *pos >= ntoks) return NULL;
-        if (tokens[*pos].kind != STOK_RPAREN) return NULL;
+        if (!n || *pos >= ntoks) { ast_node_free(n); return NULL; }
+        if (tokens[*pos].kind != STOK_RPAREN) { ast_node_free(n); return NULL; }
         (*pos)++;
         if ((n->kind == AST_IDENT || n->kind == AST_TYPE_NAME) && *pos < ntoks) {
             SharpTokKind nk = tokens[*pos].kind;
@@ -4874,7 +4880,7 @@ static AstNode *typeof_parse_expr_prec(SharpTok *tokens, int ntoks, int *pos, in
         if (prec < min_prec) break;
         (*pos)++;
         AstNode *rhs = typeof_parse_expr_prec(tokens, ntoks, pos, prec + 1);
-        if (!rhs) return NULL;
+        if (!rhs) { ast_node_free(lhs); return NULL; }
         AstNode *bin = ast_node_new(AST_BINOP, op.loc);
         bin->u.binop.op = op.kind;
         bin->u.binop.lhs = lhs;

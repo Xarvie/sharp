@@ -7644,14 +7644,16 @@ static bool cg_td_refs(size_t tgt_idx, const TdPos *tds, size_t ntds,
 static void cg_emit_td_fwd(CgCtx *ctx, size_t ti,
                             TdPos *tds, size_t ntds, bool *td_fwd) {
     if (ti >= ntds || td_fwd[ti]) return;
-    size_t nodes[256];
+    size_t nodes_cap = 64;
+    size_t *nodes = calloc(nodes_cap, sizeof(size_t));
     size_t nnodes = 0;
-    size_t bfs[256];
+    size_t bfs_cap = 64;
+    size_t *bfs = calloc(bfs_cap, sizeof(size_t));
     size_t nbfs = 0;
     bfs[nbfs++] = ti;
     td_fwd[ti] = true;
     nodes[nnodes++] = ti;
-    for (size_t qi = 0; qi < nbfs && nbfs < 256; qi++) {
+    for (size_t qi = 0; qi < nbfs; qi++) {
         size_t ci = bfs[qi];
         const AstNode *_td = tds[ci].decl;
         const AstNode *_tgt = _td->u.typedef_decl.target;
@@ -7659,6 +7661,14 @@ static void cg_emit_td_fwd(CgCtx *ctx, size_t ti,
             if (td_fwd[_di]) continue;
             if (type_refs_typedef(_tgt, tds[_di].alias)) {
                 td_fwd[_di] = true;
+                if (nbfs >= bfs_cap) {
+                    bfs_cap *= 2;
+                    bfs = realloc(bfs, bfs_cap * sizeof(size_t));
+                }
+                if (nnodes >= nodes_cap) {
+                    nodes_cap *= 2;
+                    nodes = realloc(nodes, nodes_cap * sizeof(size_t));
+                }
                 bfs[nbfs++] = _di;
                 nodes[nnodes++] = _di;
             }
@@ -7675,6 +7685,14 @@ static void cg_emit_td_fwd(CgCtx *ctx, size_t ti,
                             if (td_fwd[_di]) continue;
                             if (type_refs_typedef(_f->u.field_decl.type, tds[_di].alias)) {
                                 td_fwd[_di] = true;
+                                if (nbfs >= bfs_cap) {
+                                    bfs_cap *= 2;
+                                    bfs = realloc(bfs, bfs_cap * sizeof(size_t));
+                                }
+                                if (nnodes >= nodes_cap) {
+                                    nodes_cap *= 2;
+                                    nodes = realloc(nodes, nodes_cap * sizeof(size_t));
+                                }
                                 bfs[nbfs++] = _di;
                                 nodes[nnodes++] = _di;
                             }
@@ -7684,8 +7702,7 @@ static void cg_emit_td_fwd(CgCtx *ctx, size_t ti,
             }
         }
     }
-    bool done[256];
-    memset(done, 0, nnodes * sizeof(bool));
+    bool *done = calloc(nnodes, sizeof(bool));
     size_t emit_count = 0;
     while (emit_count < nnodes) {
         bool progress = false;
@@ -7707,6 +7724,9 @@ static void cg_emit_td_fwd(CgCtx *ctx, size_t ti,
         }
         if (!progress) break;
     }
+    free(done);
+    free(nodes);
+    free(bfs);
 }
 
 static void cg_file(CgCtx *ctx, const AstNode *file) {

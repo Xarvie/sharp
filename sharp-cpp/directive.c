@@ -622,6 +622,17 @@ static bool cpp_has_include(CppState *st, const char *name, bool is_system,
         skipping = false;
     }
 
+    /* For "..." (quoted) form, first search relative to the including
+     * file's directory — matching find_include_ex behaviour. */
+    if (!is_system && !is_next && current_file) {
+        const char *slash = find_last_sep(current_file);
+        if (slash) {
+            size_t dir_len = (size_t)(slash - current_file + 1);
+            snprintf(path, sizeof path, "%.*s%s", (int)dir_len, current_file, name);
+            if (access(path, R_OK) == 0) return true;
+        }
+    }
+
     /* For <...> search system/user paths */
     bool skip_dir_handled = false;
     const StrArr *paths[] = { &st->user_paths, &st->sys_paths };

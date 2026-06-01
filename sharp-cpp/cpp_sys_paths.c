@@ -395,9 +395,8 @@ static char *run_command_and_capture(const char *cmd) {
     if (len < 0) { fclose(fp); return NULL; }
 
     char *buf = cpp_xmalloc((size_t)len + 1);
-    
-    fread(buf, 1, len, fp);
-    buf[len] = '\0';
+    size_t nread = fread(buf, 1, (size_t)len, fp);
+    buf[nread] = '\0';
     fclose(fp);
     return buf;
 #else

@@ -347,6 +347,8 @@ static CppResult build_result(CppState *st, CppCtx *ctx, CppDiagArr *diags) {
         if (st->included_is_sys)
             memcpy(res.included_is_sys, st->included_is_sys,
                    st->included.len * sizeof(bool));
+        else
+            memset(res.included_is_sys, 0, st->included.len * sizeof(bool));
     } else {
         res.included_files = NULL;
         res.included_is_sys = NULL;

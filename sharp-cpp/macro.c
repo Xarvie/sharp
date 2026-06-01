@@ -1194,17 +1194,12 @@ static bool expand_limits_check_depth(MacroTable *mt, CppDiagArr *diags,
             int n = snprintf(buf, sizeof(buf),
                 "macro expansion depth limit reached (%d) — %s passed through unexpanded",
                 MAX_EXPAND_DEPTH, name ? name : "(macro)");
-            if (n > 0 && (size_t)n < sizeof(buf))
-                d.msg = (char *)cpp_xmalloc(n + 1);
-            else {
-                d.msg = (char *)cpp_xmalloc(80);
-                snprintf(d.msg, 80, "macro expansion depth limit reached");
-            }
-            if (d.msg) {
-                if (n > 0 && (size_t)n < sizeof(buf)) {
-                    memcpy(d.msg, buf, (size_t)n);
-                    d.msg[n] = '\0';
-                }
+            if (n > 0 && (size_t)n < sizeof(buf)) {
+                d.msg = (char *)cpp_xmalloc((size_t)n + 1);
+                memcpy(d.msg, buf, (size_t)n);
+                d.msg[n] = '\0';
+            } else {
+                d.msg = cpp_xstrdup("macro expansion depth limit reached");
             }
             diag_push(diags, d);
         }
@@ -1224,15 +1219,12 @@ static bool expand_limits_check_tokens(MacroTable *mt, CppDiagArr *diags, CppLoc
             int n = snprintf(buf, sizeof(buf),
                 "macro expansion token limit reached (%d) — truncating output",
                 MAX_EXPAND_TOKENS);
-            if (n > 0 && (size_t)n < sizeof(buf))
-                d.msg = (char *)cpp_xmalloc(n + 1);
-            else
-                d.msg = (char *)cpp_xmalloc(60);
-            if (d.msg) {
-                if (n > 0 && (size_t)n < sizeof(buf)) {
-                    memcpy(d.msg, buf, (size_t)n);
-                    d.msg[n] = '\0';
-                }
+            if (n > 0 && (size_t)n < sizeof(buf)) {
+                d.msg = (char *)cpp_xmalloc((size_t)n + 1);
+                memcpy(d.msg, buf, (size_t)n);
+                d.msg[n] = '\0';
+            } else {
+                d.msg = cpp_xstrdup("macro expansion token limit reached");
             }
             diag_push(diags, d);
         }

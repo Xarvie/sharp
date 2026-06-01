@@ -106,7 +106,9 @@ void ast_node_free(AstNode *node) {
         ast_node_free(node->u.var_decl.type);
         free(node->u.var_decl.name);
         ast_node_free(node->u.var_decl.init);
-        free(node->u.var_decl.gcc_attrs);  /* */
+        free(node->u.var_decl.gcc_attrs);
+        free(node->u.var_decl.gcc_attrs_trailing);
+        free(node->u.var_decl.alignas_text);
         break;
     case AST_ENUM_DEF:
         free(node->u.enum_def.name);
@@ -125,9 +127,19 @@ void ast_node_free(AstNode *node) {
          * once assigned) but we own the memory and must free it.     */
         free((char *)node->u.type_name.display_name);
         break;
-    case AST_TYPE_PTR:    ast_node_free(node->u.type_ptr.base); break;
-    case AST_TYPE_CONST:  ast_node_free(node->u.type_const.base); break;
-    case AST_TYPE_VOLATILE: ast_node_free(node->u.type_volatile.base); break;
+    case AST_TYPE_PTR:
+        ast_node_free(node->u.type_ptr.base);
+        free((void *)node->u.type_ptr.restrict_kw);
+        free((void *)node->u.type_ptr.nullability);
+        break;
+    case AST_TYPE_CONST:
+        ast_node_free(node->u.type_const.base);
+        free((void *)node->u.type_const.kw);
+        break;
+    case AST_TYPE_VOLATILE:
+        ast_node_free(node->u.type_volatile.base);
+        free((void *)node->u.type_volatile.kw);
+        break;
     case AST_TYPE_ATOMIC:   ast_node_free(node->u.type_atomic.base); break;
     case AST_TYPE_ARRAY:
         ast_node_free(node->u.type_array.base);
@@ -276,6 +288,7 @@ void ast_node_free(AstNode *node) {
         break;
     case AST_AT_INTRINSIC:
         free(node->u.at_intrinsic.name);
+        free(node->u.at_intrinsic.resolved_str);
         astvec_deep_free(&node->u.at_intrinsic.args);
         break;
     case AST_STMT_EXPR: /* */
