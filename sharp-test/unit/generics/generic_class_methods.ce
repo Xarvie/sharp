@@ -1,0 +1,64 @@
+#include <stdbool.h>
+
+class Counter {
+    int count;
+}
+
+Counter Counter.new(int v) { Counter c; c.count = v; return c; }
+
+void Counter.inc(this) { this->count = this->count + 1; }
+int Counter.get(this) const { return this->count; }
+
+void Counter.add(this, int n) { this->count = this->count + n; }
+
+Counter* Counter.add_chain(this, int n) {
+    this->count = this->count + n;
+    return this;
+}
+
+class Pair<T> {
+    T first;
+    T second;
+}
+
+Pair<T> Pair<T>.make(T a, T b) {
+    Pair<T> p; p.first = a; p.second = b; return p;
+}
+
+T Pair<T>.first_val(this) const { return this->first; }
+T Pair<T>.second_val(this) const { return this->second; }
+
+void Pair<T>.swap(this) {
+    T tmp = this->first;
+    this->first = this->second;
+    this->second = tmp;
+}
+
+int main(void) {
+    Counter c = Counter.new(0);
+    c.inc();
+    c.inc();
+    c.inc();
+    if (c.get() != 3) return 1;
+
+    c.add(7);
+    if (c.get() != 10) return 2;
+
+    Counter c2 = Counter.new(0);
+    c2.add_chain(5)->add_chain(3)->add_chain(2);
+    if (c2.get() != 10) return 3;
+
+    Pair<int> pi = Pair<int>.make(3, 7);
+    if (pi.first_val() != 3) return 4;
+    if (pi.second_val() != 7) return 5;
+
+    pi.swap();
+    if (pi.first_val() != 7) return 6;
+    if (pi.second_val() != 3) return 7;
+
+    Pair<float> pf = Pair<float>.make(1.5f, 2.5f);
+    if (pf.first_val() < 1.49f || pf.first_val() > 1.51f) return 8;
+    if (pf.second_val() < 2.49f || pf.second_val() > 2.51f) return 9;
+
+    return 0;
+}

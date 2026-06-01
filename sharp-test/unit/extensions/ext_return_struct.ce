@@ -1,0 +1,75 @@
+#include <stdbool.h>
+
+class IntRange {
+    int start;
+    int end;
+}
+
+IntRange IntRange.new(int a, int b) {
+    IntRange r; r.start = a; r.end = b; return r;
+}
+
+int IntRange.len(this) const {
+    return this->end - this->start;
+}
+
+bool IntRange.contains(this, int v) const {
+    return v >= this->start && v < this->end;
+}
+
+IntRange IntRange.intersect(this, IntRange o) const {
+    int s = this->start > o.start ? this->start : o.start;
+    int e = this->end < o.end ? this->end : o.end;
+    if (s >= e) return IntRange.new(0, 0);
+    return IntRange.new(s, e);
+}
+
+class Opt<T> {
+    T val;
+    bool has;
+}
+
+Opt<T> Opt<T>.some(T v) { Opt<T> o; o.val = v; o.has = true; return o; }
+Opt<T> Opt<T>.none() { Opt<T> o; o.has = false; return o; }
+
+bool Opt<T>.is_some(this) const { return this->has; }
+T Opt<T>.unwrap(this) const { return this->val; }
+
+T Opt<T>.unwrap_or(this, T fallback) const {
+    if (this->has) return this->val;
+    return fallback;
+}
+
+int main(void) {
+    IntRange r1 = IntRange.new(0, 10);
+    IntRange r2 = IntRange.new(5, 15);
+
+    if (r1.len() != 10) return 1;
+    if (r2.len() != 10) return 2;
+
+    if (!r1.contains(5)) return 3;
+    if (r1.contains(10)) return 4;
+    if (!r2.contains(10)) return 5;
+
+    IntRange inter = r1.intersect(r2);
+    if (inter.start != 5) return 6;
+    if (inter.end != 10) return 7;
+    if (inter.len() != 5) return 8;
+
+    IntRange no_overlap = IntRange.new(0, 3).intersect(IntRange.new(5, 8));
+    if (no_overlap.len() != 0) return 9;
+
+    Opt<int> some = Opt<int>.some(42);
+    Opt<int> none = Opt<int>.none();
+
+    if (!some.is_some()) return 10;
+    if (none.is_some()) return 11;
+    if (some.unwrap() != 42) return 12;
+    if (none.unwrap_or(99) != 99) return 13;
+
+    Opt<float> sf = Opt<float>.some(3.14f);
+    if (!sf.is_some()) return 14;
+    if (sf.unwrap() < 3.13f || sf.unwrap() > 3.15f) return 15;
+
+    return 0;
+}

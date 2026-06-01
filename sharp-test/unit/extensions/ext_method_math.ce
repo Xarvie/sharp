@@ -1,0 +1,52 @@
+#include <stdbool.h>
+
+class Vec2 {
+    float x; float y;
+}
+
+Vec2 Vec2.new(float a, float b) { Vec2 v; v.x = a; v.y = b; return v; }
+
+Vec2 Vec2.operator+(this, Vec2 o) const {
+    return Vec2.new(this->x + o.x, this->y + o.y);
+}
+
+Vec2 Vec2.operator-(this, Vec2 o) const {
+    return Vec2.new(this->x - o.x, this->y - o.y);
+}
+
+float Vec2.dot(this, Vec2 o) const {
+    return this->x * o.x + this->y * o.y;
+}
+
+Vec2 Vec2.scale(this, float s) const {
+    return Vec2.new(this->x * s, this->y * s);
+}
+
+float Vec2.norm_sq(this) const {
+    return this->x * this->x + this->y * this->y;
+}
+
+int main(void) {
+    Vec2 a = Vec2.new(3.0f, 4.0f);
+    Vec2 b = Vec2.new(1.0f, 2.0f);
+
+    float d = a.dot(b);
+    if (d < 10.99f || d > 11.01f) return 1;
+
+    Vec2 s = a.scale(2.0f);
+    if (s.x < 5.99f || s.x > 6.01f) return 2;
+    if (s.y < 7.99f || s.y > 8.01f) return 3;
+
+    float n = a.norm_sq();
+    if (n < 24.99f || n > 25.01f) return 4;
+
+    Vec2 sum = a + b;
+    if (sum.x < 3.99f || sum.x > 4.01f) return 5;
+    if (sum.y < 5.99f || sum.y > 6.01f) return 6;
+
+    Vec2 diff = a - b;
+    if (diff.x < 1.99f || diff.x > 2.01f) return 7;
+    if (diff.y < 1.99f || diff.y > 2.01f) return 8;
+
+    return 0;
+}

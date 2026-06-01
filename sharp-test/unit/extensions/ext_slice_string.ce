@@ -1,0 +1,71 @@
+#include <stdbool.h>
+
+class String {
+    const char* data;
+    int len;
+}
+
+String String.new(const char* s, int n) {
+    String r; r.data = s; r.len = n; return r;
+}
+
+int String.length(this) const { return this->len; }
+
+char String.at(this, int i) const { return this->data[i]; }
+
+bool String.starts_with(this, char c) const {
+    if (this->len == 0) return false;
+    return this->data[0] == c;
+}
+
+bool String.ends_with(this, char c) const {
+    if (this->len == 0) return false;
+    return this->data[this->len - 1] == c;
+}
+
+class IntSlice {
+    int* ptr;
+    int len;
+}
+
+IntSlice IntSlice.new(int* p, int n) {
+    IntSlice s; s.ptr = p; s.len = n; return s;
+}
+
+int IntSlice.at(this, int i) const { return this->ptr[i]; }
+
+int IntSlice.size(this) const { return this->len; }
+
+int IntSlice.sum(this) const {
+    int s = 0;
+    for (int i = 0; i < this->len; i++) {
+        s = s + this->ptr[i];
+    }
+    return s;
+}
+
+int main(void) {
+    const char* hello = "hello";
+    String s = String.new(hello, 5);
+
+    if (s.length() != 5) return 1;
+    if (s.at(0) != 'h') return 2;
+    if (s.at(4) != 'o') return 3;
+    if (!s.starts_with('h')) return 4;
+    if (s.starts_with('x')) return 5;
+    if (!s.ends_with('o')) return 6;
+
+    int data[] = {10, 20, 30, 40, 50};
+    IntSlice sl = IntSlice.new(data, 5);
+
+    if (sl.size() != 5) return 7;
+    if (sl.at(2) != 30) return 8;
+    if (sl.sum() != 150) return 9;
+
+    IntSlice sl2 = IntSlice.new(data + 1, 3);
+    if (sl2.size() != 3) return 10;
+    if (sl2.at(0) != 20) return 11;
+    if (sl2.sum() != 90) return 12;
+
+    return 0;
+}

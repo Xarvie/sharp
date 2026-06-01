@@ -1,0 +1,91 @@
+#include <stdbool.h>
+
+class Vec2 {
+    float x; float y;
+}
+
+Vec2 Vec2.new(float a, float b) { Vec2 v; v.x = a; v.y = b; return v; }
+
+Vec2 Vec2.operator+(this, Vec2 o) const {
+    return Vec2.new(this->x + o.x, this->y + o.y);
+}
+
+Vec2 Vec2.operator-(this, Vec2 o) const {
+    return Vec2.new(this->x - o.x, this->y - o.y);
+}
+
+Vec2 Vec2.operator*(this, float s) const {
+    return Vec2.new(this->x * s, this->y * s);
+}
+
+bool Vec2.operator==(this, Vec2 o) const {
+    return this->x == o.x && this->y == o.y;
+}
+
+float Vec2.dot(this, Vec2 o) const {
+    return this->x * o.x + this->y * o.y;
+}
+
+float Vec2.norm_sq(this) const {
+    return this->x * this->x + this->y * this->y;
+}
+
+class Stack<T> {
+    T items[16];
+    int top;
+}
+
+Stack<T> Stack<T>.new() { Stack<T> s; s.top = 0; return s; }
+
+void Stack<T>.push(this, T val) {
+    this->items[this->top] = val;
+    this->top = this->top + 1;
+}
+
+T Stack<T>.pop(this) {
+    this->top = this->top - 1;
+    return this->items[this->top];
+}
+
+int Stack<T>.size(this) const { return this->top; }
+
+bool Stack<T>.is_empty(this) const { return this->top == 0; }
+
+int main(void) {
+    Vec2 a = Vec2.new(1.0f, 2.0f);
+    Vec2 b = Vec2.new(3.0f, 4.0f);
+
+    Vec2 sum = a + b;
+    if (sum.x < 3.99f || sum.x > 4.01f) return 1;
+
+    Vec2 diff = b - a;
+    if (diff.x < 1.99f || diff.x > 2.01f) return 2;
+
+    Vec2 scaled = a * 3.0f;
+    if (scaled.x < 2.99f || scaled.x > 3.01f) return 3;
+
+    float d = a.dot(b);
+    if (d < 10.99f || d > 11.01f) return 4;
+
+    float lsq = a.norm_sq();
+    if (lsq < 4.99f || lsq > 5.01f) return 5;
+
+    Stack<int> si = Stack<int>.new();
+    si.push(10);
+    si.push(20);
+    si.push(30);
+    if (si.size() != 3) return 6;
+    if (si.is_empty()) return 7;
+
+    int v = si.pop();
+    if (v != 30) return 8;
+    if (si.size() != 2) return 9;
+
+    Stack<Vec2> sv = Stack<Vec2>.new();
+    sv.push(a);
+    sv.push(b);
+    Vec2 top = sv.pop();
+    if (!(top == b)) return 10;
+
+    return 0;
+}

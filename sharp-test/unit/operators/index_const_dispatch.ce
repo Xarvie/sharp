@@ -1,0 +1,66 @@
+#include <stdbool.h>
+
+class Matrix {
+    int data[4];
+}
+
+int Matrix.at(this, int i) const {
+    return this->data[i];
+}
+
+int* Matrix.mut_at(this, int i) {
+    return &this->data[i];
+}
+
+class Dict {
+    int keys[8];
+    int vals[8];
+    int len;
+}
+
+Dict Dict.new() { Dict d; d.len = 0; return d; }
+
+void Dict.insert(this, int k, int v) {
+    this->keys[this->len] = k;
+    this->vals[this->len] = v;
+    this->len = this->len + 1;
+}
+
+int Dict.find(this, int k) const {
+    for (int i = 0; i < this->len; i++) {
+        if (this->keys[i] == k) return this->vals[i];
+    }
+    return -1;
+}
+
+int* Dict.find_mut(this, int k) {
+    for (int i = 0; i < this->len; i++) {
+        if (this->keys[i] == k) return &this->vals[i];
+    }
+    return (int*)0;
+}
+
+int main(void) {
+    Matrix m;
+    m.data[0] = 10; m.data[1] = 20; m.data[2] = 30; m.data[3] = 40;
+
+    if (m.at(0) != 10) return 1;
+    if (m.at(2) != 30) return 2;
+
+    *m.mut_at(1) = 99;
+    if (m.at(1) != 99) return 3;
+
+    Dict d = Dict.new();
+    d.insert(100, 1000);
+    d.insert(200, 2000);
+    d.insert(300, 3000);
+
+    if (d.find(100) != 1000) return 4;
+    if (d.find(200) != 2000) return 5;
+    if (d.find(999) != -1) return 6;
+
+    *d.find_mut(200) = 2222;
+    if (d.find(200) != 2222) return 7;
+
+    return 0;
+}

@@ -1,0 +1,51 @@
+#include <stdbool.h>
+#include <string.h>
+
+class Buffer {
+    int* ptr;
+    int len;
+}
+
+Buffer Buffer.new(int* p, int n) {
+    Buffer b; b.ptr = p; b.len = n; return b;
+}
+
+int Buffer.at(this, int i) const { return this->ptr[i]; }
+
+class Pair<T> {
+    T first;
+    T second;
+}
+
+Pair<T> Pair<T>.make(T a, T b) {
+    Pair<T> p; p.first = a; p.second = b; return p;
+}
+
+int main(void) {
+    int data[4] = {10, 20, 30, 40};
+    Buffer a = Buffer.new(data, 4);
+
+    Buffer b = a;
+
+    if (b.ptr != a.ptr) return 1;
+    if (b.len != a.len) return 2;
+
+    b.ptr[0] = 999;
+    if (a.at(0) != 999) return 3;
+
+    Pair<int> p1 = Pair<int>.make(10, 20);
+    Pair<int> p2 = p1;
+
+    if (p2.first != 10) return 4;
+    if (p2.second != 20) return 5;
+
+    p2.first = 99;
+    if (p1.first != 10) return 6;
+
+    int x = 42;
+    int y = x;
+    y = 100;
+    if (x != 42) return 7;
+
+    return 0;
+}

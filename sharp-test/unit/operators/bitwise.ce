@@ -1,0 +1,74 @@
+#include <stdbool.h>
+
+class Flags {
+    unsigned int bits;
+}
+
+Flags Flags.new(unsigned int v) { Flags f; f.bits = v; return f; }
+
+Flags Flags.operator&(this, Flags o) const {
+    Flags r; r.bits = this->bits & o.bits; return r;
+}
+Flags Flags.operator|(this, Flags o) const {
+    Flags r; r.bits = this->bits | o.bits; return r;
+}
+Flags Flags.operator^(this, Flags o) const {
+    Flags r; r.bits = this->bits ^ o.bits; return r;
+}
+bool Flags.operator==(this, Flags o) const {
+    return this->bits == o.bits;
+}
+bool Flags.operator!=(this, Flags o) const {
+    return this->bits != o.bits;
+}
+
+unsigned int Flags.raw(this) const { return this->bits; }
+
+Flags Flags.bit_set(this, int pos) const {
+    Flags r; r.bits = this->bits | (1u << pos); return r;
+}
+
+Flags Flags.bit_clear(this, int pos) const {
+    Flags r; r.bits = this->bits & ~(1u << pos); return r;
+}
+
+bool Flags.bit_test(this, int pos) const {
+    return (this->bits & (1u << pos)) != 0;
+}
+
+int main(void) {
+    Flags a = Flags.new(0xFF00);
+    Flags b = Flags.new(0x0FF0);
+
+    Flags and_r = a & b;
+    if (and_r.raw() != 0x0F00) return 1;
+
+    Flags or_r = a | b;
+    if (or_r.raw() != 0xFFF0) return 2;
+
+    Flags xor_r = a ^ b;
+    if (xor_r.raw() != 0xF0F0) return 3;
+
+    if (!(a == a)) return 4;
+    if (a == b) return 5;
+    if (!(a != b)) return 6;
+
+    Flags c = Flags.new(0x00FF);
+    Flags combined = (a | c) & b;
+    if (combined.raw() != 0x0FF0) return 7;
+
+    Flags double_xor = a ^ b ^ b;
+    if (!(double_xor == a)) return 8;
+
+    Flags chain = a & b | c;
+    if (chain.raw() != (0x0F00 | 0x00FF)) return 9;
+
+    Flags f = Flags.new(0);
+    f = f.bit_set(3);
+    if (!f.bit_test(3)) return 10;
+    if (f.bit_test(4)) return 11;
+    f = f.bit_clear(3);
+    if (f.bit_test(3)) return 12;
+
+    return 0;
+}

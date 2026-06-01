@@ -1,0 +1,79 @@
+#include <stdbool.h>
+
+class HasMethod {
+    int val;
+}
+int HasMethod.foo(this) const { return this->val; }
+
+class NoMethod {
+    int val;
+}
+
+int test_has_method() {
+    if (@has_method(HasMethod, foo)) {
+        HasMethod hm; hm.val = 42;
+        return hm.foo();
+    }
+    return 0;
+}
+
+int test_no_method() {
+    if (@has_method(NoMethod, foo)) {
+        return 99;
+    }
+    return 0;
+}
+
+int test_is_arithmetic() {
+    if (@is_arithmetic(int)) {
+        int x = 10 + 20;
+        return x;
+    }
+    return 0;
+}
+
+int test_is_pointer() {
+    if (@is_pointer(int*)) {
+        int val = 77;
+        int* p = &val;
+        return *p;
+    }
+    return 0;
+}
+
+int test_not_pointer() {
+    if (!@is_pointer(int)) {
+        return 55;
+    }
+    return 0;
+}
+
+int test_not_arithmetic() {
+    if (!@is_arithmetic(HasMethod)) {
+        return 66;
+    }
+    return 0;
+}
+
+int main(void) {
+    if (test_has_method() != 42) return 1;
+    if (test_no_method() != 0) return 2;
+    if (test_is_arithmetic() != 30) return 3;
+    if (test_is_pointer() != 77) return 4;
+    if (test_not_pointer() != 55) return 5;
+    if (test_not_arithmetic() != 66) return 6;
+
+    if (@has_method(NoMethod, foo)) {
+        NoMethod n;
+        int dead = n.foo();
+        (void)dead;
+        return 7;
+    }
+
+    if (!@is_arithmetic(int)) return 8;
+    if (@is_arithmetic(int*)) return 9;
+    if (!@is_pointer(int*)) return 10;
+    if (@is_pointer(int)) return 11;
+
+    return 0;
+}

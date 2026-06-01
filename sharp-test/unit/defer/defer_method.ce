@@ -1,0 +1,53 @@
+#include <stdbool.h>
+
+int global_log[8];
+int log_count = 0;
+
+static void log_event(int v) {
+    global_log[log_count] = v;
+    log_count = log_count + 1;
+}
+
+int main(void) {
+    log_count = 0;
+
+    {
+        int id = 1;
+        defer log_event(id);
+        log_event(100 + id);
+    }
+
+    if (log_count != 2) return 1;
+    if (global_log[0] != 101) return 2;
+    if (global_log[1] != 1) return 3;
+
+    log_count = 0;
+
+    {
+        defer log_event(42);
+        log_event(0);
+    }
+
+    if (log_count != 2) return 4;
+    if (global_log[0] != 0) return 5;
+    if (global_log[1] != 42) return 6;
+
+    log_count = 0;
+
+    {
+        defer log_event(10);
+        {
+            defer log_event(20);
+            log_event(0);
+        }
+        log_event(1);
+    }
+
+    if (log_count != 4) return 7;
+    if (global_log[0] != 0) return 8;
+    if (global_log[1] != 20) return 9;
+    if (global_log[2] != 1) return 10;
+    if (global_log[3] != 10) return 11;
+
+    return 0;
+}

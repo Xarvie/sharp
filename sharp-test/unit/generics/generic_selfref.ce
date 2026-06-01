@@ -1,0 +1,67 @@
+#include <stdbool.h>
+
+class LinkedList<T> {
+    T value;
+    LinkedList<T>* next;
+}
+
+LinkedList<T> LinkedList<T>.new(T v) {
+    LinkedList<T> n; n.value = v; n.next = (LinkedList<T>*)0; return n;
+}
+
+int LinkedList<T>.count(this) const {
+    int n = 1;
+    LinkedList<T>* cur = this;
+    while (cur->next != (LinkedList<T>*)0) {
+        n = n + 1;
+        cur = cur->next;
+    }
+    return n;
+}
+
+T LinkedList<T>.last(this) const {
+    LinkedList<T>* cur = this;
+    while (cur->next != (LinkedList<T>*)0) {
+        cur = cur->next;
+    }
+    return cur->value;
+}
+
+class OptVal<T> {
+    T value;
+    bool has;
+}
+
+bool OptVal<T>.has_val(this) const { return this->has; }
+
+T OptVal<T>.get_val(this) const { return this->value; }
+
+void OptVal<T>.set_val(this, T v) { this->has = true; this->value = v; }
+
+int main(void) {
+    LinkedList<int> a = LinkedList<int>.new(1);
+    LinkedList<int> b = LinkedList<int>.new(2);
+    LinkedList<int> c = LinkedList<int>.new(3);
+
+    a.next = &b;
+    b.next = &c;
+
+    if (a.count() != 3) return 1;
+    if (a.last() != 3) return 2;
+    if (b.count() != 2) return 3;
+    if (b.last() != 3) return 4;
+
+    OptVal<int> ov = {0};
+    if (ov.has_val()) return 5;
+
+    ov.set_val(42);
+    if (!ov.has_val()) return 6;
+    if (ov.get_val() != 42) return 7;
+
+    OptVal<float> of = {0};
+    of.set_val(3.14f);
+    if (!of.has_val()) return 8;
+    if (of.get_val() < 3.13f || of.get_val() > 3.15f) return 9;
+
+    return 0;
+}

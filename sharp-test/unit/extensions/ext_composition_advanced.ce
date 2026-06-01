@@ -1,0 +1,63 @@
+#include <stdbool.h>
+
+class Point {
+    int x; int y;
+}
+
+int Point.x_val(this) const { return this->x; }
+int Point.y_val(this) const { return this->y; }
+
+class Rect {
+    Point origin;
+    int w; int h;
+}
+
+Point Rect.center(this) const {
+    Point c;
+    c.x = this->origin.x + this->w / 2;
+    c.y = this->origin.y + this->h / 2;
+    return c;
+}
+
+int Rect.area(this) const { return this->w * this->h; }
+
+bool Rect.contains(this, Point p) const {
+    return p.x >= this->origin.x && p.x < this->origin.x + this->w &&
+           p.y >= this->origin.y && p.y < this->origin.y + this->h;
+}
+
+class Named<T> {
+    T value;
+    const char* name;
+}
+
+Named<T> Named<T>.new(T v, const char* n) {
+    Named<T> r; r.value = v; r.name = n; return r;
+}
+
+T Named<T>.get(this) const { return this->value; }
+const char* Named<T>.get_name(this) const { return this->name; }
+
+int main(void) {
+    Point origin; origin.x = 0; origin.y = 0;
+    Rect r; r.origin = origin; r.w = 100; r.h = 50;
+
+    if (r.area() != 5000) return 1;
+
+    Point c = r.center();
+    if (c.x != 50) return 2;
+    if (c.y != 25) return 3;
+
+    Point inside; inside.x = 10; inside.y = 10;
+    Point outside; outside.x = 200; outside.y = 200;
+    if (!r.contains(inside)) return 4;
+    if (r.contains(outside)) return 5;
+
+    Named<int> ni = Named<int>.new(42, "answer");
+    if (ni.get() != 42) return 6;
+
+    Named<float> nf = Named<float>.new(3.14f, "pi");
+    if (nf.get() < 3.13f || nf.get() > 3.15f) return 7;
+
+    return 0;
+}

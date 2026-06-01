@@ -1,0 +1,50 @@
+#include <stdbool.h>
+
+class Vec2 {
+    float x; float y;
+}
+
+Vec2 Vec2.new(float a, float b) { Vec2 v; v.x = a; v.y = b; return v; }
+
+Vec2 Vec2.operator+(this, Vec2 o) const {
+    Vec2 r; r.x = this->x + o.x; r.y = this->y + o.y; return r;
+}
+
+float Vec2.operator*(this, Vec2 o) const {
+    return this->x * o.x + this->y * o.y;
+}
+
+class Counter {
+    int val;
+}
+
+Counter Counter.new(int v) { Counter c; c.val = v; return c; }
+
+Counter Counter.operator+(this, Counter o) const {
+    Counter r; r.val = this->val + o.val; return r;
+}
+
+bool Counter.operator==(this, Counter o) const {
+    return this->val == o.val;
+}
+
+int main(void) {
+    Vec2 a = Vec2.new(3.0f, 4.0f);
+    Vec2 b = Vec2.new(1.0f, 2.0f);
+
+    Vec2 sum = a + b;
+    if (sum.x < 3.99f || sum.x > 4.01f) return 1;
+    if (sum.y < 5.99f || sum.y > 6.01f) return 2;
+
+    float dot = a * b;
+    if (dot < 10.99f || dot > 11.01f) return 3;
+
+    Counter c1 = Counter.new(5);
+    Counter c2 = Counter.new(3);
+    Counter csum = c1 + c2;
+    if (csum.val != 8) return 4;
+    if (!(c1 == c1)) return 5;
+    if (c1 == c2) return 6;
+
+    return 0;
+}

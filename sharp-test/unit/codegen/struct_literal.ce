@@ -1,0 +1,51 @@
+#include <stdbool.h>
+
+class Vec3 {
+    float x; float y; float z;
+}
+
+Vec3 Vec3.new(float a, float b, float c) {
+    Vec3 v; v.x = a; v.y = b; v.z = c; return v;
+}
+
+float Vec3.length_sq(this) const {
+    return this->x * this->x + this->y * this->y + this->z * this->z;
+}
+
+class Pair<T,U> {
+    T first;
+    U second;
+}
+
+Pair<T,U> Pair<T,U>.make(T a, U b) {
+    Pair<T,U> p; p.first = a; p.second = b; return p;
+}
+
+int main(void) {
+    Vec3 v = Vec3 { .x = 1.0f, .y = 2.0f, .z = 3.0f };
+    if (v.x < 0.99f || v.x > 1.01f) return 1;
+    if (v.y < 1.99f || v.y > 2.01f) return 2;
+    if (v.z < 2.99f || v.z > 3.01f) return 3;
+
+    Vec3 zero = Vec3 { .x = 0.0f, .y = 0.0f, .z = 0.0f };
+    if (zero.length_sq() != 0.0f) return 4;
+
+    Vec3 partial = Vec3 { .x = 5.0f };
+    if (partial.x < 4.99f || partial.x > 5.01f) return 5;
+
+    Pair<int,float> p = Pair<int,float> { .first = 10, .second = 3.14f };
+    if (p.first != 10) return 6;
+    if (p.second < 3.13f || p.second > 3.15f) return 7;
+
+    Pair<int,int> ip = Pair<int,int> { .first = 1, .second = 2 };
+    if (ip.first != 1) return 8;
+    if (ip.second != 2) return 9;
+
+    Vec3 arr[2];
+    arr[0] = Vec3 { .x = 1.0f, .y = 0.0f, .z = 0.0f };
+    arr[1] = Vec3 { .x = 0.0f, .y = 1.0f, .z = 0.0f };
+    if (arr[0].x < 0.99f) return 10;
+    if (arr[1].y < 0.99f) return 11;
+
+    return 0;
+}

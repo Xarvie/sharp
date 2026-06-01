@@ -1,0 +1,30 @@
+#include <stdbool.h>
+
+class Signal {
+    int level;
+}
+
+bool Signal.is_active(this) const {
+    return this->level != 0;
+}
+
+bool Signal.is_silent(this) const {
+    return this->level == 0;
+}
+
+int main(void) {
+    Signal on; on.level = 42;
+    Signal off; off.level = 0;
+
+    if (!on.is_active()) return 1;
+    if (on.is_silent()) return 2;
+
+    if (!off.is_silent()) return 3;
+    if (off.is_active()) return 4;
+
+    Signal s; s.level = -5;
+    if (!s.is_active()) return 5;
+    if (s.is_silent()) return 6;
+
+    return 0;
+}

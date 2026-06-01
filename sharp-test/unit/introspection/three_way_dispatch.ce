@@ -1,0 +1,48 @@
+#include <stdbool.h>
+
+T hash_any<T>(T val) {
+    if (@is_arithmetic(T)) {
+        return val;
+    }
+    if (@is_pointer(T)) {
+        return val;
+    }
+    return val;
+}
+
+class Wrap<T> {
+    T inner;
+}
+
+T Wrap<T>.get(this) const {
+    return this->inner;
+}
+
+int main(void) {
+    int ri = hash_any(42);
+    if (ri != 42) return 1;
+
+    float rf = hash_any(3.14f);
+    if (rf < 3.13f || rf > 3.15f) return 2;
+
+    int x = 77;
+    int* p = &x;
+    int* rp = hash_any(p);
+    if (*rp != 77) return 3;
+
+    Wrap<int> wi;
+    wi.inner = 100;
+    if (wi.get() != 100) return 4;
+
+    Wrap<float> wf;
+    wf.inner = 2.5f;
+    if (wf.get() < 2.49f || wf.get() > 2.51f) return 5;
+
+    if (!@is_arithmetic(int)) return 6;
+    if (!@is_arithmetic(float)) return 7;
+    if (@is_arithmetic(int*)) return 8;
+    if (!@is_pointer(int*)) return 9;
+    if (@is_pointer(int)) return 10;
+
+    return 0;
+}

@@ -1,0 +1,72 @@
+#include <stdbool.h>
+
+class Vec2 {
+    float x; float y;
+}
+
+Vec2 Vec2.new(float a, float b) { Vec2 v; v.x = a; v.y = b; return v; }
+
+Vec2 Vec2.operator+(this, Vec2 o) const {
+    return Vec2.new(this->x + o.x, this->y + o.y);
+}
+
+Vec2 Vec2.operator-(this, Vec2 o) const {
+    return Vec2.new(this->x - o.x, this->y - o.y);
+}
+
+Vec2 Vec2.operator*(this, float s) const {
+    return Vec2.new(this->x * s, this->y * s);
+}
+
+bool Vec2.operator==(this, Vec2 o) const {
+    return this->x == o.x && this->y == o.y;
+}
+
+bool Vec2.operator!=(this, Vec2 o) const {
+    return this->x != o.x || this->y != o.y;
+}
+
+bool Vec2.operator<(this, Vec2 o) const {
+    float la = this->x * this->x + this->y * this->y;
+    float lb = o.x * o.x + o.y * o.y;
+    return la < lb;
+}
+
+bool Vec2.operator>(this, Vec2 o) const {
+    float la = this->x * this->x + this->y * this->y;
+    float lb = o.x * o.x + o.y * o.y;
+    return la > lb;
+}
+
+bool Vec2.operator<=(this, Vec2 o) const {
+    return !(o < *this);
+}
+
+bool Vec2.operator>=(this, Vec2 o) const {
+    return !(o > *this);
+}
+
+int main(void) {
+    Vec2 a = Vec2.new(1.0f, 0.0f);
+    Vec2 b = Vec2.new(3.0f, 4.0f);
+
+    if (!(a < b)) return 1;
+    if (a > b) return 2;
+    if (!(a <= a)) return 3;
+    if (!(a >= a)) return 4;
+    if (!(b > a)) return 5;
+    if (!(b >= a)) return 6;
+
+    Vec2 sum = a + b;
+    Vec2 diff = b - a;
+    Vec2 scaled = a * 5.0f;
+
+    if (!(sum == Vec2.new(4.0f, 4.0f))) return 7;
+    if (!(diff == Vec2.new(2.0f, 4.0f))) return 8;
+    if (!(scaled == Vec2.new(5.0f, 0.0f))) return 9;
+
+    if (sum != sum) return 10;
+    if (!(sum != diff)) return 11;
+
+    return 0;
+}

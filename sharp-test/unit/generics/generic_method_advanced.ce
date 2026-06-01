@@ -1,0 +1,55 @@
+#include <stdbool.h>
+
+class Box<T> {
+    T value;
+}
+
+Box<T> Box<T>.new(T v) { Box<T> b; b.value = v; return b; }
+
+T Box<T>.get(this) const { return this->value; }
+
+void Box<T>.set(this, T v) { this->value = v; }
+
+Box<T> Box<T>.map(this, T (*fn)(T)) const {
+    Box<T> r; r.value = fn(this->value); return r;
+}
+
+static int double_it(int x) { return x * 2; }
+static float halve_it(float x) { return x * 0.5f; }
+
+class Container<T,U> {
+    T key;
+    U val;
+}
+
+Container<T,U> Container<T,U>.make(T k, U v) {
+    Container<T,U> c; c.key = k; c.val = v; return c;
+}
+
+T Container<T,U>.get_key(this) const { return this->key; }
+U Container<T,U>.get_val(this) const { return this->val; }
+
+int main(void) {
+    Box<int> bi = Box<int>.new(21);
+    if (bi.get() != 21) return 1;
+
+    bi.set(42);
+    if (bi.get() != 42) return 2;
+
+    Box<int> mapped = bi.map(double_it);
+    if (mapped.get() != 84) return 3;
+
+    Box<float> bf = Box<float>.new(10.0f);
+    Box<float> mf = bf.map(halve_it);
+    if (mf.get() < 4.99f || mf.get() > 5.01f) return 4;
+
+    Container<int,float> c1 = Container<int,float>.make(1, 3.14f);
+    if (c1.get_key() != 1) return 5;
+    if (c1.get_val() < 3.13f || c1.get_val() > 3.15f) return 6;
+
+    Container<int,int> c2 = Container<int,int>.make(10, 20);
+    if (c2.get_key() != 10) return 7;
+    if (c2.get_val() != 20) return 8;
+
+    return 0;
+}
