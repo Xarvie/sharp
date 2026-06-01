@@ -940,39 +940,34 @@ static Type *sema_expr(SS *ss, AstNode *expr) {
             /* Check if the undefined name matches a struct field —
              * likely a bare field name used without 'this->'. */
             bool is_field_hint = false;
-            if (ss->ctx && ss->ctx->file_scope) {
-                Scope *fs = ss->ctx->file_scope;
-                for (Scope *sc = ss->scope; sc; sc = sc->parent) {
-                    if (sc->kind != SCOPE_FUNC) continue;
-                    for (Symbol *s = sc->buckets[0]; s; s = s->next) {
-                        if (s->kind == SYM_PARAM && strcmp(s->name, "this") == 0 && s->decl) {
-                            AstNode *fn = s->decl;
-                            const char *sname = fn && fn->kind == AST_FUNC_DEF
-                                ? fn->u.func_def.struct_name : NULL;
-                            if (sname) {
-                                Symbol *tsym = scope_lookup_type(fs, sname);
-                                for (Symbol *t = tsym; t; t = t->next) {
-                                    if (t->kind == SYM_TYPE && t->decl &&
-                                        t->decl->kind == AST_STRUCT_DEF) {
-                                        for (size_t fi = 0;
-                                             fi < t->decl->u.struct_def.fields.len;
-                                             fi++) {
-                                            AstNode *f = t->decl->u.struct_def.fields.data[fi];
-                                            if (f && f->kind == AST_FIELD_DECL &&
-                                                f->u.field_decl.name &&
-                                                strcmp(f->u.field_decl.name, name) == 0) {
-                                                is_field_hint = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if (is_field_hint) break;
+            Symbol *this_sym = scope_lookup_value(ss->scope, "this");
+            if (this_sym && this_sym->kind == SYM_PARAM && this_sym->decl) {
+                const char *sname = NULL;
+                AstNode *ptype = this_sym->decl->kind == AST_PARAM_DECL
+                    ? this_sym->decl->u.param_decl.type : NULL;
+                if (ptype && ptype->kind == AST_TYPE_PTR &&
+                    ptype->u.type_ptr.base &&
+                    ptype->u.type_ptr.base->kind == AST_TYPE_NAME)
+                    sname = ptype->u.type_ptr.base->u.type_name.name;
+                if (sname && ss->ctx && ss->ctx->file_scope) {
+                    Symbol *tsym = scope_lookup_type(ss->ctx->file_scope, sname);
+                    for (Symbol *t = tsym; t; t = t->next) {
+                        if (t->kind == SYM_TYPE && t->decl &&
+                            t->decl->kind == AST_STRUCT_DEF) {
+                            for (size_t fi = 0;
+                                 fi < t->decl->u.struct_def.fields.len;
+                                 fi++) {
+                                AstNode *f = t->decl->u.struct_def.fields.data[fi];
+                                if (f && f->kind == AST_FIELD_DECL &&
+                                    f->u.field_decl.name &&
+                                    strcmp(f->u.field_decl.name, name) == 0) {
+                                    is_field_hint = true;
+                                    break;
                                 }
                             }
-                            break;
                         }
+                        if (is_field_hint) break;
                     }
-                    if (is_field_hint) break;
                 }
             }
             if (is_field_hint) {
