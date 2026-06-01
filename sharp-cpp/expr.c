@@ -803,8 +803,12 @@ static Value eval_unary(EvalCtx *ec) {
              * negating the bit pattern as uintmax (two's complement).   */
             if (x.is_unsigned)
                 return vunsigned(0u - (uintmax_t)x.v);
-            else
+            else {
+                if (x.v == INTMAX_MIN)
+                    ec_error(ec, t->loc,
+                        "integer overflow in preprocessor expression");
                 return vsigned(-x.v);
+            }
         }
         if (strcmp(sp, "~") == 0) {
             ec_get(ec);
@@ -834,8 +838,14 @@ static Value eval_mul(EvalCtx *ec) {
             usual_conv(&v, &r);
             if (v.is_unsigned)
                 v.v = (intmax_t)((uintmax_t)v.v * (uintmax_t)r.v);
-            else
-                v.v = v.v * r.v;
+            else {
+                intmax_t a = v.v, b = r.v;
+                intmax_t p = (intmax_t)((uintmax_t)a * (uintmax_t)b);
+                if (a != 0 && p / a != b)
+                    ec_error(ec, t->loc,
+                        "integer overflow in preprocessor expression");
+                v.v = p;
+            }
         }
         else if (strcmp(sp, "/") == 0) {
             ec_get(ec);
@@ -851,8 +861,13 @@ static Value eval_mul(EvalCtx *ec) {
             }
             if (v.is_unsigned)
                 v.v = (intmax_t)((uintmax_t)v.v / (uintmax_t)r.v);
-            else
-                v.v = v.v / r.v;
+            else {
+                if (v.v == INTMAX_MIN && r.v == -1)
+                    ec_error(ec, t->loc,
+                        "integer overflow in preprocessor expression");
+                else
+                    v.v = v.v / r.v;
+            }
         }
         else if (strcmp(sp, "%") == 0) {
             ec_get(ec);
@@ -865,8 +880,13 @@ static Value eval_mul(EvalCtx *ec) {
             }
             if (v.is_unsigned)
                 v.v = (intmax_t)((uintmax_t)v.v % (uintmax_t)r.v);
-            else
-                v.v = v.v % r.v;
+            else {
+                if (v.v == INTMAX_MIN && r.v == -1)
+                    ec_error(ec, t->loc,
+                        "integer overflow in preprocessor expression");
+                else
+                    v.v = v.v % r.v;
+            }
         }
         else break;
     }
@@ -935,8 +955,14 @@ static Value eval_shift(EvalCtx *ec) {
             uintmax_t amt = (uintmax_t)r.v & ((unsigned)(sizeof(uintmax_t) * 8 - 1));
             if (v.is_unsigned)
                 v.v = (intmax_t)((uintmax_t)v.v << amt);
-            else
-                v.v = (intmax_t)((uintmax_t)v.v << amt);
+            else {
+                uintmax_t shifted = (uintmax_t)v.v << amt;
+                if (v.v >= 0 && amt > 0 &&
+                    (intmax_t)shifted < 0)
+                    ec_error(ec, t->loc,
+                        "integer overflow in preprocessor expression");
+                v.v = (intmax_t)shifted;
+            }
         }
         else if (strcmp(sp, ">>") == 0) {
             ec_get(ec);

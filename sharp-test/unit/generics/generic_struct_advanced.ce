@@ -1,0 +1,218 @@
+// Advanced generic struct tests
+// Covers: multi-type params, methods with different type params, array fields,
+//         nested generic instantiation, const methods, methods returning generic type
+
+class Triple<T, U, V> {
+    T first;
+    U second;
+    V third;
+}
+
+T Triple<T, U, V>.get_first(this) const {
+    return this->first;
+}
+
+U Triple<T, U, V>.get_second(this) const {
+    return this->second;
+}
+
+V Triple<T, U, V>.get_third(this) const {
+    return this->third;
+}
+
+void Triple<T, U, V>.set_first(this, T val) {
+    this->first = val;
+}
+
+void Triple<T, U, V>.set_second(this, U val) {
+    this->second = val;
+}
+
+void Triple<T, U, V>.set_third(this, V val) {
+    this->third = val;
+}
+
+class Buffer<T> {
+    T data[8];
+    int count;
+}
+
+void Buffer<T>.append(this, T val) {
+    this->data[this->count] = val;
+    this->count = this->count + 1;
+}
+
+T Buffer<T>.get(this, int idx) const {
+    return this->data[idx];
+}
+
+int Buffer<T>.len(this) const {
+    return this->count;
+}
+
+class Pair<A, B> {
+    A first;
+    B second;
+}
+
+class Wrapper<T> {
+    Pair<T, int> inner;
+    int tag;
+}
+
+T Wrapper<T>.get_wrapped(this) const {
+    return this->inner.first;
+}
+
+int Wrapper<T>.get_tag(this) const {
+    return this->tag;
+}
+
+void Wrapper<T>.set_wrapped(this, T val) {
+    this->inner.first = val;
+}
+
+void Wrapper<T>.set_tag(this, int t) {
+    this->tag = t;
+}
+
+void Wrapper<T>.set_inner_second(this, int v) {
+    this->inner.second = v;
+}
+
+int Wrapper<T>.get_inner_second(this) const {
+    return this->inner.second;
+}
+
+class Container<T> {
+    T value;
+    int ref_count;
+}
+
+T Container<T>.get_value(this) const {
+    return this->value;
+}
+
+void Container<T>.set_value(this, T val) {
+    this->value = val;
+}
+
+int Container<T>.get_ref_count(this) const {
+    return this->ref_count;
+}
+
+void Container<T>.inc_ref(this) {
+    this->ref_count = this->ref_count + 1;
+}
+
+T Container<T>.clone_value(this) const {
+    return this->value;
+}
+
+int main() {
+    // T1: Triple with three type params
+    Triple<int, float, long> t;
+    t.first = 10;
+    t.second = 3.14f;
+    t.third = 999L;
+    if (t.first != 10) return 1;
+    if (t.second < 3.13f || t.second > 3.15f) return 2;
+    if (t.third != 999L) return 3;
+
+    // T1b: Triple with methods using different type params
+    Triple<int, int, int> tiii;
+    tiii.set_first(1);
+    tiii.set_second(2);
+    tiii.set_third(3);
+    if (tiii.get_first() != 1) return 4;
+    if (tiii.get_second() != 2) return 5;
+    if (tiii.get_third() != 3) return 6;
+
+    // T1c: Triple with mixed types and methods
+    Triple<int, long, float> tmix;
+    tmix.set_first(42);
+    tmix.set_second(100L);
+    tmix.set_third(2.5f);
+    if (tmix.get_first() != 42) return 7;
+    if (tmix.get_second() != 100L) return 8;
+    if (tmix.get_third() < 2.49f || tmix.get_third() > 2.51f) return 9;
+
+    // T2: Generic struct with array fields of generic type
+    Buffer<int> buf;
+    buf.count = 0;
+    buf.append(10);
+    buf.append(20);
+    buf.append(30);
+    if (buf.len() != 3) return 10;
+    if (buf.get(0) != 10) return 11;
+    if (buf.get(1) != 20) return 12;
+    if (buf.get(2) != 30) return 13;
+
+    // T2b: Buffer with float
+    Buffer<float> fbuf;
+    fbuf.count = 0;
+    fbuf.append(1.1f);
+    fbuf.append(2.2f);
+    if (fbuf.len() != 2) return 14;
+    if (fbuf.get(0) < 1.0f || fbuf.get(0) > 1.2f) return 15;
+
+    // T3: Nested generic instantiation - Wrapper<T> containing Pair<T, int>
+    Wrapper<int> w;
+    w.set_wrapped(77);
+    w.set_tag(5);
+    w.set_inner_second(99);
+    if (w.get_wrapped() != 77) return 16;
+    if (w.get_tag() != 5) return 17;
+    if (w.get_inner_second() != 99) return 18;
+
+    // T3b: Direct field access on nested generic
+    if (w.inner.first != 77) return 19;
+    if (w.inner.second != 99) return 20;
+
+    // T3c: Wrapper with float
+    Wrapper<float> wf;
+    wf.set_wrapped(3.14f);
+    wf.set_tag(1);
+    if (wf.get_wrapped() < 3.13f || wf.get_wrapped() > 3.15f) return 21;
+    if (wf.get_tag() != 1) return 22;
+
+    // T4: Generic struct with const methods
+    Container<int> ci;
+    ci.ref_count = 0;
+    ci.set_value(42);
+    ci.inc_ref();
+    ci.inc_ref();
+    if (ci.get_ref_count() != 2) return 23;
+
+    // T5: Generic struct method returning generic type
+    if (ci.get_value() != 42) return 24;
+    if (ci.clone_value() != 42) return 25;
+
+    // T5b: Container with float - method returning generic type
+    Container<float> cf;
+    cf.ref_count = 0;
+    cf.set_value(2.71f);
+    cf.inc_ref();
+    if (cf.get_value() < 2.70f || cf.get_value() > 2.72f) return 26;
+    if (cf.get_ref_count() != 1) return 27;
+    if (cf.clone_value() < 2.70f || cf.clone_value() > 2.72f) return 28;
+
+    // T6: Multiple independent instantiations of same generic
+    Buffer<int> buf2;
+    buf2.count = 0;
+    buf2.append(100);
+    buf2.append(200);
+    if (buf2.get(0) != 100) return 29;
+    if (buf2.get(1) != 200) return 30;
+
+    // T7: Triple with all same type
+    Triple<long, long, long> tlll;
+    tlll.set_first(10L);
+    tlll.set_second(20L);
+    tlll.set_third(30L);
+    if (tlll.get_first() != 10L) return 31;
+    if (tlll.get_second() != 20L) return 32;
+    if (tlll.get_third() != 30L) return 33;
+
+    return 0;
+}

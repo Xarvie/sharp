@@ -1,0 +1,179 @@
+// C互操作: 可变参数函数(variadic)测试
+
+#include <stdio.h>
+#include <stdarg.h>
+
+// T1: 自定义可变参数函数 — 整数求和
+int sum_ints(int count, ...) {
+    va_list ap;
+    va_start(ap, count);
+    int total = 0;
+    for (int i = 0; i < count; i = i + 1)
+        total = total + va_arg(ap, int);
+    va_end(ap);
+    return total;
+}
+
+// T2: 可变参数函数 — 浮点数求和
+double sum_doubles(int count, ...) {
+    va_list ap;
+    va_start(ap, count);
+    double total = 0.0;
+    for (int i = 0; i < count; i = i + 1)
+        total = total + va_arg(ap, double);
+    va_end(ap);
+    return total;
+}
+
+// T3: 可变参数函数 — 混合类型参数
+int max_int(int count, ...) {
+    va_list ap;
+    va_start(ap, count);
+    int result = va_arg(ap, int);
+    for (int i = 1; i < count; i = i + 1) {
+        int val = va_arg(ap, int);
+        if (val > result) result = val;
+    }
+    va_end(ap);
+    return result;
+}
+
+// T4: 可变参数函数 — 格式字符串解析
+// 简易格式解析: 'd'=int, 'f'=double, 's'=const char*
+// 返回解析到的参数个数
+int parse_fmt(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int count = 0;
+    for (int i = 0; fmt[i] != '\0'; i = i + 1) {
+        if (fmt[i] == 'd') {
+            int v = va_arg(ap, int);
+            (void)v;
+            count = count + 1;
+        } else if (fmt[i] == 'f') {
+            double v = va_arg(ap, double);
+            (void)v;
+            count = count + 1;
+        } else if (fmt[i] == 's') {
+            const char *v = va_arg(ap, const char*);
+            (void)v;
+            count = count + 1;
+        }
+    }
+    va_end(ap);
+    return count;
+}
+
+// T5: 可变参数函数 — 拼接字符串长度
+int str_lengths(int count, ...) {
+    va_list ap;
+    va_start(ap, count);
+    int total = 0;
+    for (int i = 0; i < count; i = i + 1) {
+        const char *s = va_arg(ap, const char*);
+        int len = 0;
+        while (s[len] != '\0') len = len + 1;
+        total = total + len;
+    }
+    va_end(ap);
+    return total;
+}
+
+// T6: va_copy 使用 — 遍历两次
+int sum_then_max(int count, ...) {
+    va_list ap;
+    va_start(ap, count);
+
+    va_list ap2;
+    va_copy(ap2, ap);
+
+    int sum = 0;
+    for (int i = 0; i < count; i = i + 1)
+        sum = sum + va_arg(ap, int);
+
+    int mx = 0;
+    for (int i = 0; i < count; i = i + 1) {
+        int val = va_arg(ap2, int);
+        if (i == 0 || val > mx) mx = val;
+    }
+
+    va_end(ap);
+    va_end(ap2);
+    return sum * 1000 + mx;
+}
+
+// T7: 可变参数函数 — 仅一个固定参数
+int first_arg(int n, ...) {
+    va_list ap;
+    va_start(ap, n);
+    int result = va_arg(ap, int);
+    va_end(ap);
+    return result;
+}
+
+// T8: 可变参数函数 — long long 类型
+long long sum_longs(int count, ...) {
+    va_list ap;
+    va_start(ap, count);
+    long long total = 0;
+    for (int i = 0; i < count; i = i + 1)
+        total = total + va_arg(ap, long long);
+    va_end(ap);
+    return total;
+}
+
+int main(void) {
+    // T1: 整数求和
+    if (sum_ints(0) != 0) return 1;
+    if (sum_ints(1, 42) != 42) return 2;
+    if (sum_ints(3, 10, 20, 30) != 60) return 3;
+    if (sum_ints(5, 1, 2, 3, 4, 5) != 15) return 4;
+
+    // T2: 浮点数求和
+    if (sum_doubles(0) < -0.001 || sum_doubles(0) > 0.001) return 5;
+    if (sum_doubles(2, 1.5, 2.5) < 3.99 || sum_doubles(2, 1.5, 2.5) > 4.01) return 6;
+    if (sum_doubles(3, 0.1, 0.2, 0.3) < 0.59 || sum_doubles(3, 0.1, 0.2, 0.3) > 0.61) return 7;
+
+    // T3: 最大值
+    if (max_int(1, 7) != 7) return 8;
+    if (max_int(3, 5, 9, 3) != 9) return 9;
+    if (max_int(4, -1, -5, -3, -2) != -1) return 10;
+
+    // T4: 格式字符串解析
+    if (parse_fmt("") != 0) return 11;
+    if (parse_fmt("d", 10) != 1) return 12;
+    if (parse_fmt("ddf", 1, 2, 3.0) != 3) return 13;
+    if (parse_fmt("dsf", 42, "hello", 1.0) != 3) return 14;
+    if (parse_fmt("dds", 1, 2, "abc") != 3) return 15;
+
+    // T5: 字符串长度求和
+    if (str_lengths(0) != 0) return 16;
+    if (str_lengths(1, "abc") != 3) return 17;
+    if (str_lengths(3, "ab", "cde", "f") != 6) return 18;
+
+    // T6: va_copy — sum*1000 + max
+    // sum(3,10,20,30)=60, max=30 → 60*1000+30=60030
+    if (sum_then_max(3, 10, 20, 30) != 60030) return 19;
+    // sum(4,5,1,8,3)=17, max=8 → 17*1000+8=17008
+    if (sum_then_max(4, 5, 1, 8, 3) != 17008) return 20;
+
+    // T7: 仅取第一个可变参数
+    if (first_arg(1, 99) != 99) return 21;
+    if (first_arg(3, 77, 88, 99) != 77) return 22;
+
+    // T8: long long 类型
+    if (sum_longs(0) != 0) return 23;
+    if (sum_longs(2, 1000000000LL, 2000000000LL) != 3000000000LL) return 24;
+
+    // T9: 调用 printf 各种格式说明符 (验证编译通过, 返回值不为负即可)
+    if (printf("%d\n", 42) < 1) return 25;
+    if (printf("%s %d\n", "hello", 123) < 1) return 26;
+    if (printf("%f\n", 3.14) < 1) return 27;
+    if (printf("%c %x %o\n", 'A', 255, 8) < 1) return 28;
+    if (printf("%ld %lld\n", (long)100, (long long)999) < 1) return 29;
+
+    // T10: printf 空格式
+    if (printf("") != 0) return 30;
+
+    return 0;
+}

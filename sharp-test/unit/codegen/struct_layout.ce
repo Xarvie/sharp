@@ -1,0 +1,217 @@
+// C代码生成: struct布局与代码生成测试
+// 覆盖: 混合字段类型、嵌套struct、位域、赋值拷贝、函数参数/返回值、匿名struct/union成员、柔性数组成员
+
+#include <stdlib.h>
+#include <string.h>
+
+// === T1: 混合字段类型 (int, char, pointer, array) ===
+class MixedFields {
+    int    id;
+    char   tag;
+    int*   ptr;
+    char   name[8];
+};
+
+int MixedFields.tag_val(this) const { return (int)this->tag; }
+
+void MixedFields.set_id(this, int v) { this->id = v; }
+
+// === T2: 嵌套struct定义 ===
+class Inner {
+    int a;
+    int b;
+};
+
+class Outer {
+    Inner  first;
+    Inner  second;
+    int    total;
+};
+
+int Outer.compute_total(this) const {
+    return this->first.a + this->first.b + this->second.a + this->second.b;
+}
+
+// === T3: 位域 ===
+struct BitFlags {
+    unsigned int x : 4;
+    unsigned int y : 8;
+    unsigned int z : 1;
+};
+
+// === T4: struct赋值与拷贝 ===
+class Color {
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+};
+
+Color make_color(unsigned char r, unsigned char g, unsigned char b) {
+    Color c;
+    c.r = r; c.g = g; c.b = b;
+    return c;
+}
+
+Color brighten(Color c, int amount) {
+    Color result;
+    result.r = (unsigned char)(c.r + amount > 255 ? 255 : c.r + amount);
+    result.g = (unsigned char)(c.g + amount > 255 ? 255 : c.g + amount);
+    result.b = (unsigned char)(c.b + amount > 255 ? 255 : c.b + amount);
+    return result;
+}
+
+unsigned char Color.luminance(this) const {
+    return (unsigned char)((this->r * 77 + this->g * 150 + this->b * 29) / 256);
+}
+
+// === T5: struct作为函数参数和返回值 ===
+class Rect {
+    int x;
+    int y;
+    int w;
+    int h;
+};
+
+int Rect.area(this) const { return this->w * this->h; }
+
+Rect make_rect(int x, int y, int w, int h) {
+    Rect r;
+    r.x = x; r.y = y; r.w = w; r.h = h;
+    return r;
+}
+
+Rect translate_rect(Rect r, int dx, int dy) {
+    Rect out;
+    out.x = r.x + dx;
+    out.y = r.y + dy;
+    out.w = r.w;
+    out.h = r.h;
+    return out;
+}
+
+int Rect.contains(this, int px, int py) const {
+    return px >= this->x && px < this->x + this->w &&
+           py >= this->y && py < this->y + this->h;
+}
+
+// === T6: 匿名struct/union成员 ===
+struct TaggedValue {
+    int kind;
+    union {
+        int    i_val;
+        double d_val;
+    };
+};
+
+struct Coords {
+    union {
+        struct {
+            float x;
+            float y;
+        };
+        float data[2];
+    };
+};
+
+// === T7: 柔性数组成员 ===
+struct FlexHeader {
+    int count;
+    int items[];
+};
+
+int main(void) {
+    // --- T1: 混合字段类型 ---
+    MixedFields mf;
+    int val = 42;
+    mf.id = 10;
+    mf.tag = 'A';
+    mf.ptr = &val;
+    mf.name[0] = 't'; mf.name[1] = 'e'; mf.name[2] = 's'; mf.name[3] = 't';
+    mf.name[4] = '\0';
+    if (mf.id != 10) return 1;
+    if (mf.tag_val() != (int)'A') return 2;
+    if (mf.ptr[0] != 42) return 3;
+    if (mf.name[0] != 't') return 4;
+    mf.set_id(99);
+    if (mf.id != 99) return 5;
+
+    // --- T2: 嵌套struct ---
+    Outer o;
+    o.first.a = 1; o.first.b = 2;
+    o.second.a = 3; o.second.b = 4;
+    o.total = o.compute_total();
+    if (o.total != 10) return 6;
+    if (o.first.a + o.second.b != 5) return 7;
+
+    // --- T3: 位域 ---
+    struct BitFlags bf;
+    bf.x = 12;
+    bf.y = 200;
+    bf.z = 1;
+    if (bf.x != 12) return 8;
+    if (bf.y != 200) return 9;
+    if (bf.z != 1) return 10;
+    bf.x = 31;
+    if (bf.x != 15) return 11;
+    bf.y = 300;
+    if (bf.y != 44) return 12;
+
+    // --- T4: struct赋值与拷贝 ---
+    Color c1 = make_color(100, 150, 200);
+    Color c2 = c1;
+    if (c2.r != 100) return 13;
+    if (c2.g != 150) return 14;
+    if (c2.b != 200) return 15;
+    c2.r = 0;
+    if (c1.r != 100) return 16;
+    Color c3 = brighten(c1, 50);
+    if (c3.r != 150) return 17;
+    if (c3.g != 200) return 18;
+    if (c3.b != 250) return 19;
+    unsigned char lum = c1.luminance();
+    if (lum == 0) return 20;
+
+    // --- T5: struct作为函数参数和返回值 ---
+    Rect r1 = make_rect(10, 20, 30, 40);
+    if (r1.area() != 1200) return 21;
+    if (!r1.contains(15, 25)) return 22;
+    if (r1.contains(5, 25)) return 23;
+    Rect r2 = translate_rect(r1, 5, -10);
+    if (r2.x != 15) return 24;
+    if (r2.y != 10) return 25;
+    if (r2.w != 30) return 26;
+    if (r2.h != 40) return 27;
+
+    // --- T6: 匿名struct/union成员 ---
+    struct TaggedValue tv;
+    tv.kind = 0;
+    tv.i_val = 42;
+    if (tv.i_val != 42) return 28;
+    tv.kind = 1;
+    tv.d_val = 3.14;
+    if (tv.d_val < 3.13 || tv.d_val > 3.15) return 29;
+
+    struct Coords co;
+    co.x = 1.0f;
+    co.y = 2.0f;
+    if (co.data[0] < 0.99f || co.data[0] > 1.01f) return 30;
+    if (co.data[1] < 1.99f || co.data[1] > 2.01f) return 31;
+    co.data[0] = 5.0f;
+    co.data[1] = 6.0f;
+    if (co.x < 4.99f || co.x > 5.01f) return 32;
+    if (co.y < 5.99f || co.y > 6.01f) return 33;
+
+    // --- T7: 柔性数组成员 ---
+    struct FlexHeader* fh = (struct FlexHeader*)malloc(sizeof(struct FlexHeader) + 3 * sizeof(int));
+    fh->count = 3;
+    fh->items[0] = 10;
+    fh->items[1] = 20;
+    fh->items[2] = 30;
+    if (fh->count != 3) return 34;
+    if (fh->items[0] != 10) return 35;
+    if (fh->items[1] != 20) return 36;
+    if (fh->items[2] != 30) return 37;
+    free(fh);
+
+    return 0;
+}

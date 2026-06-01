@@ -1,0 +1,100 @@
+// auto 类型推导: struct/class 类型场景
+// 覆盖: struct变量声明、struct指针、函数返回struct、数组元素访问、for-loop迭代、const struct
+
+class Point {
+    int x;
+    int y;
+};
+
+int Point.sum(this) const { return this->x + this->y; }
+void Point.set(this, int nx, int ny) { this->x = nx; this->y = ny; }
+
+class Rect {
+    int w;
+    int h;
+};
+
+int Rect.area(this) const { return this->w * this->h; }
+
+Point make_point(int x, int y) {
+    Point p;
+    p.x = x;
+    p.y = y;
+    return p;
+}
+
+Rect make_rect(int w, int h) {
+    Rect r;
+    r.w = w;
+    r.h = h;
+    return r;
+}
+
+int main(void) {
+    // T1: auto with struct variable declaration
+    Point pt;
+    pt.x = 10;
+    pt.y = 20;
+    auto apt = pt;
+    if (apt.x != 10) return 1;
+    if (apt.y != 20) return 2;
+    auto asum = apt.sum();
+    if (asum != 30) return 3;
+
+    // T2: auto with struct pointer
+    Point pt2;
+    pt2.x = 5;
+    pt2.y = 15;
+    auto pp = &pt2;
+    if (pp->x != 5) return 4;
+    if (pp->y != 15) return 5;
+    pp->set(100, 200);
+    if (pt2.x != 100) return 6;
+    if (pt2.y != 200) return 7;
+
+    // T3: auto with function returning struct
+    auto rp = make_point(7, 13);
+    if (rp.x != 7) return 8;
+    if (rp.y != 13) return 9;
+    auto rr = make_rect(4, 5);
+    if (rr.area() != 20) return 10;
+    auto chained = make_point(1, 2).sum();
+    if (chained != 3) return 11;
+
+    // T4: auto with array element access
+    Point pts[3] = {0};
+    pts[0].x = 1; pts[0].y = 2;
+    pts[1].x = 3; pts[1].y = 4;
+    pts[2].x = 5; pts[2].y = 6;
+    auto elem = pts[1];
+    if (elem.x != 3) return 12;
+    if (elem.y != 4) return 13;
+    auto elem_field = pts[2].x;
+    if (elem_field != 5) return 14;
+
+    // T5: auto in for-loop with struct iteration
+    int total_x = 0;
+    int total_y = 0;
+    for (auto i = 0; i < 3; i = i + 1) {
+        auto px = pts[i].x;
+        auto py = pts[i].y;
+        total_x = total_x + px;
+        total_y = total_y + py;
+    }
+    if (total_x != 9) return 15;
+    if (total_y != 12) return 16;
+
+    // T6: auto with const struct
+    Point cp;
+    cp.x = 42;
+    cp.y = 58;
+    const Point* cptr = &cp;
+    auto cval = cptr->sum();
+    if (cval != 100) return 17;
+    auto cx = cptr->x;
+    if (cx != 42) return 18;
+    auto cy = cptr->y;
+    if (cy != 58) return 19;
+
+    return 0;
+}

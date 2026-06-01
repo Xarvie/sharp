@@ -1,0 +1,343 @@
+// Advanced extension method scenarios:
+// T1: Extension method on wrapper for built-in pointer type (IntPtr)
+// T2: Extension method with multiple parameters
+// T3: Extension method returning struct type
+// T4: Extension method with pointer receiver (call via ->, return pointer)
+// T5: Extension method chaining (return this for fluent API)
+// T6: Extension method on generic struct
+
+#include <stdbool.h>
+
+// === T1: Wrapper for built-in pointer type ===
+class IntPtr {
+    int* ptr;
+    long len;
+};
+
+int IntPtr.at(this, long i) const {
+    return this->ptr[i];
+}
+
+void IntPtr.set(this, long i, int v) {
+    this->ptr[i] = v;
+}
+
+long IntPtr.length(this) const {
+    return this->len;
+}
+
+int IntPtr.sum(this) const {
+    int s = 0;
+    for (long i = 0; i < this->len; i = i + 1)
+        s = s + this->ptr[i];
+    return s;
+}
+
+void IntPtr.reverse(this) {
+    long i = 0;
+    long j = this->len - 1;
+    while (i < j) {
+        int tmp = this->ptr[i];
+        this->ptr[i] = this->ptr[j];
+        this->ptr[j] = tmp;
+        i = i + 1;
+        j = j - 1;
+    }
+}
+
+// === T2: Extension method with multiple parameters ===
+class Color {
+    int r;
+    int g;
+    int b;
+};
+
+int Color.luminance(this) const {
+    return (this->r * 299 + this->g * 587 + this->b * 114) / 1000;
+}
+
+void Color.set_rgb(this, int nr, int ng, int nb) {
+    this->r = nr;
+    this->g = ng;
+    this->b = nb;
+}
+
+void Color.blend(this, int dr, int dg, int db, int alpha) {
+    this->r = this->r + (dr - this->r) * alpha / 255;
+    this->g = this->g + (dg - this->g) * alpha / 255;
+    this->b = this->b + (db - this->b) * alpha / 255;
+}
+
+bool Color.equals_rgb(this, int er, int eg, int eb) const {
+    return this->r == er && this->g == eg && this->b == eb;
+}
+
+// === T3: Extension method returning struct type ===
+class Point {
+    int x;
+    int y;
+};
+
+Point Point.origin() {
+    Point p;
+    p.x = 0;
+    p.y = 0;
+    return p;
+}
+
+Point Point.translate(this, int dx, int dy) const {
+    Point result;
+    result.x = this->x + dx;
+    result.y = this->y + dy;
+    return result;
+}
+
+Point Point.midpoint(this, Point other) const {
+    Point m;
+    m.x = (this->x + other.x) / 2;
+    m.y = (this->y + other.y) / 2;
+    return m;
+}
+
+class Line {
+    Point start;
+    Point end;
+};
+
+Line Line.from_points(Point a, Point b) {
+    Line l;
+    l.start = a;
+    l.end = b;
+    return l;
+}
+
+long Line.length_sq(this) const {
+    long dx = (long)(this->end.x - this->start.x);
+    long dy = (long)(this->end.y - this->start.y);
+    return dx * dx + dy * dy;
+}
+
+// === T4: Extension method with pointer receiver ===
+class Node {
+    int value;
+    Node* next;
+};
+
+int Node.get_value(this) const {
+    return this->value;
+}
+
+void Node.set_value(this, int v) {
+    this->value = v;
+}
+
+Node* Node.get_next(this) const {
+    return this->next;
+}
+
+void Node.set_next(this, Node* n) {
+    this->next = n;
+}
+
+int Node.chain_sum(this) {
+    int s = 0;
+    Node* cur = this;
+    while (cur != (void*)0) {
+        s = s + cur->get_value();
+        cur = cur->get_next();
+    }
+    return s;
+}
+
+// === T5: Extension method chaining ===
+class FluentCounter {
+    int val;
+};
+
+FluentCounter* FluentCounter.inc(this) {
+    this->val = this->val + 1;
+    return this;
+}
+
+FluentCounter* FluentCounter.add(this, int n) {
+    this->val = this->val + n;
+    return this;
+}
+
+FluentCounter* FluentCounter.mul(this, int n) {
+    this->val = this->val * n;
+    return this;
+}
+
+int FluentCounter.get(this) const {
+    return this->val;
+}
+
+class Painter {
+    int x;
+    int y;
+    int color;
+};
+
+Painter* Painter.move_to(this, int mx, int my) {
+    this->x = mx;
+    this->y = my;
+    return this;
+}
+
+Painter* Painter.set_color(this, int c) {
+    this->color = c;
+    return this;
+}
+
+int Painter.render(this) const {
+    return this->x + this->y + this->color;
+}
+
+// === T6: Extension method on generic struct ===
+class Container<T> {
+    T data;
+    bool valid;
+};
+
+T Container<T>.get(this) const {
+    return this->data;
+}
+
+void Container<T>.set(this, T v) {
+    this->data = v;
+    this->valid = true;
+}
+
+bool Container<T>.is_valid(this) const {
+    return this->valid;
+}
+
+void Container<T>.reset(this) {
+    this->valid = false;
+}
+
+T Container<T>.get_or(this, T default_val) const {
+    if (this->valid) return this->data;
+    return default_val;
+}
+
+class Pair<T> {
+    T first;
+    T second;
+};
+
+T Pair<T>.get_first(this) const {
+    return this->first;
+}
+
+T Pair<T>.get_second(this) const {
+    return this->second;
+}
+
+Pair<T> Pair<T>.swap(this) const {
+    Pair<T> result;
+    result.first = this->second;
+    result.second = this->first;
+    return result;
+}
+
+int main(void) {
+    // --- T1: IntPtr wrapper for built-in pointer type ---
+    int arr[5] = {10, 20, 30, 40, 50};
+    IntPtr ip;
+    ip.ptr = arr;
+    ip.len = 5;
+    if (ip.at(0) != 10) return 1;
+    if (ip.at(4) != 50) return 2;
+    if (ip.length() != 5) return 3;
+    if (ip.sum() != 150) return 4;
+    ip.set(2, 99);
+    if (ip.at(2) != 99) return 5;
+    ip.reverse();
+    if (ip.at(0) != 50) return 6;
+    if (ip.at(4) != 10) return 7;
+
+    // --- T2: Multiple parameters ---
+    Color c;
+    c.r = 100; c.g = 150; c.b = 200;
+    if (c.luminance() != 140) return 8;
+    c.set_rgb(255, 128, 0);
+    if (c.r != 255 || c.g != 128 || c.b != 0) return 9;
+    if (!c.equals_rgb(255, 128, 0)) return 10;
+    c.blend(0, 0, 255, 128);
+    if (c.equals_rgb(255, 128, 0)) return 11;
+    Color c2;
+    c2.r = 200; c2.g = 200; c2.b = 200;
+    c2.blend(100, 100, 100, 128);
+    if (c2.r != 150) return 12;
+
+    // --- T3: Returning struct type ---
+    Point p1;
+    p1.x = 3; p1.y = 4;
+    Point translated = p1.translate(10, 20);
+    if (translated.x != 13 || translated.y != 24) return 13;
+    Point p2;
+    p2.x = 7; p2.y = 10;
+    Point mid = p1.midpoint(p2);
+    if (mid.x != 5 || mid.y != 7) return 14;
+    Point origin = Point.origin();
+    if (origin.x != 0 || origin.y != 0) return 15;
+    Line ln = Line.from_points(p1, p2);
+    if (ln.length_sq() != 52) return 16;
+
+    // --- T4: Pointer receiver ---
+    Node n1; n1.value = 10; n1.next = (void*)0;
+    Node n2; n2.value = 20; n2.next = &n1;
+    Node n3; n3.value = 30; n3.next = &n2;
+    if (n3.get_value() != 30) return 17;
+    n3.set_value(33);
+    if (n3.get_value() != 33) return 18;
+    Node* pn = &n2;
+    if (pn->get_value() != 20) return 19;
+    pn->set_value(22);
+    if (pn->get_value() != 22) return 20;
+    if (n3.chain_sum() != 65) return 21;
+    Node* cn = &n3;
+    if (cn->get_value() != 33) return 22;
+
+    // --- T5: Method chaining ---
+    FluentCounter fc;
+    fc.val = 0;
+    fc.inc()->add(5)->mul(3);
+    if (fc.get() != 18) return 23;
+    fc.add(2)->inc()->inc();
+    if (fc.get() != 22) return 24;
+    Painter pt;
+    pt.x = 0; pt.y = 0; pt.color = 0;
+    int rendered = pt.move_to(5, 10)->set_color(3)->render();
+    if (rendered != 18) return 25;
+
+    // --- T6: Generic struct extension methods ---
+    Container<int> ci;
+    ci.valid = false;
+    if (ci.is_valid()) return 26;
+    if (ci.get_or(42) != 42) return 27;
+    ci.set(100);
+    if (!ci.is_valid()) return 28;
+    if (ci.get() != 100) return 29;
+    if (ci.get_or(0) != 100) return 30;
+    ci.reset();
+    if (ci.is_valid()) return 31;
+
+    Container<long> cl;
+    cl.valid = false;
+    cl.set(999L);
+    if (cl.get() != 999L) return 32;
+
+    Pair<int> pi;
+    pi.first = 42;
+    pi.second = 99;
+    if (pi.get_first() != 42) return 33;
+    if (pi.get_second() != 99) return 34;
+    Pair<int> swapped = pi.swap();
+    if (swapped.first != 99) return 35;
+    if (swapped.second != 42) return 36;
+
+    return 0;
+}

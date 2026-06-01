@@ -1,0 +1,126 @@
+#include "module_advanced.he"
+
+int main(void) {
+    int ibuf[8] = {0};
+    RingBuf<int> irb;
+    irb.init(ibuf, 8);
+
+    if (!irb.is_empty()) return 1;
+    if (irb.size() != 0) return 2;
+
+    irb.push(10);
+    irb.push(20);
+    irb.push(30);
+
+    if (irb.is_empty()) return 3;
+    if (irb.size() != 3) return 4;
+    if (irb.peek() != 10) return 5;
+
+    int ival = 0;
+    irb.pop(&ival);
+    if (ival != 10) return 6;
+    if (irb.peek() != 20) return 7;
+
+    int ibuf2[4] = {0};
+    RingBuf<int> irb2;
+    irb2.init(ibuf2, 4);
+
+    irb2.push(1);
+    irb2.push(2);
+    irb2.push(3);
+    irb2.push(4);
+
+    if (!irb2.is_full()) return 8;
+    if (irb2.push(5)) return 9;
+
+    irb2.clear();
+    if (!irb2.is_empty()) return 10;
+    if (irb2.size() != 0) return 11;
+
+    float fbuf[6] = {0.0f};
+    RingBuf<float> frb;
+    frb.init(fbuf, 6);
+
+    frb.push(1.5f);
+    frb.push(2.5f);
+    frb.push(3.5f);
+
+    if (frb.size() != 3) return 12;
+    if (frb.capacity() != 6) return 13;
+
+    float fval = 0.0f;
+    frb.pop(&fval);
+    if (fval < 1.49f || fval > 1.51f) return 14;
+
+    float fpeek = frb.peek();
+    if (fpeek < 2.49f || fpeek > 2.51f) return 15;
+
+    int clamped_int = clamp_val<int>(15, 0, 10);
+    if (clamped_int != 10) return 16;
+
+    int clamped_int2 = clamp_val<int>(5, 0, 10);
+    if (clamped_int2 != 5) return 17;
+
+    float clamped_float = clamp_val<float>(-1.0f, 0.0f, 10.0f);
+    if (clamped_float < -0.01f || clamped_float > 0.01f) return 18;
+
+    enum BufStatus status = BUF_OK;
+    if (status != BUF_OK) return 19;
+
+    status = BUF_FULL;
+    if (status != BUF_FULL) return 20;
+
+    status = BUF_EMPTY;
+    if (status != BUF_EMPTY) return 21;
+
+    int buf3[4] = {0};
+    RingBuf<int> rb3;
+    rb3.init(buf3, 4);
+
+    rb3.push(clamp_val<int>(100, 0, 50));
+    rb3.push(clamp_val<int>(-10, 0, 50));
+    rb3.push(clamp_val<int>(25, 0, 50));
+
+    int v1 = 0, v2 = 0, v3 = 0;
+    rb3.pop(&v1);
+    rb3.pop(&v2);
+    rb3.pop(&v3);
+    if (v1 != 50) return 22;
+    if (v2 != 0) return 23;
+    if (v3 != 25) return 24;
+
+    float fbuf2[4] = {0.0f};
+    RingBuf<float> frb2;
+    frb2.init(fbuf2, 4);
+
+    frb2.push(clamp_val<float>(3.14f, 0.0f, 2.0f));
+    frb2.push(clamp_val<float>(1.5f, 0.0f, 2.0f));
+
+    float fv1 = 0.0f, fv2 = 0.0f;
+    frb2.pop(&fv1);
+    frb2.pop(&fv2);
+    if (fv1 < 1.99f || fv1 > 2.01f) return 25;
+    if (fv2 < 1.49f || fv2 > 1.51f) return 26;
+
+    enum BufStatus check_status;
+    if (irb2.is_full()) {
+        check_status = BUF_FULL;
+    } else if (irb2.is_empty()) {
+        check_status = BUF_EMPTY;
+    } else {
+        check_status = BUF_OK;
+    }
+    if (check_status != BUF_EMPTY) return 27;
+
+    irb2.push(42);
+    if (irb2.is_full()) {
+        check_status = BUF_FULL;
+    } else if (irb2.is_empty()) {
+        check_status = BUF_EMPTY;
+    } else {
+        check_status = BUF_OK;
+    }
+    if (check_status != BUF_OK) return 28;
+
+    return 0;
+}

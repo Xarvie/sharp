@@ -1,0 +1,406 @@
+// 控制流: switch 高级场景
+// 覆盖: fall-through、default位置、嵌套switch、case中break、
+//       Duff's device模式、大case值、char/enum类型switch
+
+enum Direction {
+    DIR_NORTH,
+    DIR_SOUTH,
+    DIR_EAST,
+    DIR_WEST
+};
+
+enum Priority {
+    PRIO_LOW = 1,
+    PRIO_MED = 5,
+    PRIO_HIGH = 10,
+    PRIO_CRIT = 99
+};
+
+int test_fallthrough_accumulate(int mode) {
+    int acc = 0;
+    switch (mode) {
+        case 3: acc = acc + 100;
+        case 2: acc = acc + 10;
+        case 1: acc = acc + 1;
+                break;
+        default: acc = -1;
+    }
+    return acc;
+}
+
+int test_default_first(int val) {
+    int result = 0;
+    switch (val) {
+        default: result = -1; break;
+        case 1: result = 10; break;
+        case 2: result = 20; break;
+    }
+    return result;
+}
+
+int test_default_middle(int val) {
+    int result = 0;
+    switch (val) {
+        case 1: result = 10; break;
+        default: result = -1; break;
+        case 2: result = 20; break;
+    }
+    return result;
+}
+
+int test_nested_switch(int outer, int inner) {
+    int result = 0;
+    switch (outer) {
+        case 1:
+            switch (inner) {
+                case 1: result = 11; break;
+                case 2: result = 12; break;
+                default: result = 19; break;
+            }
+            break;
+        case 2:
+            switch (inner) {
+                case 1: result = 21; break;
+                case 2: result = 22; break;
+                default: result = 29; break;
+            }
+            break;
+        default:
+            result = 99;
+            break;
+    }
+    return result;
+}
+
+int test_triple_nested(int a, int b, int c) {
+    int result = 0;
+    switch (a) {
+        case 1:
+            switch (b) {
+                case 1:
+                    switch (c) {
+                        case 1: result = 111; break;
+                        case 2: result = 112; break;
+                        default: result = 119; break;
+                    }
+                    break;
+                default: result = 190; break;
+            }
+            break;
+        default: result = 900; break;
+    }
+    return result;
+}
+
+int test_break_mid_case(int val) {
+    int x = 0;
+    switch (val) {
+        case 1:
+            x = x + 1;
+            break;
+            x = x + 100;
+        case 2:
+            x = x + 2;
+            break;
+        default:
+            x = x + 9;
+            break;
+    }
+    return x;
+}
+
+int test_duff_device(int count) {
+    int sum = 0;
+    int n = count;
+    int i = 0;
+    switch (n % 4) {
+        case 0: sum = sum + i; i = i + 1;
+        case 3: sum = sum + i; i = i + 1;
+        case 2: sum = sum + i; i = i + 1;
+        case 1: sum = sum + i; i = i + 1;
+    }
+    return sum;
+}
+
+int test_duff_device_loop(int total) {
+    int sum = 0;
+    int n = total;
+    int vals[16];
+    for (int k = 0; k < 16; k = k + 1) vals[k] = k + 1;
+
+    int idx = 0;
+    switch (n % 4) {
+        do {
+        case 0: sum = sum + vals[idx]; idx = idx + 1;
+        case 3: sum = sum + vals[idx]; idx = idx + 1;
+        case 2: sum = sum + vals[idx]; idx = idx + 1;
+        case 1: sum = sum + vals[idx]; idx = idx + 1;
+        } while ((n = n - 4) > 0);
+    }
+    return sum;
+}
+
+int test_large_case_values(int val) {
+    int result = 0;
+    switch (val) {
+        case 0: result = 1; break;
+        case 1000: result = 2; break;
+        case 100000: result = 3; break;
+        case 2147483647: result = 4; break;
+        default: result = -1; break;
+    }
+    return result;
+}
+
+int test_large_sparse_case(int val) {
+    int result = 0;
+    switch (val) {
+        case 1: result = 10; break;
+        case 500: result = 20; break;
+        case 99999: result = 30; break;
+        default: result = 0; break;
+    }
+    return result;
+}
+
+int test_char_switch(char c) {
+    int result = 0;
+    switch (c) {
+        case 'A': result = 1; break;
+        case 'B': result = 2; break;
+        case 'Z': result = 26; break;
+        case 'a': result = 27; break;
+        case '0': result = 48; break;
+        default: result = -1; break;
+    }
+    return result;
+}
+
+int test_char_fallthrough(char c) {
+    int result = 0;
+    switch (c) {
+        case 'A': case 'a': result = 1; break;
+        case 'B': case 'b': result = 2; break;
+        default: result = -1; break;
+    }
+    return result;
+}
+
+int test_enum_switch(enum Direction d) {
+    int result = 0;
+    switch (d) {
+        case DIR_NORTH: result = 1; break;
+        case DIR_SOUTH: result = 2; break;
+        case DIR_EAST:  result = 3; break;
+        case DIR_WEST:  result = 4; break;
+    }
+    return result;
+}
+
+int test_enum_with_default(enum Priority p) {
+    int result = 0;
+    switch (p) {
+        case PRIO_LOW:  result = 1; break;
+        case PRIO_MED:  result = 5; break;
+        case PRIO_HIGH: result = 10; break;
+        case PRIO_CRIT: result = 99; break;
+        default: result = -1; break;
+    }
+    return result;
+}
+
+int test_enum_fallthrough(enum Direction d) {
+    int result = 0;
+    switch (d) {
+        case DIR_NORTH: result = result + 1;
+        case DIR_SOUTH: result = result + 2;
+        case DIR_EAST:  result = result + 4;
+        case DIR_WEST:  result = result + 8;
+                        break;
+    }
+    return result;
+}
+
+int test_switch_no_default(int val) {
+    int result = 42;
+    switch (val) {
+        case 1: result = 10; break;
+        case 2: result = 20; break;
+    }
+    return result;
+}
+
+int test_switch_only_default(int val) {
+    int result = 0;
+    switch (val) {
+        default: result = 99; break;
+    }
+    return result;
+}
+
+int test_switch_empty_case(int val) {
+    int result = 0;
+    switch (val) {
+        case 1:
+        case 2:
+        case 3: result = 30; break;
+        case 4:
+        case 5: result = 50; break;
+        default: result = 0; break;
+    }
+    return result;
+}
+
+int test_switch_return_from_case(int val) {
+    switch (val) {
+        case 1: return 10;
+        case 2: return 20;
+        case 3: return 30;
+        default: return 0;
+    }
+}
+
+int test_switch_negative_case(int val) {
+    int result = 0;
+    switch (val) {
+        case -3: result = -3; break;
+        case -2: result = -2; break;
+        case -1: result = -1; break;
+        case 0:  result = 0; break;
+        case 1:  result = 1; break;
+        default: result = 99; break;
+    }
+    return result;
+}
+
+int main(void) {
+    // T1: fall-through accumulation
+    if (test_fallthrough_accumulate(1) != 1) return 1;
+    if (test_fallthrough_accumulate(2) != 11) return 2;
+    if (test_fallthrough_accumulate(3) != 111) return 3;
+    if (test_fallthrough_accumulate(0) != -1) return 4;
+    if (test_fallthrough_accumulate(4) != -1) return 5;
+
+    // T2: default case at first position
+    if (test_default_first(1) != 10) return 10;
+    if (test_default_first(2) != 20) return 11;
+    if (test_default_first(3) != -1) return 12;
+    if (test_default_first(0) != -1) return 13;
+
+    // T3: default case in middle position
+    if (test_default_middle(1) != 10) return 20;
+    if (test_default_middle(2) != 20) return 21;
+    if (test_default_middle(3) != -1) return 22;
+
+    // T4: nested switch - two levels
+    if (test_nested_switch(1, 1) != 11) return 30;
+    if (test_nested_switch(1, 2) != 12) return 31;
+    if (test_nested_switch(1, 3) != 19) return 32;
+    if (test_nested_switch(2, 1) != 21) return 33;
+    if (test_nested_switch(2, 2) != 22) return 34;
+    if (test_nested_switch(3, 1) != 99) return 35;
+
+    // T5: triple nested switch
+    if (test_triple_nested(1, 1, 1) != 111) return 40;
+    if (test_triple_nested(1, 1, 2) != 112) return 41;
+    if (test_triple_nested(1, 1, 3) != 119) return 42;
+    if (test_triple_nested(1, 2, 1) != 190) return 43;
+    if (test_triple_nested(2, 1, 1) != 900) return 44;
+
+    // T6: break in the middle of case (dead code after break)
+    if (test_break_mid_case(1) != 1) return 50;
+    if (test_break_mid_case(2) != 2) return 51;
+    if (test_break_mid_case(3) != 9) return 52;
+
+    // T7: Duff's device - single pass (no loop)
+    if (test_duff_device(1) != 0) return 60;
+    if (test_duff_device(2) != 1) return 61;
+    if (test_duff_device(3) != 3) return 62;
+    if (test_duff_device(4) != 6) return 63;
+
+    // T8: Duff's device - with loop
+    if (test_duff_device_loop(4) != 10) return 70;
+    if (test_duff_device_loop(8) != 36) return 71;
+    if (test_duff_device_loop(12) != 78) return 72;
+
+    // T9: large case values
+    if (test_large_case_values(0) != 1) return 80;
+    if (test_large_case_values(1000) != 2) return 81;
+    if (test_large_case_values(100000) != 3) return 82;
+    if (test_large_case_values(2147483647) != 4) return 83;
+    if (test_large_case_values(999) != -1) return 84;
+
+    // T10: large sparse case values
+    if (test_large_sparse_case(1) != 10) return 90;
+    if (test_large_sparse_case(500) != 20) return 91;
+    if (test_large_sparse_case(99999) != 30) return 92;
+    if (test_large_sparse_case(50) != 0) return 93;
+
+    // T11: char type switch
+    if (test_char_switch('A') != 1) return 100;
+    if (test_char_switch('B') != 2) return 101;
+    if (test_char_switch('Z') != 26) return 102;
+    if (test_char_switch('a') != 27) return 103;
+    if (test_char_switch('0') != 48) return 104;
+    if (test_char_switch('x') != -1) return 105;
+
+    // T12: char fall-through (case aliasing)
+    if (test_char_fallthrough('A') != 1) return 110;
+    if (test_char_fallthrough('a') != 1) return 111;
+    if (test_char_fallthrough('B') != 2) return 112;
+    if (test_char_fallthrough('b') != 2) return 113;
+    if (test_char_fallthrough('c') != -1) return 114;
+
+    // T13: enum switch
+    if (test_enum_switch(DIR_NORTH) != 1) return 120;
+    if (test_enum_switch(DIR_SOUTH) != 2) return 121;
+    if (test_enum_switch(DIR_EAST) != 3) return 122;
+    if (test_enum_switch(DIR_WEST) != 4) return 123;
+
+    // T14: enum with explicit values and default
+    if (test_enum_with_default(PRIO_LOW) != 1) return 130;
+    if (test_enum_with_default(PRIO_MED) != 5) return 131;
+    if (test_enum_with_default(PRIO_HIGH) != 10) return 132;
+    if (test_enum_with_default(PRIO_CRIT) != 99) return 133;
+    if (test_enum_with_default(50) != -1) return 134;
+
+    // T15: enum fall-through
+    if (test_enum_fallthrough(DIR_NORTH) != 15) return 140;
+    if (test_enum_fallthrough(DIR_SOUTH) != 14) return 141;
+    if (test_enum_fallthrough(DIR_EAST) != 12) return 142;
+    if (test_enum_fallthrough(DIR_WEST) != 8) return 143;
+
+    // T16: switch with no default (value unchanged)
+    if (test_switch_no_default(1) != 10) return 150;
+    if (test_switch_no_default(2) != 20) return 151;
+    if (test_switch_no_default(3) != 42) return 152;
+
+    // T17: switch with only default
+    if (test_switch_only_default(0) != 99) return 160;
+    if (test_switch_only_default(1) != 99) return 161;
+    if (test_switch_only_default(-1) != 99) return 162;
+
+    // T18: empty case labels (case aliasing)
+    if (test_switch_empty_case(1) != 30) return 170;
+    if (test_switch_empty_case(2) != 30) return 171;
+    if (test_switch_empty_case(3) != 30) return 172;
+    if (test_switch_empty_case(4) != 50) return 173;
+    if (test_switch_empty_case(5) != 50) return 174;
+    if (test_switch_empty_case(6) != 0) return 175;
+
+    // T19: return from case
+    if (test_switch_return_from_case(1) != 10) return 180;
+    if (test_switch_return_from_case(2) != 20) return 181;
+    if (test_switch_return_from_case(3) != 30) return 182;
+    if (test_switch_return_from_case(4) != 0) return 183;
+
+    // T20: negative case values
+    if (test_switch_negative_case(-3) != -3) return 190;
+    if (test_switch_negative_case(-2) != -2) return 191;
+    if (test_switch_negative_case(-1) != -1) return 192;
+    if (test_switch_negative_case(0) != 0) return 193;
+    if (test_switch_negative_case(1) != 1) return 194;
+    if (test_switch_negative_case(2) != 99) return 195;
+
+    return 0;
+}

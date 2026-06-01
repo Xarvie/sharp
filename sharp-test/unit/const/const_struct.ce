@@ -1,0 +1,114 @@
+// const: const 与 class(struct)类型测试
+
+class Point {
+    int x;
+    int y;
+};
+
+int Point.sum(this) const { return this->x + this->y; }
+void Point.move(this, int dx, int dy) { this->x = this->x + dx; this->y = this->y + dy; }
+
+class Rect {
+    int w;
+    int h;
+};
+
+int Rect.area(this) const { return this->w * this->h; }
+int Rect.perimeter(this) const { return 2 * (this->w + this->h); }
+
+class Data {
+    int value;
+};
+
+int Data.get(this) const { return this->value; }
+void Data.set(this, int v) { this->value = v; }
+
+int compute_area(const Rect* r) {
+    return r->area();
+}
+
+int point_sum_const(const Point* p) {
+    return p->sum();
+}
+
+const Point* get_const_point(Point* p) {
+    return p;
+}
+
+const Data* get_const_data(Data* d) {
+    return d;
+}
+
+int main(void) {
+    // T1: const struct variable - fields are read-only
+    Point pt = {3, 4};
+    const Point cpt = pt;
+    if (cpt.x != 3) return 1;
+    if (cpt.y != 4) return 2;
+
+    Point pt2 = {10, 20};
+    const Point cpt2 = pt2;
+    if (cpt2.x != 10) return 3;
+    if (cpt2.y != 20) return 4;
+
+    // T2: const pointer to struct - can change pointer, not the struct
+    Point a = {1, 2};
+    Point b = {10, 20};
+    const Point* cp = &a;
+    if (cp->x != 1) return 5;
+    if (cp->y != 2) return 6;
+    cp = &b;
+    if (cp->x != 10) return 7;
+    if (cp->y != 20) return 8;
+
+    // T3: pointer to const struct - can change struct through other pointer
+    Point c = {10, 20};
+    const Point* pc = &c;
+    if (pc->sum() != 30) return 9;
+    c.x = 15;
+    if (pc->sum() != 35) return 10;
+    c.move(5, 5);
+    if (pc->x != 20) return 11;
+    if (pc->y != 25) return 12;
+
+    // T4: const struct with const method calls
+    Rect r = {5, 6};
+    const Rect* pr = &r;
+    if (pr->area() != 30) return 13;
+    if (pr->perimeter() != 22) return 14;
+
+    const Rect cr = r;
+    const Rect* pcr = &cr;
+    if (pcr->area() != 30) return 15;
+    if (pcr->perimeter() != 22) return 16;
+
+    // T5: const struct as function parameter
+    Rect rr = {7, 8};
+    if (compute_area(&rr) != 56) return 17;
+
+    const Rect cr2 = rr;
+    if (compute_area(&cr2) != 56) return 18;
+
+    Point pp = {100, 200};
+    if (point_sum_const(&pp) != 300) return 19;
+
+    const Point cpp = pp;
+    if (point_sum_const(&cpp) != 300) return 20;
+
+    // T6: const return type from function
+    Point p = {100, 200};
+    const Point* pptr = get_const_point(&p);
+    if (pptr->x != 100) return 21;
+    if (pptr->sum() != 300) return 22;
+    p.x = 150;
+    if (pptr->x != 150) return 23;
+
+    Data d;
+    d.set(42);
+    const Data* dptr = get_const_data(&d);
+    if (dptr->get() != 42) return 24;
+    d.set(99);
+    if (dptr->get() != 99) return 25;
+
+    return 0;
+}

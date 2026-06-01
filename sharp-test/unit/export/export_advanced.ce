@@ -1,0 +1,171 @@
+// Advanced export scenarios: nested generics, extension methods on exported types,
+// method chaining, const methods, multiple type parameters
+
+// === T1: Export with nested generic types (Pair<T,U> with extern) ===
+class Pair<T, U> {
+    T first;
+    U second;
+}
+
+T Pair<T, U>.get_first(this) const { return this->first; }
+U Pair<T, U>.get_second(this) const { return this->second; }
+void Pair<T, U>.set_first(this, T v) { this->first = v; }
+void Pair<T, U>.set_second(this, U v) { this->second = v; }
+
+extern Pair<int, float>;
+extern Pair<long, double>;
+
+// === T2: Export with extension methods on generic types ===
+class Box<T> {
+    T value;
+}
+
+T Box<T>.get(this) const { return this->value; }
+void Box<T>.set(this, T v) { this->value = v; }
+Box<T>* Box<T>.chain_set(this, T v) { this->value = v; return this; }
+
+extern Box<int>;
+extern Box<float>;
+
+// === T3: Export with method chaining on exported types ===
+class Builder {
+    int x;
+    int y;
+};
+
+Builder* Builder.set_x(this, int v) { this->x = v; return this; }
+Builder* Builder.set_y(this, int v) { this->y = v; return this; }
+int Builder.sum(this) const { return this->x + this->y; }
+
+// === T4: Export with const methods ===
+class Rect {
+    int w;
+    int h;
+};
+
+int Rect.area(this) const { return this->w * this->h; }
+int Rect.perimeter(this) const { return 2 * (this->w + this->h); }
+int Rect.double_area(this) const { return this->area() * 2; }
+
+// === T5: Export with multiple type parameters ===
+class Triple<T, U, V> {
+    T first;
+    U second;
+    V third;
+}
+
+T Triple<T, U, V>.get_first(this) const { return this->first; }
+U Triple<T, U, V>.get_second(this) const { return this->second; }
+V Triple<T, U, V>.get_third(this) const { return this->third; }
+
+extern Triple<int, int, int>;
+extern Triple<int, float, long>;
+
+// === T6: Export generic function with multiple type params ===
+T first_of_three<T, U, V>(T a, U b, V c) {
+    return a;
+}
+
+extern first_of_three<int, float, long>;
+extern first_of_three<long, int, double>;
+
+// === T7: Nested generic with extern ===
+class Holder<T> {
+    T inner;
+}
+
+T Holder<T>.get(this) const { return this->inner; }
+void Holder<T>.set(this, T v) { this->inner = v; }
+
+extern Holder<Pair<int, float>>;
+
+// === T8: Generic extension method on exported type ===
+int Box<T>.increment_and_get(this) {
+    this->value = this->value + 1;
+    return this->value;
+}
+
+int main(void) {
+    // T1: nested generic types with extern
+    Pair<int, float> p1;
+    p1.set_first(42);
+    p1.set_second(3.14f);
+    if (p1.get_first() != 42) return 1;
+    if (p1.get_second() < 3.13f || p1.get_second() > 3.15f) return 2;
+
+    Pair<long, double> p2;
+    p2.set_first(100L);
+    p2.set_second(2.718);
+    if (p2.get_first() != 100L) return 3;
+    if (p2.get_second() < 2.717 || p2.get_second() > 2.719) return 4;
+
+    // T2: extension methods on exported generic types
+    Box<int> bi;
+    bi.set(10);
+    if (bi.get() != 10) return 5;
+
+    Box<float> bf;
+    bf.set(1.5f);
+    if (bf.get() < 1.49f || bf.get() > 1.51f) return 6;
+
+    // T3: method chaining on exported types
+    Builder b;
+    b.x = 0; b.y = 0;
+    b.set_x(3)->set_y(7);
+    if (b.sum() != 10) return 7;
+
+    Builder b2;
+    b2.x = 0; b2.y = 0;
+    int s = b2.set_x(20)->set_y(30)->sum();
+    if (s != 50) return 8;
+
+    // T4: const methods on exported types
+    Rect r;
+    r.w = 5; r.h = 6;
+    if (r.area() != 30) return 9;
+    if (r.perimeter() != 22) return 10;
+    if (r.double_area() != 60) return 11;
+
+    const Rect* cr = &r;
+    if (cr->area() != 30) return 12;
+    if (cr->perimeter() != 22) return 13;
+
+    // T5: multiple type parameters with extern
+    Triple<int, int, int> t1;
+    t1.first = 1; t1.second = 2; t1.third = 3;
+    if (t1.get_first() != 1) return 14;
+    if (t1.get_second() != 2) return 15;
+    if (t1.get_third() != 3) return 16;
+
+    Triple<int, float, long> t2;
+    t2.first = 10; t2.second = 2.5f; t2.third = 100L;
+    if (t2.get_first() != 10) return 17;
+    if (t2.get_second() < 2.49f || t2.get_second() > 2.51f) return 18;
+    if (t2.get_third() != 100L) return 19;
+
+    // T6: generic function with multiple type params
+    int r1 = first_of_three<int, float, long>(5, 3.0f, 100L);
+    if (r1 != 5) return 20;
+
+    long r2 = first_of_three<long, int, double>(10L, 20, 3.14);
+    if (r2 != 10L) return 21;
+
+    // T7: nested generic with extern
+    Holder<Pair<int, float>> hp;
+    Pair<int, float> inner;
+    inner.first = 99;
+    inner.second = 1.23f;
+    hp.set(inner);
+    Pair<int, float> got = hp.get();
+    if (got.first != 99) return 22;
+    if (got.second < 1.22f || got.second > 1.24f) return 23;
+
+    // T8: generic extension method on exported type
+    Box<int> bx;
+    bx.set(5);
+    int val = bx.increment_and_get();
+    if (val != 6) return 24;
+    if (bx.get() != 6) return 25;
+
+    return 0;
+}

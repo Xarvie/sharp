@@ -252,8 +252,10 @@ static char *convert_raw_strings_cpp(const char *src, size_t len, size_t *out_le
         if (src[r_pos] == '"') {
             out[w++] = src[r_pos++];
             while (r_pos < len && src[r_pos] != '"') {
-                if (src[r_pos] == '\\' && r_pos + 1 < len)
+                if (src[r_pos] == '\\' && r_pos + 1 < len) {
+                    if (w + 2 >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
                     out[w++] = src[r_pos++];
+                }
                 if (w >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
                 out[w++] = src[r_pos++];
             }
@@ -266,8 +268,10 @@ static char *convert_raw_strings_cpp(const char *src, size_t len, size_t *out_le
         if (src[r_pos] == '\'') {
             out[w++] = src[r_pos++];
             while (r_pos < len && src[r_pos] != '\'') {
-                if (src[r_pos] == '\\' && r_pos + 1 < len)
+                if (src[r_pos] == '\\' && r_pos + 1 < len) {
+                    if (w + 2 >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
                     out[w++] = src[r_pos++];
+                }
                 if (w >= cap) { cap = cap * 2; out = (char *)cpp_xrealloc(out, cap); }
                 out[w++] = src[r_pos++];
             }

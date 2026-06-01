@@ -113,7 +113,7 @@ static bool  ty_contains_param(const Type *t);
 static bool eval_const_int(const AstNode *expr, int64_t *val);
 
 static Scope *struct_scope_of(TyStore *ts, Type *t, Scope *file_scope);
-static const char *op_overload_name(SharpTokKind k);
+static char *op_overload_name(SharpTokKind k);
 static bool recv_object_is_const(Type *t);
 static Type *sema_field_access_expr(SS *ss, AstNode *expr);
 static Type *sema_method_call_expr(SS *ss, AstNode *expr);
@@ -369,12 +369,13 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
     {
         Type *lt_unconst = ty_unconst(ts, lt);
         bool lhs_is_struct_value = ty_is_struct_value(ts, lt);
-        const char *op_nm = lhs_is_struct_value ? op_overload_name(op) : NULL;
+        char *op_nm = lhs_is_struct_value ? op_overload_name(op) : NULL;
         if (op_nm) {
             Scope *ss_s = struct_scope_of(ts, lt, ss->scope);
             if (ss_s) {
                 Symbol *osym = scope_lookup_local(ss_s, op_nm);
                 if (osym && osym->decl && osym->decl->kind == AST_FUNC_DEF) {
+                    free(op_nm);
                     return sema_resolve_method_ret(ss, osym->decl, lt);
                 }
                 /* Struct method not found — fall through to free-function
@@ -441,6 +442,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
                     /* Matching overload found — return its return type. */
                     Type *ret = ty_from_ast(ts,
                         fsym->decl->u.func_def.ret_type, ss->scope, NULL);
+                    free(op_nm);
                     return ret ? ret : ty_int(ts);
                 }
 
@@ -481,6 +483,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
                                         es->decl->u.func_def.ret_type, mscope, NULL);
                                     if (ret && !ty_is_error(ret) && lt_unconst)
                                         ret = sema_subst_for_struct(ts, lt_unconst, ret);
+                                    free(op_nm);
                                     return ret ? ret : ty_int(ts);
                                 }
                             }
@@ -494,6 +497,7 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
                 FE_ERROR(ss->ctx->diags, expr->loc,
                     "operator '%s' not defined for struct type",
                     op_nm + 8); /* skip "operator" prefix */
+            free(op_nm);
             if (ss_s) return ty_error(ts);
         }
     }
@@ -589,6 +593,7 @@ static Type *sema_unary(SS *ss, AstNode *expr) {
          * Lookup order: (1) struct method operator-() (2) free operator-(T). */
         if (ty_is_struct_value(ts, ot)) {
             Type *ot_unc = ty_unconst(ts, ot);
+            if (!ot_unc) return ty_int(ts);
             const char *op_nm = (op == STOK_MINUS) ? "operator-" : "operator+";
             /* (1) struct scope */
             Scope *ss_s = struct_scope_of(ts, ot, ss->scope);
@@ -1584,6 +1589,8 @@ static void sema_stmt(SS *ss, AstNode *stmt) {
     case AST_CASE:
         if (stmt->u.case_.value) sema_expr(ss, stmt->u.case_.value);
         break;
+    case AST_DEFAULT:
+        break;
     case AST_SWITCH: {
         sema_expr(ss, stmt->u.switch_.cond);
         sema_stmt(ss, stmt->u.switch_.body);
@@ -1644,11 +1651,12 @@ static Scope *struct_scope_of(TyStore *ts, Type *t, Scope *file_scope) {
 }
 
 /* Map a binary operator token to its overload name, e.g. STOK_PLUS → "operator+". */
-static const char *op_overload_name(SharpTokKind k) {
+static char *op_overload_name(SharpTokKind k) {
     const char *sym = fe_op_sym(k);
     if (!sym) return NULL;
-    static char buf[64];
-    snprintf(buf, sizeof buf, "operator%s", sym);
+    size_t slen = strlen(sym);
+    char *buf = (char *)cpp_xmalloc(slen + 9);
+    snprintf(buf, slen + 9, "operator%s", sym);
     return buf;
 }
 
@@ -1969,6 +1977,7 @@ static void dc_stmt(DcState *ds, const AstNode *stmt) {
         break;
     case AST_DECL_STMT: case AST_EXPR_STMT: case AST_RETURN:
     case AST_BREAK:     case AST_CONTINUE:  case AST_LABEL:
+    case AST_CASE:      case AST_DEFAULT:
         break; /* no recursion needed / safe */
     default:
         break;

@@ -1,0 +1,263 @@
+/*
+ * Test: advanced preprocessor macro scenarios
+ *   T1: Multi-level macro expansion (macros calling macros)
+ *   T2: Macro with complex token pasting (##)
+ *   T3: Macro with stringification (#)
+ *   T4: Conditional compilation with #if expressions (arithmetic, defined())
+ *   T5: #pragma once guard behavior
+ *   T6: Variadic macros (__VA_ARGS__)
+ *   T7: Macro redefinition and #undef
+ */
+
+/* ================================================================
+ * T1: Multi-level macro expansion
+ * ================================================================ */
+#define ADD(a, b)       ((a) + (b))
+#define MUL(a, b)       ((a) * (b))
+#define SQUARE(x)       MUL(x, x)
+#define SUM_OF_SQUARES(a, b)  ADD(SQUARE(a), SQUARE(b))
+#define DOUBLE(x)       ADD(x, x)
+#define QUAD(x)         DOUBLE(DOUBLE(x))
+
+/* ================================================================
+ * T2: Macro with complex token pasting (##)
+ * ================================================================ */
+#define PASTE2(a, b)    a##b
+#define PASTE2_INDIRECT(a, b) PASTE2(a, b)
+#define PASTE3(a, b, c) PASTE2_INDIRECT(PASTE2(a, b), c)
+#define MAKE_VAR(prefix, num) PASTE2(prefix, num)
+#define MAKE_FUNC(ns, name) PASTE2(ns, _##name)
+
+/* ================================================================
+ * T3: Macro with stringification (#)
+ * ================================================================ */
+#define STR(x)          #x
+#define XSTR(x)         STR(x)
+#define STR_WITH_PARENS(x) #x
+
+#define VERSION_MAJOR 3
+#define VERSION_MINOR 1
+#define VERSION_STR   XSTR(VERSION_MAJOR) "." XSTR(VERSION_MINOR)
+
+/* ================================================================
+ * T4: Conditional compilation with #if expressions
+ * ================================================================ */
+#define LEVEL 2
+#define HAS_FEATURE_A 1
+#define HAS_FEATURE_B 0
+
+/* ================================================================
+ * T5: #pragma once guard behavior
+ * (tested via a separate header — see macro_advanced_once.h)
+ * ================================================================ */
+
+/* ================================================================
+ * T6: Variadic macros (__VA_ARGS__)
+ * ================================================================ */
+#define VA_IDENTITY(...) __VA_ARGS__
+#define VA_COUNT_HELPER(a, b, c, d, e, f, g, h, i, j, N, ...) N
+#define VA_COUNT(...) VA_COUNT_HELPER(__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
+#define VA_WRAP(fmt, ...) fmt __VA_ARGS__
+
+/* ================================================================
+ * T7: Macro redefinition and #undef
+ * ================================================================ */
+#define REDEF_VAL 10
+#undef REDEF_VAL
+#define REDEF_VAL 20
+
+int main(void) {
+    int result = 0;
+
+    /* ============================================================
+     * T1: Multi-level macro expansion
+     * ============================================================ */
+
+    /* SQUARE(5) => MUL(5, 5) => ((5) * (5)) => 25 */
+    if (SQUARE(5) != 25) return 1;
+
+    /* SUM_OF_SQUARES(3, 4) => ADD(SQUARE(3), SQUARE(4))
+     *                       => ADD(MUL(3,3), MUL(4,4))
+     *                       => ADD(9, 16) => ((9) + (16)) => 25 */
+    if (SUM_OF_SQUARES(3, 4) != 25) return 2;
+
+    /* DOUBLE(7) => ADD(7, 7) => ((7) + (7)) => 14 */
+    if (DOUBLE(7) != 14) return 3;
+
+    /* QUAD(3) => DOUBLE(DOUBLE(3))
+     *          => DOUBLE(ADD(3, 3))
+     *          => DOUBLE(6)
+     *          => ADD(6, 6) => 12 */
+    if (QUAD(3) != 12) return 4;
+
+    /* ============================================================
+     * T2: Complex token pasting
+     * ============================================================ */
+
+    /* PASTE2(var, 1) => var1 */
+    int PASTE2(var, 1) = 100;
+    if (PASTE2(var, 1) != 100) return 5;
+
+    /* PASTE2(var, 2) => var2 */
+    int PASTE2(var, 2) = 200;
+    if (PASTE2(var, 2) != 200) return 6;
+
+    /* MAKE_VAR(tmp, 3) => PASTE2(tmp, 3) => tmp3 */
+    int MAKE_VAR(tmp, 3) = 300;
+    if (MAKE_VAR(tmp, 3) != 300) return 7;
+
+    /* MAKE_FUNC(my, func) => PASTE2(my, _func) => my_func */
+    int MAKE_FUNC(my, func) = 42;
+    if (MAKE_FUNC(my, func) != 42) return 8;
+
+    /* PASTE3(a, b, c) => PASTE2(a, PASTE2(b, c))
+     *                   => PASTE2(a, bc) => abc */
+    int PASTE3(x, y, z) = 999;
+    if (PASTE3(x, y, z) != 999) return 9;
+
+    /* ============================================================
+     * T3: Stringification
+     * ============================================================ */
+
+    /* STR(hello) => "hello" */
+    const char *s1 = STR(hello);
+    if (s1[0] != 'h' || s1[4] != 'o' || s1[5] != '\0') return 10;
+
+    /* STR_WITH_PARENS(a+b) => "a+b" */
+    const char *s2 = STR_WITH_PARENS(a+b);
+    if (s2[0] != 'a' || s2[1] != '+' || s2[2] != 'b') return 11;
+
+    /* XSTR(VERSION_MAJOR) => STR(3) => "3" — indirect stringification */
+    const char *s3 = XSTR(VERSION_MAJOR);
+    if (s3[0] != '3' || s3[1] != '\0') return 12;
+
+    /* ============================================================
+     * T4: Conditional compilation with #if expressions
+     * ============================================================ */
+
+    result = 0;
+
+#if LEVEL == 1
+    result = result + 1;
+#elif LEVEL == 2
+    result = result + 10;
+#elif LEVEL == 3
+    result = result + 100;
+#else
+    result = result + 1000;
+#endif
+    /* LEVEL == 2, so result should be 10 */
+    if (result != 10) return 13;
+
+#if HAS_FEATURE_A
+    result = result + 1;
+#endif
+#if HAS_FEATURE_B
+    result = result + 100;
+#endif
+    /* HAS_FEATURE_A=1, HAS_FEATURE_B=0 => result += 1 => 11 */
+    if (result != 11) return 14;
+
+#if defined(HAS_FEATURE_A) && !HAS_FEATURE_B
+    result = result + 1;
+#endif
+    if (result != 12) return 15;
+
+#if (LEVEL + 1) * 2 == 6
+    result = result + 1;
+#endif
+    if (result != 13) return 16;
+
+#if !defined(UNDEFINED_MACRO_XYZ)
+    result = result + 1;
+#endif
+    if (result != 14) return 17;
+
+#if LEVEL > 0 && LEVEL < 5
+    result = result + 1;
+#endif
+    if (result != 15) return 18;
+
+    /* ============================================================
+     * T5: #pragma once guard behavior
+     * ============================================================ */
+#include "macro_advanced_once.h"
+#include "macro_advanced_once.h"
+#include "macro_advanced_once.h"
+
+    /* If #pragma once works, pragma_once_val is defined exactly once */
+    if (pragma_once_val != 77) return 19;
+
+    /* ============================================================
+     * T6: Variadic macros (__VA_ARGS__)
+     * ============================================================ */
+
+    /* VA_IDENTITY(1, 2, 3) => 1, 2, 3 */
+    {
+        int arr[3] = { VA_IDENTITY(10, 20, 30) };
+        if (arr[0] != 10) return 20;
+        if (arr[1] != 20) return 21;
+        if (arr[2] != 30) return 22;
+    }
+
+    /* VA_COUNT(1, 2, 3) should yield 3 */
+    if (VA_COUNT(1, 2, 3) != 3) return 23;
+
+    /* VA_COUNT(a) should yield 1 */
+    if (VA_COUNT(a) != 1) return 24;
+
+    /* VA_COUNT(a, b, c, d, e) should yield 5 */
+    if (VA_COUNT(a, b, c, d, e) != 5) return 25;
+
+    /* VA_WRAP with no variadic args */
+    {
+        int vw = VA_WRAP(42);
+        if (vw != 42) return 26;
+    }
+
+    /* VA_WRAP with variadic args */
+    {
+        int a = 1, b = 2;
+        int vw = VA_WRAP(a +, b);
+        if (vw != 3) return 27;
+    }
+
+    /* ============================================================
+     * T7: Macro redefinition and #undef
+     * ============================================================ */
+
+    /* REDEF_VAL was undef'd and redefined to 20 */
+    if (REDEF_VAL != 20) return 28;
+
+    /* #undef then use — macro should be gone */
+#define TEMP_MACRO 555
+    if (TEMP_MACRO != 555) return 29;
+#undef TEMP_MACRO
+    /* TEMP_MACRO is now undefined; we cannot use it directly.
+     * Instead, test that #ifdef correctly reports it as absent. */
+    {
+        int temp_check = 0;
+#ifdef TEMP_MACRO
+        temp_check = 1;
+#else
+        temp_check = 2;
+#endif
+        if (temp_check != 2) return 30;
+    }
+
+    /* Redefine with same value — should be fine */
+#define DUP_MACRO 100
+#define DUP_MACRO 100
+    if (DUP_MACRO != 100) return 31;
+
+    /* Undef an undefined macro — should be harmless */
+#undef NEVER_DEFINED_MACRO
+
+    /* Redefine with different value after undef */
+#define CHANGING 1
+#undef CHANGING
+#define CHANGING 2
+    if (CHANGING != 2) return 32;
+
+    return 0;
+}

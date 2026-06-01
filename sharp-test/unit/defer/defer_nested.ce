@@ -1,0 +1,397 @@
+// defer: nested defer scenarios — LIFO, if-else, loops, nested blocks, resource, counter
+
+int log_buf[64];
+int logn = 0;
+void mark(int v) { if (logn < 64) { log_buf[logn] = v; logn = logn + 1; } }
+
+/* === T1: Multiple defer statements in sequence (LIFO order) === */
+int test_lifo_sequence() {
+    logn = 0;
+    {
+        defer mark(1);
+        defer mark(2);
+        defer mark(3);
+        defer mark(4);
+        defer mark(5);
+        mark(0);
+    }
+    if (logn != 6) return 1;
+    if (log_buf[0] != 0) return 2;
+    if (log_buf[1] != 5) return 3;
+    if (log_buf[2] != 4) return 4;
+    if (log_buf[3] != 3) return 5;
+    if (log_buf[4] != 2) return 6;
+    if (log_buf[5] != 1) return 7;
+    return 0;
+}
+
+/* === T2: Defer inside if-else branches === */
+int test_defer_if_else(int branch) {
+    logn = 0;
+    if (branch == 1) {
+        defer mark(100);
+        mark(10);
+    } else if (branch == 2) {
+        defer mark(200);
+        mark(20);
+    } else {
+        defer mark(300);
+        mark(30);
+    }
+    mark(99);
+    return 0;
+}
+
+int test_nested_if_defer() {
+    logn = 0;
+    int x = 5;
+    if (x > 0) {
+        defer mark(1);
+        if (x > 10) {
+            defer mark(2);
+            mark(3);
+        } else {
+            defer mark(4);
+            mark(5);
+        }
+        mark(6);
+    }
+    mark(7);
+    if (logn != 5) return 1;
+    if (log_buf[0] != 5) return 2;
+    if (log_buf[1] != 4) return 3;
+    if (log_buf[2] != 6) return 4;
+    if (log_buf[3] != 1) return 5;
+    if (log_buf[4] != 7) return 6;
+    return 0;
+}
+
+/* === T3: Defer inside for/while loops === */
+int test_defer_for_loop() {
+    logn = 0;
+    for (int i = 0; i < 3; i = i + 1) {
+        defer mark(i + 10);
+        mark(i);
+    }
+    mark(99);
+    if (logn != 7) return 1;
+    if (log_buf[0] != 0) return 2;
+    if (log_buf[1] != 10) return 3;
+    if (log_buf[2] != 1) return 4;
+    if (log_buf[3] != 11) return 5;
+    if (log_buf[4] != 2) return 6;
+    if (log_buf[5] != 12) return 7;
+    if (log_buf[6] != 99) return 8;
+    return 0;
+}
+
+int test_defer_while_loop() {
+    logn = 0;
+    int i = 0;
+    while (i < 3) {
+        defer mark(i + 20);
+        mark(i);
+        i = i + 1;
+    }
+    mark(99);
+    if (logn != 7) return 1;
+    if (log_buf[0] != 0) return 2;
+    if (log_buf[1] != 21) return 3;
+    if (log_buf[2] != 1) return 4;
+    if (log_buf[3] != 22) return 5;
+    if (log_buf[4] != 2) return 6;
+    if (log_buf[5] != 23) return 7;
+    if (log_buf[6] != 99) return 8;
+    return 0;
+}
+
+int test_defer_nested_loop() {
+    logn = 0;
+    for (int a = 0; a < 2; a = a + 1) {
+        defer mark(a + 30);
+        for (int b = 0; b < 2; b = b + 1) {
+            defer mark(b + 40);
+            mark(a * 10 + b);
+        }
+    }
+    mark(99);
+    if (logn != 11) return 1;
+    if (log_buf[0] != 0) return 2;
+    if (log_buf[1] != 40) return 3;
+    if (log_buf[2] != 1) return 4;
+    if (log_buf[3] != 41) return 5;
+    if (log_buf[4] != 30) return 6;
+    if (log_buf[5] != 10) return 7;
+    if (log_buf[6] != 40) return 8;
+    if (log_buf[7] != 11) return 9;
+    if (log_buf[8] != 41) return 10;
+    if (log_buf[9] != 31) return 11;
+    if (log_buf[10] != 99) return 12;
+    return 0;
+}
+
+/* === T4: Defer inside nested blocks === */
+int test_deep_nested_blocks() {
+    logn = 0;
+    mark(1);
+    {
+        defer mark(10);
+        mark(2);
+        {
+            defer mark(20);
+            mark(3);
+            {
+                defer mark(30);
+                mark(4);
+            }
+            mark(5);
+        }
+        mark(6);
+    }
+    mark(7);
+    if (logn != 10) return 1;
+    if (log_buf[0] != 1) return 2;
+    if (log_buf[1] != 2) return 3;
+    if (log_buf[2] != 3) return 4;
+    if (log_buf[3] != 4) return 5;
+    if (log_buf[4] != 30) return 6;
+    if (log_buf[5] != 5) return 7;
+    if (log_buf[6] != 20) return 8;
+    if (log_buf[7] != 6) return 9;
+    if (log_buf[8] != 10) return 10;
+    if (log_buf[9] != 7) return 11;
+    return 0;
+}
+
+int test_nested_block_with_early_exit() {
+    logn = 0;
+    {
+        defer mark(100);
+        mark(1);
+        {
+            defer mark(200);
+            mark(2);
+            if (1) {
+                defer mark(300);
+                mark(3);
+            }
+            mark(4);
+        }
+        mark(5);
+    }
+    mark(6);
+    if (logn != 9) return 1;
+    if (log_buf[0] != 1) return 2;
+    if (log_buf[1] != 2) return 3;
+    if (log_buf[2] != 3) return 4;
+    if (log_buf[3] != 300) return 5;
+    if (log_buf[4] != 4) return 6;
+    if (log_buf[5] != 200) return 7;
+    if (log_buf[6] != 5) return 8;
+    if (log_buf[7] != 100) return 9;
+    if (log_buf[8] != 6) return 10;
+    return 0;
+}
+
+/* === T5: Defer with resource management pattern (open/close) === */
+class Resource {
+    int handle;
+    int closed;
+}
+
+Resource g_res;
+
+void res_open(int h) {
+    g_res.handle = h;
+    g_res.closed = 0;
+}
+
+void res_close() {
+    g_res.closed = 1;
+}
+
+int test_resource_pattern() {
+    logn = 0;
+    res_open(42);
+    {
+        defer { res_close(); mark(g_res.handle); }
+        mark(g_res.handle);
+        if (g_res.closed != 0) return 1;
+    }
+    if (g_res.closed != 1) return 2;
+    if (logn != 2) return 3;
+    if (log_buf[0] != 42) return 4;
+    if (log_buf[1] != 42) return 5;
+    return 0;
+}
+
+int test_multi_resource_pattern() {
+    logn = 0;
+    int handles[3];
+    int states[3];
+    handles[0] = 0;
+    handles[1] = 0;
+    handles[2] = 0;
+    states[0] = 0;
+    states[1] = 0;
+    states[2] = 0;
+    {
+        handles[0] = 1;
+        defer { states[0] = 1; mark(10); }
+        {
+            handles[1] = 2;
+            defer { states[1] = 1; mark(20); }
+            {
+                handles[2] = 3;
+                defer { states[2] = 1; mark(30); }
+                mark(0);
+            }
+            if (states[2] != 1) return 1;
+            if (states[1] != 0) return 2;
+        }
+        if (states[1] != 1) return 3;
+        if (states[0] != 0) return 4;
+    }
+    if (states[0] != 1) return 5;
+    if (logn != 4) return 6;
+    if (log_buf[0] != 0) return 7;
+    if (log_buf[1] != 30) return 8;
+    if (log_buf[2] != 20) return 9;
+    if (log_buf[3] != 10) return 10;
+    return 0;
+}
+
+/* === T6: Defer with counter tracking execution order === */
+int exec_counter;
+
+int next_counter() {
+    exec_counter = exec_counter + 1;
+    return exec_counter;
+}
+
+int test_counter_lifo() {
+    int order[6];
+    exec_counter = 0;
+    {
+        defer { order[0] = next_counter(); }
+        defer { order[1] = next_counter(); }
+        defer { order[2] = next_counter(); }
+        defer { order[3] = next_counter(); }
+        defer { order[4] = next_counter(); }
+        order[5] = next_counter();
+    }
+    if (order[5] != 1) return 1;
+    if (order[4] != 2) return 2;
+    if (order[3] != 3) return 3;
+    if (order[2] != 4) return 4;
+    if (order[1] != 5) return 5;
+    if (order[0] != 6) return 6;
+    return 0;
+}
+
+int test_counter_nested() {
+    int order[8];
+    exec_counter = 0;
+    {
+        defer { order[0] = next_counter(); }
+        order[1] = next_counter();
+        {
+            defer { order[2] = next_counter(); }
+            order[3] = next_counter();
+            {
+                defer { order[4] = next_counter(); }
+                order[5] = next_counter();
+            }
+            order[6] = next_counter();
+        }
+        order[7] = next_counter();
+    }
+    if (order[1] != 1) return 1;
+    if (order[3] != 2) return 2;
+    if (order[5] != 3) return 3;
+    if (order[4] != 4) return 4;
+    if (order[6] != 5) return 5;
+    if (order[2] != 6) return 6;
+    if (order[7] != 7) return 7;
+    if (order[0] != 8) return 8;
+    return 0;
+}
+
+int test_counter_loop() {
+    int order[7];
+    exec_counter = 0;
+    for (int i = 0; i < 3; i = i + 1) {
+        defer { order[i * 2] = next_counter(); }
+        order[i * 2 + 1] = next_counter();
+    }
+    if (order[1] != 1) return 1;
+    if (order[0] != 2) return 2;
+    if (order[3] != 3) return 3;
+    if (order[2] != 4) return 4;
+    if (order[5] != 5) return 5;
+    if (order[4] != 6) return 6;
+    return 0;
+}
+
+int main(void) {
+    int r;
+
+    /* T1: LIFO sequence */
+    r = test_lifo_sequence();
+    if (r != 0) return r;
+
+    /* T2: if-else branches */
+    logn = 0;
+    test_defer_if_else(1);
+    if (logn != 3) return 10;
+    if (log_buf[0] != 10 || log_buf[1] != 100 || log_buf[2] != 99) return 11;
+
+    logn = 0;
+    test_defer_if_else(2);
+    if (logn != 3) return 12;
+    if (log_buf[0] != 20 || log_buf[1] != 200 || log_buf[2] != 99) return 13;
+
+    logn = 0;
+    test_defer_if_else(3);
+    if (logn != 3) return 14;
+    if (log_buf[0] != 30 || log_buf[1] != 300 || log_buf[2] != 99) return 15;
+
+    r = test_nested_if_defer();
+    if (r != 0) return 100 + r;
+
+    /* T3: loops */
+    r = test_defer_for_loop();
+    if (r != 0) return 200 + r;
+
+    r = test_defer_while_loop();
+    if (r != 0) return 210 + r;
+
+    r = test_defer_nested_loop();
+    if (r != 0) return 220 + r;
+
+    /* T4: nested blocks */
+    r = test_deep_nested_blocks();
+    if (r != 0) return 300 + r;
+
+    r = test_nested_block_with_early_exit();
+    if (r != 0) return 310 + r;
+
+    /* T5: resource management */
+    r = test_resource_pattern();
+    if (r != 0) return 400 + r;
+
+    r = test_multi_resource_pattern();
+    if (r != 0) return 410 + r;
+
+    /* T6: counter tracking */
+    r = test_counter_lifo();
+    if (r != 0) return 500 + r;
+
+    r = test_counter_nested();
+    if (r != 0) return 510 + r;
+
+    r = test_counter_loop();
+    if (r != 0) return 520 + r;
+
+    return 0;
+}

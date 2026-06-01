@@ -399,6 +399,10 @@ static void install_builtins(CppState *st) {
         time_t epoch = 0;
         tm_now = gmtime(&epoch);
     }
+    if (!tm_now) {
+        static const struct tm fallback = {0,0,0,1,0,70,4,0,0};
+        tm_now = (struct tm *)&fallback;
+    }
     char date_buf[32], time_buf[32];
     if (tm_now) {
         strftime(date_buf, sizeof date_buf, "\"%b %e %Y\"", tm_now);

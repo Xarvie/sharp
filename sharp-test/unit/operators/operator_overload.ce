@@ -1,0 +1,145 @@
+// 运算符重载综合测试: 二元运算符、比较运算符、一元运算符、跨类型运算符
+
+#include <stdbool.h>
+
+class Vec2 {
+    int x;
+    int y;
+}
+
+Vec2 Vec2.operator+(this, Vec2 other) const {
+    Vec2 r;
+    r.x = this->x + other.x;
+    r.y = this->y + other.y;
+    return r;
+}
+
+Vec2 Vec2.operator-(this, Vec2 other) const {
+    Vec2 r;
+    r.x = this->x - other.x;
+    r.y = this->y - other.y;
+    return r;
+}
+
+Vec2 Vec2.operator*(this, int s) const {
+    Vec2 r;
+    r.x = this->x * s;
+    r.y = this->y * s;
+    return r;
+}
+
+bool Vec2.operator==(this, Vec2 other) const {
+    return this->x == other.x && this->y == other.y;
+}
+
+bool Vec2.operator!=(this, Vec2 other) const {
+    return this->x != other.x || this->y != other.y;
+}
+
+class Vec2f {
+    float x;
+    float y;
+}
+
+Vec2f Vec2f.operator+(this, Vec2f other) const {
+    Vec2f r;
+    r.x = this->x + other.x;
+    r.y = this->y + other.y;
+    return r;
+}
+
+Vec2f Vec2f.operator-(this, Vec2f other) const {
+    Vec2f r;
+    r.x = this->x - other.x;
+    r.y = this->y - other.y;
+    return r;
+}
+
+Vec2f Vec2f.operator*(this, float s) const {
+    Vec2f r;
+    r.x = this->x * s;
+    r.y = this->y * s;
+    return r;
+}
+
+bool Vec2f.operator==(this, Vec2f other) const {
+    return this->x == other.x && this->y == other.y;
+}
+
+bool Vec2f.operator!=(this, Vec2f other) const {
+    return this->x != other.x || this->y != other.y;
+}
+
+int main(void) {
+    // T1: Vec2 operator+ (Vec2 + Vec2)
+    Vec2 a; a.x = 1; a.y = 2;
+    Vec2 b; b.x = 3; b.y = 4;
+    Vec2 s = a + b;
+    if (s.x != 4)  return 1;
+    if (s.y != 6)  return 2;
+
+    // T2: Vec2 operator- (Vec2 - Vec2)
+    Vec2 d = b - a;
+    if (d.x != 2)  return 3;
+    if (d.y != 2)  return 4;
+
+    // T3: Vec2 operator* with scalar (Vec2 * int)
+    Vec2 m = a * 3;
+    if (m.x != 3)  return 5;
+    if (m.y != 6)  return 6;
+
+    // T4: Vec2 operator== (Vec2 == Vec2)
+    Vec2 c; c.x = 1; c.y = 2;
+    if (!(a == c)) return 7;
+    if (a == b)    return 8;
+
+    // T5: Vec2 operator!= (Vec2 != Vec2)
+    if (a != c)       return 9;
+    if (!(a != b))    return 10;
+
+    // T7: Vec2f operator* with float (Vec2f * float)
+    Vec2f fa; fa.x = 2.0f; fa.y = 3.0f;
+    Vec2f fm = fa * 2.5f;
+    if (fm.x != 5.0f)  return 13;
+    if (fm.y != 7.5f)  return 14;
+
+    // T8: Vec2f operator+ and operator-
+    Vec2f fb; fb.x = 1.0f; fb.y = 1.0f;
+    Vec2f fs = fa + fb;
+    if (fs.x != 3.0f)  return 15;
+    if (fs.y != 4.0f)  return 16;
+    Vec2f fd = fa - fb;
+    if (fd.x != 1.0f)  return 17;
+    if (fd.y != 2.0f)  return 18;
+
+    // T9: Vec2f operator== and operator!=
+    Vec2f fc; fc.x = 2.0f; fc.y = 3.0f;
+    if (!(fa == fc)) return 19;
+    if (fa == fb)    return 20;
+    if (fa != fc)       return 21;
+    if (!(fa != fb))    return 22;
+
+    // T11: chained binary operators
+    Vec2 v1; v1.x = 1; v1.y = 0;
+    Vec2 v2; v2.x = 0; v2.y = 1;
+    Vec2 v3; v3.x = 1; v3.y = 1;
+    Vec2 chain = v1 + v2 + v3;
+    if (chain.x != 2) return 25;
+    if (chain.y != 2) return 26;
+
+    // T13: scalar multiply then add
+    Vec2 sa; sa.x = 2; sa.y = 3;
+    Vec2 sb; sb.x = 1; sb.y = 1;
+    Vec2 result = sa * 2 + sb;
+    if (result.x != 5) return 29;
+    if (result.y != 7) return 30;
+
+    // T15: Vec2f chained with float scalar
+    Vec2f f1; f1.x = 1.0f; f1.y = 0.0f;
+    Vec2f f2; f2.x = 0.0f; f2.y = 1.0f;
+    Vec2f fchain = f1 * 3.0f + f2 * 2.0f;
+    if (fchain.x != 3.0f) return 33;
+    if (fchain.y != 2.0f) return 34;
+
+    return 0;
+}
