@@ -4840,8 +4840,9 @@ static void cg_emit_spec_method_impl(CgCtx *ctx, const AstNode *fn,
     cg_method_name(ctx, msname, fn->u.func_def.name);
     cg_puts(ctx, "(");
     bool first = true;
-    /* Mirror cg_func: omit 'this' for associated functions (body never uses this). */
-    bool spec_is_assoc = !cg_fn_uses_this(fn);
+    /* Mirror cg_func: omit 'this' for associated functions (body never uses this).
+     * Extension methods with has_receiver already have 'this' as a parameter. */
+    bool spec_is_assoc = !cg_fn_uses_this(fn) || fn->u.func_def.has_receiver;
     if (!spec_is_assoc) {
         if (fn->u.func_def.is_const_method) {
             cg_puts(ctx, "const "); cg_emit_struct_type(ctx, msname); cg_puts(ctx, " *this");

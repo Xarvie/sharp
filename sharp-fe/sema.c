@@ -442,6 +442,8 @@ static Type *sema_binop(SS *ss, AstNode *expr) {
                     /* Matching overload found — return its return type. */
                     Type *ret = ty_from_ast(ts,
                         fsym->decl->u.func_def.ret_type, ss->scope, NULL);
+                    if (ret && !ty_is_error(ret) && lt_unconst)
+                        ret = sema_subst_for_struct(ts, lt_unconst, ret);
                     free(op_nm);
                     return ret ? ret : ty_int(ts);
                 }

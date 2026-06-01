@@ -4483,27 +4483,23 @@ static AstNode *parse_postfix(PS *ps, AstNode *lhs) {
                 char buf[512];
                 int blen = snprintf(buf, sizeof buf, "%s(", lhs->u.ident.name);
                 ps_advance(ps);
-                blen += collect_balanced_call_body(ps, buf + blen, (int)sizeof buf - blen);
+                int room = (int)sizeof buf - blen;
+                if (room > 0) blen += collect_balanced_call_body(ps, buf + blen, room);
+                if (blen >= (int)sizeof buf) blen = (int)sizeof buf - 1;
                 ast_node_free(lhs);
                 lhs = ast_node_new(AST_IDENT, t.loc);
                 lhs->u.ident.name = cpp_xstrndup(buf, blen);
                 continue;
             }
-            /* `va_arg(ap, TYPE)` and `__builtin_va_arg(ap, TYPE)` —
-             * the type-name second argument cannot be parsed as an
-             * expression.  We collect all tokens from '(' to the
-             * matching ')' and store the full call text as an
-             * AST_IDENT so cg can emit it verbatim.  This preserves
-             * the actual va_arg semantics at C-compile time (the C
-             * compiler evaluates it), which is critical for functions
-             * like lua_gc that dispatch on va_arg results. */
             if (lhs->kind == AST_IDENT &&
                 (strcmp(lhs->u.ident.name, "va_arg") == 0 ||
                  strcmp(lhs->u.ident.name, "__builtin_va_arg") == 0)) {
                 char buf2[512];
                 int blen2 = snprintf(buf2, sizeof buf2, "__builtin_va_arg(");
                 ps_advance(ps);
-                blen2 += collect_balanced_call_body(ps, buf2 + blen2, (int)sizeof buf2 - blen2);
+                int room2 = (int)sizeof buf2 - blen2;
+                if (room2 > 0) blen2 += collect_balanced_call_body(ps, buf2 + blen2, room2);
+                if (blen2 >= (int)sizeof buf2) blen2 = (int)sizeof buf2 - 1;
                 ast_node_free(lhs);
                 lhs = ast_node_new(AST_IDENT, t.loc);
                 lhs->u.ident.name = cpp_xstrndup(buf2, blen2);
