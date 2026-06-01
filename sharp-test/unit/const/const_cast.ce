@@ -1,0 +1,37 @@
+// const: const 与类型转换测试
+
+const int* get_const(int *p) { return p; }
+
+int main() {
+    // T1: const 指针赋值兼容性
+    int val = 5;
+    int *mutable_p = &val;
+    const int *const_p = mutable_p;
+    if (*const_p != 5) return 1;
+
+    // T2: void* 与 const
+    int cval = 99;
+    const void *cvp = &cval;
+    const int *cip = (const int*)cvp;
+    if (*cip != 99) return 2;
+
+    // T3: const 在条件表达式中
+    int a = 1;
+    const int *p = a ? &a : (const int*)0;
+    if (!p) return 3;
+    if (*p != 1) return 4;
+
+    // T4: const 指针算术
+    int arr[3] = {10, 20, 30};
+    const int *cp = arr;
+    if (*cp != 10) return 5;
+    cp = cp + 1;
+    if (*cp != 20) return 6;
+
+    // T5: const 返回值
+    int x = 42;
+    const int *rp = get_const(&x);
+    if (*rp != 42) return 7;
+
+    return 0;
+}

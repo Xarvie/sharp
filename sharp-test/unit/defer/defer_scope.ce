@@ -1,0 +1,74 @@
+// defer: 不同作用域中的 defer 测试
+int log_buf[32];
+int logn = 0;
+void mark(int v) { if (logn < 32) { log_buf[logn] = v; logn = logn + 1; } }
+
+int test_scope_defer() {
+    mark(1);
+    {
+        defer mark(10);
+        mark(2);
+        {
+            defer mark(20);
+            mark(3);
+        }
+        mark(4);
+    }
+    mark(5);
+    return 0;
+}
+
+int test_if_defer() {
+    int x = 5;
+    if (x > 0) {
+        defer mark(30);
+        mark(6);
+    }
+    mark(7);
+    return 0;
+}
+
+int test_for_defer() {
+    for (int i = 0; i < 3; i = i + 1) {
+        defer mark(40 + i);
+        mark(8);
+    }
+    mark(9);
+    return 0;
+}
+
+int main() {
+    // T1: 嵌套作用域 defer (LIFO)
+    logn = 0;
+    test_scope_defer();
+    if (logn != 7) return 1;
+    if (log_buf[0] != 1) return 2;
+    if (log_buf[1] != 2) return 3;
+    if (log_buf[2] != 3) return 4;
+    if (log_buf[3] != 20) return 5;
+    if (log_buf[4] != 4) return 6;
+    if (log_buf[5] != 10) return 7;
+    if (log_buf[6] != 5) return 8;
+
+    // T2: if 作用域 defer
+    logn = 0;
+    test_if_defer();
+    if (logn != 3) return 9;
+    if (log_buf[0] != 6) return 10;
+    if (log_buf[1] != 30) return 11;
+    if (log_buf[2] != 7) return 12;
+
+    // T3: for 循环 defer
+    logn = 0;
+    test_for_defer();
+    if (logn != 7) return 13;
+    if (log_buf[0] != 8) return 14;
+    if (log_buf[1] != 40) return 15;
+    if (log_buf[2] != 8) return 16;
+    if (log_buf[3] != 41) return 17;
+    if (log_buf[4] != 8) return 18;
+    if (log_buf[5] != 42) return 19;
+    if (log_buf[6] != 9) return 20;
+
+    return 0;
+}

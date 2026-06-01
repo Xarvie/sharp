@@ -1,0 +1,42 @@
+// 扩展方法: const 扩展方法测试
+class Vec2 {
+    int x;
+    int y;
+};
+
+int Vec2.length_sq(this) const { return this->x * this->x + this->y * this->y; }
+void Vec2.scale(this, int s) { this->x = this->x * s; this->y = this->y * s; }
+
+class Rect {
+    int w;
+    int h;
+};
+
+int Rect.area(this) const { return this->w * this->h; }
+int Rect.perimeter(this) const { return 2 * (this->w + this->h); }
+
+int main() {
+    // T1: const 方法读取
+    Vec2 v; v.x = 3; v.y = 4;
+    if (v.length_sq() != 25) return 1;
+
+    // T2: 非const 方法修改
+    v.scale(2);
+    if (v.x != 6) return 2;
+    if (v.y != 8) return 3;
+    if (v.length_sq() != 100) return 4;
+
+    // T3: const 方法链
+    Rect r; r.w = 5; r.h = 3;
+    int a = r.area();
+    int p = r.perimeter();
+    if (a != 15) return 5;
+    if (p != 16) return 6;
+
+    // T4: const 指针调用 const 方法
+    const Rect *pr = &r;
+    if (pr->area() != 15) return 7;
+    if (pr->perimeter() != 16) return 8;
+
+    return 0;
+}

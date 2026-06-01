@@ -1,0 +1,57 @@
+// 运算符: 比较运算符重载测试
+#include <stdbool.h>
+
+class Score {
+    int pts;
+};
+
+bool Score.operator==(this, Score other) const {
+    return this->pts == other.pts;
+}
+bool Score.operator!=(this, Score other) const {
+    return this->pts != other.pts;
+}
+bool Score.operator<(this, Score other) const {
+    return this->pts < other.pts;
+}
+bool Score.operator>(this, Score other) const {
+    return this->pts > other.pts;
+}
+bool Score.operator<=(this, Score other) const {
+    return this->pts <= other.pts;
+}
+bool Score.operator>=(this, Score other) const {
+    return this->pts >= other.pts;
+}
+
+int main() {
+    // T1: == 和 !=
+    Score a; a.pts = 10;
+    Score b; b.pts = 10;
+    Score c; c.pts = 20;
+    if (!(a == b)) return 1;
+    if (a != b) return 2;
+    if (a == c) return 3;
+    if (!(a != c)) return 4;
+
+    // T2: < 和 >
+    if (a < b) return 5;
+    if (a > b) return 6;
+    if (!(a < c)) return 7;
+    if (a > c) return 8;
+
+    // T3: <= 和 >=
+    if (!(a <= b)) return 9;
+    if (!(a >= b)) return 10;
+    if (!(a <= c)) return 11;
+    if (a >= c) return 12;
+
+    // T4: 比较链
+    Score lo; lo.pts = 5;
+    Score mid; mid.pts = 10;
+    Score hi; hi.pts = 15;
+    if (!(lo < mid && mid < hi)) return 13;
+    if (!(lo < mid && mid <= hi)) return 14;
+
+    return 0;
+}

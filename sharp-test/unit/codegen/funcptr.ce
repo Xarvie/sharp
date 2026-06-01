@@ -1,0 +1,43 @@
+// C代码生成: 函数指针测试
+int add(int a, int b) { return a + b; }
+int sub(int a, int b) { return a - b; }
+int mul(int a, int b) { return a * b; }
+
+int apply(int (*fn)(int, int), int a, int b) {
+    return fn(a, b);
+}
+
+// Sharp 不支持嵌套函数，get_op 移到顶层
+int (*get_op(int idx))(int, int) {
+    if (idx == 0) return add;
+    if (idx == 1) return sub;
+    return mul;
+}
+
+int main() {
+    // T1: 函数指针基本调用
+    int (*op)(int, int) = add;
+    if (op(3, 4) != 7) return 1;
+
+    // T2: 函数指针切换
+    op = sub;
+    if (op(10, 3) != 7) return 2;
+    op = mul;
+    if (op(3, 4) != 12) return 3;
+
+    // T3: 函数指针作为参数
+    if (apply(add, 5, 3) != 8) return 4;
+    if (apply(mul, 5, 3) != 15) return 5;
+
+    // T4: 函数指针数组
+    int (*ops[3])(int, int) = {add, sub, mul};
+    if (ops[0](10, 5) != 15) return 6;
+    if (ops[1](10, 5) != 5) return 7;
+    if (ops[2](10, 5) != 50) return 8;
+
+    // T5: 函数指针返回函数指针
+    if (get_op(0)(7, 3) != 10) return 9;
+    if (get_op(1)(7, 3) != 4) return 10;
+
+    return 0;
+}

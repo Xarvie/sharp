@@ -1,0 +1,55 @@
+// defer: 条件分支中的 defer 测试
+int log_buf[32];
+int logn = 0;
+void mark(int v) { if (logn < 32) { log_buf[logn] = v; logn = logn + 1; } }
+
+int test_branch_defer(int branch) {
+    if (branch == 1) {
+        defer mark(100);
+        mark(1);
+        return 1;
+    } else {
+        defer mark(200);
+        mark(2);
+        return 2;
+    }
+}
+
+int test_early_return(int x) {
+    defer mark(50);
+    if (x < 0) return -1;
+    if (x > 100) return 101;
+    mark(3);
+    return x;
+}
+
+int main() {
+    // T1: if-else 分支中的 defer
+    logn = 0;
+    int r1 = test_branch_defer(1);
+    if (r1 != 1) return 1;
+    if (log_buf[0] != 1) return 2;
+    if (log_buf[1] != 100) return 3;
+
+    logn = 0;
+    int r2 = test_branch_defer(2);
+    if (r2 != 2) return 4;
+    if (log_buf[0] != 2) return 5;
+    if (log_buf[1] != 200) return 6;
+
+    // T2: 早期返回 + defer
+    logn = 0;
+    int r3 = test_early_return(-5);
+    if (r3 != -1) return 7;
+    if (logn != 1) return 8;
+    if (log_buf[0] != 50) return 9;
+
+    logn = 0;
+    int r4 = test_early_return(42);
+    if (r4 != 42) return 10;
+    if (logn != 2) return 11;
+    if (log_buf[0] != 3) return 12;
+    if (log_buf[1] != 50) return 13;
+
+    return 0;
+}

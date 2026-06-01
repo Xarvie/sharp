@@ -1,0 +1,39 @@
+// 运算符: 赋值相关运算符测试
+class Counter {
+    int n;
+};
+
+Counter Counter.operator+(this, int x) const {
+    Counter r; r.n = this->n + x; return r;
+}
+
+Counter Counter.operator-(this, int x) const {
+    Counter r; r.n = this->n - x; return r;
+}
+
+int main() {
+    // T1: 简单赋值
+    Counter c; c.n = 0;
+    Counter d; d.n = 5;
+    c = d;
+    if (c.n != 5) return 1;
+
+    // T2: 运算符 + 赋值
+    Counter e; e.n = 10;
+    Counter f = e + 5;
+    if (f.n != 15) return 2;
+    if (e.n != 10) return 3;
+
+    // T3: 运算符 - 赋值
+    Counter g; g.n = 20;
+    Counter h = g - 8;
+    if (h.n != 12) return 4;
+
+    // T4: 链式运算
+    Counter base; base.n = 100;
+    Counter r1 = base + 10;
+    Counter r2 = r1 - 5;
+    if (r2.n != 105) return 5;
+
+    return 0;
+}

@@ -1040,19 +1040,27 @@ static char *write_tmp_file(const char *prefix, const char *suffix,
  * On error, an appropriate message is printed to stderr.              */
 static char *compile_input_to_obj(const char *zig_exe, const char *target,
                                    const char *sysroot, StrVec *link_other,
+                                   StrVec *user_inc, StrVec *sys_inc,
                                    InputFile *inf) {
     const char *obj_path = make_tmp_name(inf->path, ".o");
     if (!obj_path) return NULL;
 
     if (inf->tmp_is_zig_direct) {
         StrVec args = zig_cc_prefix(zig_exe, target, sysroot, link_other);
+        for (size_t i = 0; i < user_inc->len; i++) {
+            sv_push(&args, "-I");
+            sv_push(&args, user_inc->data[i]);
+        }
+        for (size_t i = 0; i < sys_inc->len; i++) {
+            sv_push(&args, "-isystem");
+            sv_push(&args, sys_inc->data[i]);
+        }
         sv_push(&args, "-c");
         sv_push(&args, inf->tmp_c);
         sv_push(&args, "-o");
         sv_push(&args, obj_path);
         if (zig_cc_run(&args) != 0) {
             fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
-            free((void *)obj_path);
             return NULL;
         }
         return (char *)obj_path;
@@ -1060,7 +1068,7 @@ static char *compile_input_to_obj(const char *zig_exe, const char *target,
 
     if (inf->tmp_is_asm) {
         char *tmp_s = write_tmp_file(inf->path, ".s", inf->tmp_c);
-        if (!tmp_s) { free((void *)obj_path); return NULL; }
+        if (!tmp_s) return NULL;
 
         StrVec args = zig_cc_prefix(zig_exe, target, sysroot, link_other);
         sv_push(&args, "-c");
@@ -1069,17 +1077,14 @@ static char *compile_input_to_obj(const char *zig_exe, const char *target,
         sv_push(&args, obj_path);
         if (zig_cc_run(&args) != 0) {
             fprintf(stderr, "sharpc: assembly failed for %s\n", inf->path);
-            free((void *)obj_path);
-            free(tmp_s);
             return NULL;
         }
-        free(tmp_s);
         return (char *)obj_path;
     }
 
     /* Normal Sharp-compiled C text */
     char *tmp_i = write_tmp_file(inf->path, ".i", inf->tmp_c);
-    if (!tmp_i) { free((void *)obj_path); return NULL; }
+    if (!tmp_i) return NULL;
 
     StrVec args = zig_cc_prefix(zig_exe, target, sysroot, link_other);
     sv_push(&args, "-x");
@@ -1090,11 +1095,8 @@ static char *compile_input_to_obj(const char *zig_exe, const char *target,
     sv_push(&args, obj_path);
     if (zig_cc_run(&args) != 0) {
         fprintf(stderr, "sharpc: compilation failed for %s\n", inf->path);
-        free((void *)obj_path);
-        free(tmp_i);
         return NULL;
     }
-    free(tmp_i);
     return (char *)obj_path;
 }
 
@@ -1539,10 +1541,8 @@ int main(int argc, char *argv[]) {
 
                 if (zig_cc_run(&zig_args) != 0) {
                     fprintf(stderr, "sharpc: assembly generation failed for %s\n", inf->path);
-                    free(tmp_i);
                     ret = 3; goto cleanup;
                 }
-                free(tmp_i);
             }
             if (g_sess.verbose)
                 fprintf(stderr, "sharpc: wrote %s\n", out_file);
@@ -1586,16 +1586,14 @@ int main(int argc, char *argv[]) {
                                   replace_ext(inf->path, ".o");
 
             char *obj_tmp = compile_input_to_obj(zig_exe, target, sysroot,
-                                                  &link_other, inf);
+                                                  &link_other,
+                                                  &user_inc, &sys_inc, inf);
             if (!obj_tmp) { ret = 3; goto cleanup; }
 
             if (strcmp(obj_tmp, obj_out) != 0) {
                 if (g_sess.verbose)
                     fprintf(stderr, "sharpc: rename %s -> %s\n", obj_tmp, obj_out);
                 rename(obj_tmp, obj_out);
-                free(obj_tmp);
-            } else {
-                free(obj_tmp);
             }
             if (g_sess.verbose)
                 fprintf(stderr, "sharpc: wrote %s\n", obj_out);
@@ -1623,7 +1621,8 @@ int main(int argc, char *argv[]) {
         if (!inf->tmp_c) continue;
 
         char *obj_tmp = compile_input_to_obj(zig_exe, target, sysroot,
-                                              &link_other, inf);
+                                              &link_other,
+                                              &user_inc, &sys_inc, inf);
         if (!obj_tmp) { ret = 3; goto cleanup; }
 
         sv_push(&obj_files, obj_tmp);

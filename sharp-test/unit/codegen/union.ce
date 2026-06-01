@@ -1,0 +1,47 @@
+// C代码生成: 联合体测试
+union Data {
+    int i;
+    float f;
+    char c;
+};
+
+union Value {
+    long long ll;
+    struct { int lo; int hi; };
+};
+
+// Sharp 不支持嵌套函数，transform 移到顶层
+union Data transform(union Data d) {
+    d.i = d.i * 2;
+    return d;
+}
+
+int main() {
+    // T1: 联合体基本读写
+    union Data d;
+    d.i = 42;
+    if (d.i != 42) return 1;
+    d.f = 3.14f;
+    d.c = 'A';
+    if (d.c != 'A') return 2;
+
+    // T2: 联合体大小
+    if (sizeof(union Data) < sizeof(int)) return 3;
+    if (sizeof(union Data) < sizeof(float)) return 4;
+
+    // T3: 联合体数组
+    union Data arr[3];
+    arr[0].i = 1;
+    arr[1].f = 2.0f;
+    arr[2].c = 'Z';
+    if (arr[0].i != 1) return 5;
+    if (arr[2].c != 'Z') return 6;
+
+    // T4: 联合体作为函数参数
+    union Data input;
+    input.i = 21;
+    union Data output = transform(input);
+    if (output.i != 42) return 7;
+
+    return 0;
+}

@@ -1,0 +1,48 @@
+// const: const 返回值和 const 参数测试
+const int* get_const_ptr(const int *p) {
+    return p;
+}
+
+int sum_const_arr(const int *arr, int len) {
+    int s = 0;
+    for (int i = 0; i < len; i = i + 1)
+        s = s + arr[i];
+    return s;
+}
+
+struct Config {
+    int width;
+    int height;
+};
+
+int Config.area(this) const { return this->width * this->height; }
+
+int main() {
+    // T1: const 指针参数
+    int vals[3] = {10, 20, 30};
+    if (sum_const_arr(vals, 3) != 60) return 1;
+
+    // T2: const 返回指针
+    int x = 42;
+    const int *cp = get_const_ptr(&x);
+    if (*cp != 42) return 2;
+
+    // T3: const 方法
+    struct Config c;
+    c.width = 6; c.height = 7;
+    if (c.area() != 42) return 3;
+
+    // T4: const 指针算术
+    const int *p = vals;
+    if (*p != 10) return 4;
+    p = p + 1;
+    if (*p != 20) return 5;
+    p = p + 1;
+    if (*p != 30) return 6;
+
+    // T5: const struct 指针调用 const 方法
+    const struct Config *pc = &c;
+    if (pc->area() != 42) return 7;
+
+    return 0;
+}

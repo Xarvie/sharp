@@ -1,0 +1,38 @@
+// C互操作: 位操作测试
+
+int main() {
+    // T1: 基本位操作
+    unsigned int a = 0xFF00;
+    unsigned int b = 0x0FF0;
+    if ((a & b) != 0x0F00) return 1;
+    if ((a | b) != 0xFFF0) return 2;
+    if ((a ^ b) != 0xF0F0) return 3;
+
+    // T2: 移位操作
+    unsigned int c = 1;
+    if ((c << 8) != 256) return 4;
+    if ((256 >> 4) != 16) return 5;
+
+    // T3: 位域设置和清除
+    unsigned int flags = 0;
+    flags = flags | (1u << 3);
+    if (!(flags & (1u << 3))) return 6;
+    flags = flags & ~(1u << 3);
+    if (flags & (1u << 3)) return 7;
+
+    // T4: 位掩码组合
+    unsigned int mask1 = 0x0F;
+    unsigned int mask2 = 0xF0;
+    unsigned int combined = mask1 | mask2;
+    if (combined != 0xFF) return 8;
+    if ((combined & mask1) != mask1) return 9;
+    if ((combined & mask2) != mask2) return 10;
+
+    // T5: 取反与掩码
+    unsigned int d = 0x0000FFFF;
+    unsigned int e = ~d;
+    unsigned int top16 = e >> 16;
+    if (top16 != 0xFFFF) return 11;
+
+    return 0;
+}

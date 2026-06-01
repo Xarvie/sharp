@@ -1,0 +1,54 @@
+// C互操作: 回调函数和函数指针测试
+typedef int (*Comparator)(const void*, const void*);
+
+int int_compare(const void* a, const void* b) {
+    int ia = *(const int*)a;
+    int ib = *(const int*)b;
+    if (ia < ib) return -1;
+    if (ia > ib) return 1;
+    return 0;
+}
+
+int apply_twice(int (*fn)(int), int x) {
+    return fn(fn(x));
+}
+
+int square(int x) { return x * x; }
+
+int negate(int x) { return -x; }
+
+void foreach_int(int *arr, int len, void (*fn)(int*)) {
+    for (int i = 0; i < len; i = i + 1)
+        fn(&arr[i]);
+}
+
+void add_one(int *p) { *p = *p + 1; }
+
+int main() {
+    // T1: 比较器回调
+    int vals[5] = {5, 3, 1, 4, 2};
+    int min_val = vals[0];
+    for (int i = 1; i < 5; i = i + 1) {
+        if (int_compare(&vals[i], &min_val) < 0)
+            min_val = vals[i];
+    }
+    if (min_val != 1) return 1;
+
+    // T2: 高阶函数 apply_twice
+    if (apply_twice(square, 2) != 16) return 2;  // square(square(2)) = square(4) = 16
+    if (apply_twice(negate, 5) != 5) return 3;    // negate(negate(5)) = negate(-5) = 5
+
+    // T3: foreach 回调
+    int arr[3] = {10, 20, 30};
+    foreach_int(arr, 3, add_one);
+    if (arr[0] != 11) return 4;
+    if (arr[1] != 21) return 5;
+    if (arr[2] != 31) return 6;
+
+    // T4: 函数指针数组
+    int (*ops[2])(int) = {square, negate};
+    if (ops[0](3) != 9) return 7;
+    if (ops[1](7) != -7) return 8;
+
+    return 0;
+}

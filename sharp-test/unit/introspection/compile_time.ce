@@ -1,0 +1,52 @@
+// 内省: 编译时内省测试
+#include <stdbool.h>
+
+class HasMethod {
+    int val;
+};
+void HasMethod.do_thing(this) { (void)this; }
+int HasMethod.get_val(this) { return this->val; }
+
+class NoMethod {
+    int val;
+};
+
+class HasOps {
+    int v;
+};
+int HasOps.operator+(this, int x) { return this->v + x; }
+bool HasOps.operator==(this, HasOps o) { return this->v == o.v; }
+
+int main() {
+    // T1: @has_method 编译时验证
+    @static_assert(@has_method(HasMethod, do_thing), "HasMethod has do_thing");
+    @static_assert(@has_method(HasMethod, get_val), "HasMethod has get_val");
+    @static_assert(!@has_method(NoMethod, do_thing), "NoMethod lacks do_thing");
+
+    // T2: @has_operator 编译时验证
+    @static_assert(@has_operator(HasOps, +), "HasOps has +");
+    @static_assert(@has_operator(HasOps, ==), "HasOps has ==");
+    @static_assert(!@has_operator(HasOps, *), "HasOps lacks *");
+
+    // T3: 运行时使用 @has_method
+    if (@has_method(HasMethod, do_thing)) {
+        HasMethod hm; hm.val = 42;
+        hm.do_thing();
+        if (hm.get_val() != 42) return 1;
+    }
+
+    // T4: 运行时使用 @has_operator
+    if (@has_operator(HasOps, +)) {
+        HasOps a; a.v = 10;
+        int r = a + 5;
+        if (r != 15) return 2;
+    }
+
+    // T5: 条件编译路径
+    if (!@has_method(NoMethod, do_thing)) {
+        int x = 99;
+        if (x != 99) return 3;
+    }
+
+    return 0;
+}

@@ -1,0 +1,49 @@
+// 泛型: 泛型结构体方法测试
+class Stack<T> {
+    T data[16];
+    int top;
+};
+
+void Stack<T>.push(this, T val) {
+    this->data[this->top] = val;
+    this->top = this->top + 1;
+}
+
+T Stack<T>.pop(this) {
+    this->top = this->top - 1;
+    return this->data[this->top];
+}
+
+int Stack<T>.size(this) const { return this->top; }
+
+int main() {
+    // T1: int 栈
+    Stack<int> si;
+    si.top = 0;
+    si.push(10);
+    si.push(20);
+    si.push(30);
+    if (si.size() != 3) return 1;
+    if (si.pop() != 30) return 2;
+    if (si.pop() != 20) return 3;
+    if (si.size() != 1) return 4;
+
+    // T2: float 栈
+    Stack<float> sf;
+    sf.top = 0;
+    sf.push(1.5f);
+    sf.push(2.5f);
+    if (sf.size() != 2) return 5;
+    float fv = sf.pop();
+    if (fv < 2.49f || fv > 2.51f) return 6;
+
+    // T3: 多个泛型实例
+    Stack<int> s1; s1.top = 0;
+    Stack<int> s2; s2.top = 0;
+    s1.push(100);
+    s2.push(200);
+    if (s1.pop() != 100) return 7;
+    if (s2.pop() != 200) return 8;
+
+    return 0;
+}

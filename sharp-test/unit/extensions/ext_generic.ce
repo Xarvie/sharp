@@ -1,0 +1,51 @@
+// 扩展方法: 泛型扩展方法测试
+class Wrapper<T> {
+    T value;
+};
+
+T Wrapper<T>.get(this) const { return this->value; }
+void Wrapper<T>.set(this, T v) { this->value = v; }
+T Wrapper<T>.transform(this, T (*fn)(T)) { this->value = fn(this->value); return this->value; }
+
+int double_it(int x) { return x * 2; }
+
+class Pair<T> {
+    T first;
+    T second;
+};
+
+T Pair<T>.max_elem(this) const {
+    return this->first > this->second ? this->first : this->second;
+}
+
+void Pair<T>.swap(this) {
+    T tmp = this->first;
+    this->first = this->second;
+    this->second = tmp;
+}
+
+int main() {
+    // T1: 泛型扩展方法 get/set
+    Wrapper<int> w;
+    w.set(42);
+    if (w.get() != 42) return 1;
+    w.set(10);
+    if (w.get() != 10) return 2;
+
+    // T2: 泛型扩展方法 transform
+    Wrapper<int> w2;
+    w2.set(5);
+    int r = w2.transform(double_it);
+    if (r != 10) return 3;
+    if (w2.get() != 10) return 4;
+
+    // T3: 泛型 Pair 扩展方法
+    Pair<int> p;
+    p.first = 10; p.second = 20;
+    if (p.max_elem() != 20) return 5;
+    p.swap();
+    if (p.first != 20) return 6;
+    if (p.second != 10) return 7;
+
+    return 0;
+}

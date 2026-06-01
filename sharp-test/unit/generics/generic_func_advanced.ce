@@ -1,0 +1,48 @@
+// 泛型: 高级泛型函数测试
+T min_val<T>(T a, T b) {
+    return a < b ? a : b;
+}
+
+T max_val<T>(T a, T b) {
+    return a > b ? a : b;
+}
+
+void swap_vals<T>(T *a, T *b) {
+    T tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+T clamp_val<T>(T val, T lo, T hi) {
+    if (val < lo) return lo;
+    if (val > hi) return hi;
+    return val;
+}
+
+int main() {
+    // T1: min/max 泛型
+    if (min_val<int>(3, 7) != 3) return 1;
+    if (max_val<int>(3, 7) != 7) return 2;
+
+    // T2: swap 泛型
+    int a = 10, b = 20;
+    swap_vals<int>(&a, &b);
+    if (a != 20) return 3;
+    if (b != 10) return 4;
+
+    // T3: clamp 泛型
+    if (clamp_val<int>(5, 0, 10) != 5) return 5;
+    if (clamp_val<int>(-3, 0, 10) != 0) return 6;
+    if (clamp_val<int>(15, 0, 10) != 10) return 7;
+
+    // T4: 泛型函数组合
+    int x = 15, y = 3;
+    int lo = min_val<int>(x, y);
+    int hi = max_val<int>(x, y);
+    if (lo != 3) return 8;
+    if (hi != 15) return 9;
+    int clamped = clamp_val<int>(7, lo, hi);
+    if (clamped != 7) return 10;
+
+    return 0;
+}

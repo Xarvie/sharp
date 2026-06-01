@@ -1,0 +1,36 @@
+// auto 类型推导: 指针和数组场景
+int add(int a, int b) { return a + b; }
+
+int main() {
+    // T1: auto 推导指针类型
+    int val = 42;
+    auto p = &val;
+    if (*p != 42) return 1;
+    *p = 100;
+    if (val != 100) return 2;
+
+    // T2: auto 推导函数指针
+    int (*fp)(int, int) = add;
+    auto result = fp(3, 4);
+    if (result != 7) return 3;
+
+    // T3: auto 推导数组下标
+    int arr[5] = {10, 20, 30, 40, 50};
+    auto elem = arr[2];
+    if (elem != 30) return 4;
+
+    // T4: auto 推导结构体字段
+    struct Pair { int a; int b; };
+    struct Pair pr;
+    pr.a = 7; pr.b = 13;
+    auto fa = pr.a;
+    if (fa != 7) return 5;
+
+    // T5: auto 在赋值链中
+    int x = 5;
+    auto y = x;
+    auto z = y;
+    if (z != 5) return 6;
+
+    return 0;
+}

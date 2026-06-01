@@ -1,0 +1,54 @@
+// 控制流: break 和 continue 在各种循环中
+
+int main() {
+    // T1: for 循环 break
+    int sum1 = 0;
+    for (int i = 0; i < 100; i = i + 1) {
+        if (i > 5) break;
+        sum1 = sum1 + i;
+    }
+    if (sum1 != 15) return 1;  // 0+1+2+3+4+5
+
+    // T2: while 循环 break
+    int sum2 = 0;
+    int i2 = 0;
+    while (1) {
+        if (i2 >= 5) break;
+        sum2 = sum2 + i2;
+        i2 = i2 + 1;
+    }
+    if (sum2 != 10) return 2;  // 0+1+2+3+4
+
+    // T3: do-while 循环 break
+    int sum3 = 0;
+    int i3 = 0;
+    do {
+        if (i3 > 3) break;
+        sum3 = sum3 + i3;
+        i3 = i3 + 1;
+    } while (1);
+    if (sum3 != 6) return 3;  // 0+1+2+3
+
+    // T4: for 循环 continue
+    int sum4 = 0;
+    for (int i = 0; i < 10; i = i + 1) {
+        if (i % 3 == 0) continue;
+        sum4 = sum4 + i;
+    }
+    if (sum4 != 27) return 4;  // 1+2+4+5+7+8
+
+    // T5: 嵌套 break 到外层（使用标志变量）
+    int outer_broke = 0;
+    for (int i = 0; i < 5; i = i + 1) {
+        for (int j = 0; j < 5; j = j + 1) {
+            if (i + j > 3) {
+                outer_broke = 1;
+                break;
+            }
+        }
+        if (outer_broke) break;
+    }
+    if (!outer_broke) return 5;
+
+    return 0;
+}

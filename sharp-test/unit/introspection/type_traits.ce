@@ -1,0 +1,40 @@
+// 内省: 类型特征检查测试
+#include <stdbool.h>
+
+class TestStruct {
+    int x;
+    int y;
+};
+
+int main() {
+    // T1: @is_arithmetic 编译时验证
+    @static_assert(@is_arithmetic(int), "int is arithmetic");
+    @static_assert(@is_arithmetic(float), "float is arithmetic");
+    @static_assert(!@is_arithmetic(void*), "void* is not arithmetic");
+
+    // T2: @is_pointer 编译时验证
+    @static_assert(@is_pointer(int*), "int* is pointer");
+    @static_assert(@is_pointer(char*), "char* is pointer");
+    @static_assert(!@is_pointer(int), "int is not pointer");
+
+    // T3: @is_arithmetic 运行时验证
+    int ai = 1;
+    float af = 1.0f;
+    if (ai != 1) return 1;
+    if (af < 0.99f || af > 1.01f) return 2;
+
+    // T4: @is_pointer 运行时验证
+    int *pi = &ai;
+    if (*pi != 1) return 3;
+
+    // T5: @has_field 运行时验证
+    if (!@has_field(TestStruct, x)) return 4;
+    if (!@has_field(TestStruct, y)) return 5;
+    if (@has_field(TestStruct, z)) return 6;
+
+    // T6: @type_name 基本检查
+    const char *n = @type_name(int);
+    if (n[0] != 'i') return 7;
+
+    return 0;
+}
