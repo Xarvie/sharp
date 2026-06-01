@@ -2312,7 +2312,10 @@ static void process_buf(CppState *st, CppReader *rd) {
                         if (at.kind == CPPT_PUNCT) {
                             const char *sp = pptok_spell(&at);
                             if (strcmp(sp, "(") == 0) depth++;
-                            else if (strcmp(sp, ")") == 0) { depth--; pptok_free(&at); if (depth == 0) break; }
+                            else if (strcmp(sp, ")") == 0) {
+                                depth--;
+                                if (depth == 0) { pptok_free(&at); break; }
+                            }
                         }
                         if (in_live_branch(st)) {
                             PUSH_CSTR(st, pptok_spell(&at));
@@ -2328,6 +2331,7 @@ static void process_buf(CppState *st, CppReader *rd) {
                 } else {
                     /* Not followed by '(' — pass through as identifier */
                     emit_tok_text(st, &t);
+                    pptok_free(&t);
                     pptok_free(&nx);
                 }
                 continue;

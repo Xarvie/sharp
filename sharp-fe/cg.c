@@ -146,6 +146,7 @@ void cg_ctx_free(CgCtx *ctx) {
         free(ctx->gfinsts[i].targs);
     }
     free(ctx->gfinsts);
+    free(ctx->fwd_typedef_names);
     free(ctx);
 }
 
@@ -356,6 +357,7 @@ static AstCvpaPeel ast_type_peel_cvpa(const AstNode *n) {
     while (r.base && (r.base->kind == AST_TYPE_ARRAY ||
                       r.base->kind == AST_TYPE_CONST ||
                       r.base->kind == AST_TYPE_VOLATILE ||
+                      r.base->kind == AST_TYPE_ATOMIC ||
                       r.base->kind == AST_TYPE_PTR)) {
         if (r.base->kind == AST_TYPE_ARRAY)
             r.base = r.base->u.type_array.base;
@@ -363,6 +365,8 @@ static AstCvpaPeel ast_type_peel_cvpa(const AstNode *n) {
             { r.is_const = true; r.base = r.base->u.type_const.base; }
         else if (r.base->kind == AST_TYPE_VOLATILE)
             { r.is_volatile = true; r.base = r.base->u.type_volatile.base; }
+        else if (r.base->kind == AST_TYPE_ATOMIC)
+            r.base = r.base->u.type_atomic.base;
         else
             { r.nptr++; r.base = r.base->u.type_ptr.base; }
     }
@@ -380,10 +384,12 @@ static AstPtrPeel ast_peel_ptr(const AstNode *n) {
 }
 
 static const AstNode *ast_type_strip_cv(const AstNode *n) {
-    while (n && (n->kind == AST_TYPE_CONST || n->kind == AST_TYPE_VOLATILE))
-        n = n->kind == AST_TYPE_CONST
-            ? n->u.type_const.base
-            : n->u.type_volatile.base;
+    while (n && (n->kind == AST_TYPE_CONST ||
+                 n->kind == AST_TYPE_VOLATILE ||
+                 n->kind == AST_TYPE_ATOMIC))
+        n = n->kind == AST_TYPE_CONST ? n->u.type_const.base
+          : n->kind == AST_TYPE_VOLATILE ? n->u.type_volatile.base
+          : n->u.type_atomic.base;
     return n;
 }
 
@@ -5460,8 +5466,8 @@ static void cg_collect_expr(CgCtx *ctx, const AstNode *expr) {
         cg_collect_expr(ctx, expr->u.ternary.else_);
         break;
     case AST_COMMA:
-        cg_collect_expr(ctx, expr->u.binop.lhs);
-        cg_collect_expr(ctx, expr->u.binop.rhs);
+        cg_collect_expr(ctx, expr->u.comma.lhs);
+        cg_collect_expr(ctx, expr->u.comma.rhs);
         break;
     case AST_FIELD_ACCESS:
         cg_collect_expr(ctx, expr->u.field_access.recv);

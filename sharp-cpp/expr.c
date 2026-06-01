@@ -261,10 +261,14 @@ static Value parse_char_const_ex(const char *sp, int *char_count_out,
                 /* Hex escape — any number of hex digits */
                 ch = 0; sp++;
                 int hx = 0;
+                uval limit = (uval)-1 / 16;
                 while (isxdigit((unsigned char)*sp)) {
-                    ch = ch*16 + (uval)(isdigit((unsigned char)*sp)
-                                         ? *sp-'0'
-                                         : tolower((unsigned char)*sp)-'a'+10);
+                    uval digit = (uval)(isdigit((unsigned char)*sp)
+                                        ? *sp-'0'
+                                        : tolower((unsigned char)*sp)-'a'+10);
+                    if (ch > limit) escape_overflow = true;
+                    ch = ch * 16 + digit;
+                    if (ch < digit) escape_overflow = true;
                     sp++; hx++;
                 }
                 /* Phase R4 (u_2): per C99 §6.4.4.4/3 a hex escape
@@ -956,12 +960,16 @@ static Value eval_shift(EvalCtx *ec) {
             if (v.is_unsigned)
                 v.v = (intmax_t)((uintmax_t)v.v << amt);
             else {
-                uintmax_t shifted = (uintmax_t)v.v << amt;
-                if (v.v >= 0 && amt > 0 &&
-                    (intmax_t)shifted < 0)
+                if (v.v < 0) {
                     ec_error(ec, t->loc,
-                        "integer overflow in preprocessor expression");
-                v.v = (intmax_t)shifted;
+                        "left shift of negative value in preprocessor expression");
+                } else {
+                    uintmax_t shifted = (uintmax_t)v.v << amt;
+                    if (amt > 0 && (intmax_t)shifted < 0)
+                        ec_error(ec, t->loc,
+                            "integer overflow in preprocessor expression");
+                    v.v = (intmax_t)shifted;
+                }
             }
         }
         else if (strcmp(sp, ">>") == 0) {

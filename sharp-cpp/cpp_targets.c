@@ -84,6 +84,7 @@ execZig(const char *cmd)
     if (!f) { remove(out_path); return NULL; }
     fseek(f, 0, SEEK_END);
     long flen = ftell(f);
+    if (flen < 0) { fclose(f); remove(out_path); return NULL; }
     fseek(f, 0, SEEK_SET);
     char *buf = cpp_xmalloc((size_t)flen + 1);
     size_t rd = fread(buf, 1, (size_t)flen, f);
