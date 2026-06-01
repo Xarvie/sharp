@@ -4004,9 +4004,9 @@ static AstNode *parse_top_decl(PS *ps) {
         free(ds.gcc_attrs);
         free(ds.alignas_text);
         free(ds.post_type_attr);
-        free(ds.inline_kw);
-        free(ds.const_kw);
-        free(ds.volatile_kw);
+        free((void*)ds.inline_kw);
+        free((void*)ds.const_kw);
+        free((void*)ds.volatile_kw);
         ps_sync(ps);
         return NULL;
     }
@@ -4062,9 +4062,9 @@ static AstNode *parse_top_decl(PS *ps) {
             free(ds.gcc_attrs);
             free(ds.alignas_text);
             free(ds.post_type_attr);
-            free(ds.inline_kw);
-            free(ds.const_kw);
-            free(ds.volatile_kw);
+            free((void*)ds.inline_kw);
+            free((void*)ds.const_kw);
+            free((void*)ds.volatile_kw);
             memset(&ds, 0, sizeof ds);
             ps_restore(ps, ds_sv);
             goto try_ext_method;
@@ -5731,8 +5731,8 @@ static AstNode *parse_stmt(PS *ps) {
                 wrap->u.decl_stmt.decl = fn;
                 free(ds.alignas_text);
                 free(ds.post_type_attr);
-                free(ds.const_kw);
-                free(ds.volatile_kw);
+                free((void*)ds.const_kw);
+                free((void*)ds.volatile_kw);
                 ast_node_free(ds.base_ty);
                 return wrap;
             }

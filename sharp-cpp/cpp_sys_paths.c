@@ -15,6 +15,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <direct.h>
+#define getcwd _getcwd
 #else
 #include <sys/stat.h>
 #include <unistd.h>
