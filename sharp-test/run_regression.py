@@ -977,7 +977,7 @@ def run_special_probe_tests(base_dir: Path, sharpc_path: str,
 # ── 主逻辑 ──────────────────────────────────────────────────────────────
 
 def main():
-    default_jobs = min(os.cpu_count() or 4, 16)
+    default_jobs = 16
 
     parser = argparse.ArgumentParser(description="Sharp 统一回归测试")
     parser.add_argument(

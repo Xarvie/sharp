@@ -24,6 +24,19 @@
 #define MAX_PATH PATH_MAX
 #endif
 
+static int is_path_absolute(const char *path)
+{
+    if (!path || !*path) return 0;
+    if (path[0] == '/') return 1;
+#ifdef _WIN32
+    if (path[0] == '\\' && path[1] == '\\') return 1;
+    if (isalpha((unsigned char)path[0]) && path[1] == ':'
+        && (path[2] == '/' || path[2] == '\\'))
+        return 1;
+#endif
+    return 0;
+}
+
 /* Helper: compare two version strings like "10.0.26100.0" */
 static int compare_version(const char *a, const char *b) {
     unsigned long va[4] = {0}, vb[4] = {0};
@@ -980,12 +993,17 @@ void cpp_detect_zig_sys_paths_from_zig(CppCtx *ctx, const char *target)
         path_buf[path_len] = '\0';
 
         /* Resolve relative paths against current working directory.
-         * zig cc -E -v outputs paths relative to the cwd when run. */
-        if (path_buf[0] != '/') {
+         * zig cc -E -v may output relative or absolute paths depending
+         * on the cwd relative to the zig installation. */
+        if (!is_path_absolute(path_buf)) {
             char cwd[MAX_PATH];
             if (getcwd(cwd, sizeof(cwd))) {
                 char full_path[MAX_PATH];
+#ifdef _WIN32
+                snprintf(full_path, sizeof(full_path), "%s\\%s", cwd, path_buf);
+#else
                 snprintf(full_path, sizeof(full_path), "%s/%s", cwd, path_buf);
+#endif
                 add_sys_path_if_valid(ctx, full_path);
             }
         } else {
