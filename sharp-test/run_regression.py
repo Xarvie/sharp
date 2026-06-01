@@ -335,6 +335,9 @@ def _run_sharpc_codegen(src_path: str, sharpc_path: str, zig_path: str = "",
     tmp_out = src_path + ".gen.i"
     try:
         cmd = [sharpc_path, "-c", src_path, "-o", tmp_out]
+        tag = _target_ref_tag()
+        if tag:
+            cmd.extend(["--target", tag])
         # Note: sharpc now auto-detects zig's include paths internally via
         # cpp_detect_zig_sys_paths_from_zig(), so we don't need to pass
         # -isystem flags here. This ensures consistent output regardless
@@ -379,9 +382,29 @@ def _find_zig(project_root: Path) -> Optional[str]:
     return find_file_in_path("zig", os.environ.get("PATH", ""))
 
 
+_override_target: Optional[str] = None
+
+
+def _is_native_target() -> bool:
+    """Check whether the current target matches the host platform."""
+    tag = _target_ref_tag()
+    if not tag:
+        return True
+    if sys.platform == "win32" and "windows" in tag:
+        return True
+    if sys.platform == "darwin" and "macos" in tag:
+        return True
+    if sys.platform.startswith("linux") and "linux" in tag:
+        return True
+    return False
+
+
 def _target_ref_tag() -> Optional[str]:
     """Return the target triple tag for reference file lookup.
-    Mirrors sharpc's default target selection logic."""
+    Mirrors sharpc's default target selection logic.
+    Can be overridden via --target CLI flag."""
+    if _override_target:
+        return _override_target
     if sys.platform == "win32":
         return "x86_64-windows-gnu"
     if sys.platform == "darwin":
@@ -472,19 +495,26 @@ def _compare_gen_with_ref(tmp_out: str, ref_path: str) -> Tuple[int, str]:
 
 def _compile_and_run(gen_i_path: str, zig_path: str, timeout: int = 30) -> Tuple[int, str]:
     """Compile generated .gen.i with zig cc, link to executable, and run it.
-    Returns (rc, detail): 0=pass, 1=fail (non-zero exit), 2=error (compile/link fail)."""
+    Returns (rc, detail): 0=pass, 1=fail (non-zero exit), 2=error (compile/link fail).
+    For cross-compiled targets, skip the run step (compile-only)."""
     exe_path = gen_i_path + ".exe"
 
-    stdout, stderr, rc = run_cmd(
-        [zig_path, "cc", "-x", "c", gen_i_path, "-o", exe_path, "-std=c11", "-fno-sanitize=undefined"],
-        timeout=timeout
-    )
+    zig_cmd = [zig_path, "cc", "-x", "c", gen_i_path, "-o", exe_path, "-std=c11", "-fno-sanitize=undefined"]
+    tag = _target_ref_tag()
+    if tag:
+        zig_cmd.extend(["-target", tag])
+
+    stdout, stderr, rc = run_cmd(zig_cmd, timeout=timeout)
     if rc != 0:
         detail = (stderr or stdout).strip()
         if len(detail) > 300:
             detail = detail[:300] + "..."
         _cleanup_files(exe_path)
         return 2, f"zig cc failed: {detail}"
+
+    if not _is_native_target():
+        _cleanup_files(exe_path)
+        return 0, "pass (compile-only, cross-target)"
 
     stdout, stderr, rc = run_cmd([exe_path], timeout=timeout)
     _cleanup_files(exe_path)
@@ -696,21 +726,15 @@ def run_bugs_tests(
     max_workers = max(1, jobs)
 
     def _test_one(name: str) -> Tuple[str, int, str]:
-        src = str(bugs_dir / name)
+        src = _resolve_src_path(str(bugs_dir / name))
         ok, tmp_out, err = _run_sharpc_codegen(src, sharpc_path, zig_path, timeout)
         if not ok:
             _cleanup_files(tmp_out)
             return name, 2, err
-        # Check if the source has a main function.  Many bug tests are
-        # compile-only (declarations + stubs) and intentionally have no main.
-        # For those, only verifying that sharpc generates valid C (accepted
-        # by zig cc -c) is sufficient.
         has_main = False
         try:
             with open(src, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
-                # Simple heuristic: look for `int main(` or `int main (`
-                # in the file (not in comments).
                 for line in content.splitlines():
                     stripped = line.strip()
                     if stripped.startswith("/*") or stripped.startswith("*"):
@@ -721,13 +745,13 @@ def run_bugs_tests(
         except Exception:
             pass
         if not has_main:
-            # Compile only (no link, no run).
             exe_path = tmp_out + ".o"
-            stdout, stderr, rc = run_cmd(
-                [zig_path, "cc", "-c", tmp_out, "-o", exe_path, "-std=c11",
-                 "-fno-sanitize=undefined"],
-                timeout=timeout
-            )
+            zig_cmd = [zig_path, "cc", "-c", tmp_out, "-o", exe_path, "-std=c11",
+                       "-fno-sanitize=undefined"]
+            tag = _target_ref_tag()
+            if tag:
+                zig_cmd.extend(["-target", tag])
+            stdout, stderr, rc = run_cmd(zig_cmd, timeout=timeout)
             _cleanup_files(tmp_out, exe_path)
             if rc != 0:
                 detail = (stderr or stdout).strip()
@@ -735,6 +759,9 @@ def run_bugs_tests(
                     detail = detail[:300] + "..."
                 return name, 2, f"zig cc -c failed: {detail}"
             return name, 0, "pass (compile-only)"
+        if not _is_native_target():
+            _cleanup_files(tmp_out)
+            return name, 0, "pass (compile-only, cross-target)"
         # Full compile + run for files with main.
         rc, detail = _compile_and_run(tmp_out, zig_path, timeout)
         _cleanup_files(tmp_out)
@@ -965,8 +992,13 @@ def main():
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument("--dump-fail", action="store_true",
                         help="Save raw -E output for failed files")
+    parser.add_argument("--target", default=None,
+                        help="Override target triple (e.g. x86_64-linux-gnu, x86_64-windows-gnu)")
 
     args = parser.parse_args()
+
+    global _override_target
+    _override_target = args.target
 
     script_dir = Path(__file__).resolve().parent
 
