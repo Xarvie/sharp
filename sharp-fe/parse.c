@@ -137,7 +137,10 @@ static bool td_has_n(const TdSet *s, const char *name, size_t len) {
 
 static void td_free(TdSet *s) {
     if (!s->slots) return;
-    for (size_t i = 0; i < s->cap; i++) free(s->slots[i]);
+    for (size_t i = 0; i < s->cap; i++) {
+        if (s->slots[i] && s->slots[i] != (const char*)1)
+            free(s->slots[i]);
+    }
     free(s->slots);
     s->slots = NULL; s->cap = 0; s->len = 0;
 }
@@ -5720,6 +5723,7 @@ static AstNode *parse_stmt(PS *ps) {
                 free(ds.post_type_attr);
                 free(ds.const_kw);
                 free(ds.volatile_kw);
+                ast_node_free(ds.base_ty);
                 return wrap;
             }
             ast_node_free(_fty);

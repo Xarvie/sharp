@@ -55,6 +55,7 @@ static bool ty_compound_eq(const Type *a, const Type *b) {
     switch (a->kind) {
     case TY_PTR:    return a->u.ptr.base    == b->u.ptr.base;
     case TY_CONST:  return a->u.const_.base == b->u.const_.base;
+    case TY_ATOMIC: return a->u.atomic.base == b->u.atomic.base;
     case TY_ARRAY:  return a->u.array.base  == b->u.array.base &&
                            a->u.array.size  == b->u.array.size;
     case TY_PARAM:  return a->u.param.name  == b->u.param.name; /* interned */
@@ -360,6 +361,11 @@ bool ty_has_error(const Type *t) {
     case TY_ATOMIC:  return ty_has_error(t->u.atomic.base);
     case TY_ARRAY:   return ty_has_error(t->u.array.base);
     case TY_VECTOR:  return ty_has_error(t->u.vector.elem);
+    case TY_FUNC:
+        if (ty_has_error(t->u.func.ret)) return true;
+        for (size_t i = 0; i < t->u.func.nparams; i++)
+            if (ty_has_error(t->u.func.params[i])) return true;
+        return false;
     default:         return false;
     }
 }
@@ -550,6 +556,7 @@ static const char * const KNOWN_NAMES[] = {
     "signed int", "unsigned int",
     "long int", "signed long", "signed long int",
     "unsigned long", "unsigned long int",
+    "long unsigned", "long unsigned int",
     "long long", "long long int", "signed long long", "signed long long int",
     "unsigned long long", "unsigned long long int",
     "long double",

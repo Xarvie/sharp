@@ -5534,6 +5534,7 @@ static void cg_collect_stmt(CgCtx *ctx, const AstNode *stmt) {
     case AST_FOR:
         cg_collect_stmt(ctx, stmt->u.for_.init);
         cg_collect_expr(ctx, stmt->u.for_.cond);
+        cg_collect_expr(ctx, stmt->u.for_.post);
         cg_collect_stmt(ctx, stmt->u.for_.body);
         break;
     case AST_DO_WHILE:
@@ -7293,7 +7294,7 @@ static bool cg_stmt_uses_this(const AstNode *stmt) {
         return cg_expr_uses_this(stmt->u.do_while.cond) ||
                cg_stmt_uses_this(stmt->u.do_while.body);
     case AST_FOR:
-        return cg_expr_uses_this(stmt->u.for_.init) ||
+        return cg_stmt_uses_this(stmt->u.for_.init) ||
                cg_expr_uses_this(stmt->u.for_.cond) ||
                cg_expr_uses_this(stmt->u.for_.post) ||
                cg_stmt_uses_this(stmt->u.for_.body);
@@ -7422,7 +7423,7 @@ static bool cg_stmt_uses_name(const AstNode *stmt, const char *name) {
         return cg_expr_uses_name(stmt->u.do_while.cond, name) ||
                cg_stmt_uses_name(stmt->u.do_while.body, name);
     case AST_FOR:
-        return cg_expr_uses_name(stmt->u.for_.init, name) ||
+        return cg_stmt_uses_name(stmt->u.for_.init, name) ||
                cg_expr_uses_name(stmt->u.for_.cond, name) ||
                cg_expr_uses_name(stmt->u.for_.post, name) ||
                cg_stmt_uses_name(stmt->u.for_.body, name);
@@ -7467,7 +7468,6 @@ static void cg_emit_methods(CgCtx *ctx, const AstNode *sd) {
 static void cg_emit_decl_sharp(CgCtx *ctx, AstNode *d) {
     if (!d) return;
     CppLoc saved_loc = d->loc;
-    if (!d) return;
     cg_emit_linemarker(ctx, saved_loc);
 
     switch (d->kind) {

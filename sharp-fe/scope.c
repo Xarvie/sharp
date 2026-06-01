@@ -851,7 +851,8 @@ Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
         if (!d) continue;
         switch (d->kind) {
         case AST_STRUCT_DEF:
-            scope_define(fs, SYM_TYPE, d->u.struct_def.name, d, diags);
+            if (d->u.struct_def.name)
+                scope_define(fs, SYM_TYPE, d->u.struct_def.name, d, diags);
             break;
         case AST_FUNC_DEF:
             if (d->u.func_def.struct_name) {
@@ -882,9 +883,11 @@ Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
             {
                 const AstNode *ty = d->u.var_decl.type;
                 while (ty) {
-                    if (ty->kind == AST_TYPE_PTR)     { ty = ty->u.type_ptr.base;   continue; }
-                    if (ty->kind == AST_TYPE_CONST)   { ty = ty->u.type_const.base; continue; }
-                    if (ty->kind == AST_TYPE_ARRAY)   { ty = ty->u.type_array.base; continue; }
+                    if (ty->kind == AST_TYPE_PTR)      { ty = ty->u.type_ptr.base;      continue; }
+                    if (ty->kind == AST_TYPE_CONST)    { ty = ty->u.type_const.base;    continue; }
+                    if (ty->kind == AST_TYPE_VOLATILE) { ty = ty->u.type_volatile.base; continue; }
+                    if (ty->kind == AST_TYPE_ATOMIC)   { ty = ty->u.type_atomic.base;   continue; }
+                    if (ty->kind == AST_TYPE_ARRAY)    { ty = ty->u.type_array.base;    continue; }
                     break;
                 }
                 if (ty && ty->kind == AST_TYPE_NAME && ty->u.type_name.name) {
@@ -920,8 +923,14 @@ Scope *scope_build_with_prelude(AstNode *file, FeDiagArr *diags,
                  * e.g. typedef struct __pthread * pthread_t;
                  * The target is AST_TYPE_PTR -> AST_TYPE_NAME("__pthread") */
                 AstNode *inner = d->u.typedef_decl.target;
-                while (inner && inner->kind == AST_TYPE_PTR)
-                    inner = inner->u.type_ptr.base;
+                while (inner) {
+                    if (inner->kind == AST_TYPE_PTR)      { inner = inner->u.type_ptr.base;      continue; }
+                    if (inner->kind == AST_TYPE_CONST)    { inner = inner->u.type_const.base;    continue; }
+                    if (inner->kind == AST_TYPE_VOLATILE) { inner = inner->u.type_volatile.base; continue; }
+                    if (inner->kind == AST_TYPE_ATOMIC)   { inner = inner->u.type_atomic.base;   continue; }
+                    if (inner->kind == AST_TYPE_ARRAY)    { inner = inner->u.type_array.base;    continue; }
+                    break;
+                }
                 if (!inner) { /* nothing to register */ }
                 else if (inner->kind == AST_TYPE_NAME)
                     tag = inner->u.type_name.name;
