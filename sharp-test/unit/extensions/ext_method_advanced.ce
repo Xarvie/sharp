@@ -56,10 +56,10 @@ int Color.luminance(this) const {
     return (this->r * 299 + this->g * 587 + this->b * 114) / 1000;
 }
 
-void Color.set_rgb(this, int nr, int ng, int nb) {
-    this->r = nr;
-    this->g = ng;
-    this->b = nb;
+void Color.set_rgb(this, int r, int g, int b) {
+    this->r = r;
+    this->g = g;
+    this->b = b;
 }
 
 void Color.blend(this, int dr, int dg, int db, int alpha) {
@@ -68,8 +68,8 @@ void Color.blend(this, int dr, int dg, int db, int alpha) {
     this->b = this->b + (db - this->b) * alpha / 255;
 }
 
-bool Color.equals_rgb(this, int er, int eg, int eb) const {
-    return this->r == er && this->g == eg && this->b == eb;
+bool Color.equals_rgb(this, int r, int g, int b) const {
+    return this->r == r && this->g == g && this->b == b;
 }
 
 // === T3: Extension method returning struct type ===
@@ -179,9 +179,9 @@ class Painter {
     int color;
 };
 
-Painter* Painter.move_to(this, int mx, int my) {
-    this->x = mx;
-    this->y = my;
+Painter* Painter.move_to(this, int x, int y) {
+    this->x = x;
+    this->y = y;
     return this;
 }
 

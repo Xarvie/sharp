@@ -33,13 +33,13 @@ struct Color {
 int Color__luminance(Color * this);
 
 #line 59 "sharp-test/unit/extensions/ext_method_advanced.ce"
-void Color__set_rgb(Color * this, int nr, int ng, int nb);
+void Color__set_rgb(Color * this, int r, int g, int b);
 
 #line 65 "sharp-test/unit/extensions/ext_method_advanced.ce"
 void Color__blend(Color * this, int dr, int dg, int db, int alpha);
 
 #line 71 "sharp-test/unit/extensions/ext_method_advanced.ce"
-_Bool Color__equals_rgb(Color * this, int er, int eg, int eb);
+_Bool Color__equals_rgb(Color * this, int r, int g, int b);
 
 #line 76 "sharp-test/unit/extensions/ext_method_advanced.ce"
 typedef struct Point Point;
@@ -119,7 +119,7 @@ struct Painter {
 };
 
 #line 182 "sharp-test/unit/extensions/ext_method_advanced.ce"
-Painter * Painter__move_to(Painter * this, int mx, int my);
+Painter * Painter__move_to(Painter * this, int x, int y);
 
 #line 188 "sharp-test/unit/extensions/ext_method_advanced.ce"
 Painter * Painter__set_color(Painter * this, int c);
@@ -260,16 +260,16 @@ int Color__luminance(Color * this) {
 }
 
 #line 59 "sharp-test/unit/extensions/ext_method_advanced.ce"
-void Color__set_rgb(Color * this, int nr, int ng, int nb) {
+void Color__set_rgb(Color * this, int r, int g, int b) {
 
 #line 60 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    this->r = nr;
+    this->r = r;
 
 #line 61 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    this->g = ng;
+    this->g = g;
 
 #line 62 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    this->b = nb;
+    this->b = b;
 }
 
 #line 65 "sharp-test/unit/extensions/ext_method_advanced.ce"
@@ -286,10 +286,10 @@ void Color__blend(Color * this, int dr, int dg, int db, int alpha) {
 }
 
 #line 71 "sharp-test/unit/extensions/ext_method_advanced.ce"
-_Bool Color__equals_rgb(Color * this, int er, int eg, int eb) {
+_Bool Color__equals_rgb(Color * this, int r, int g, int b) {
 
 #line 72 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    return this->r == er && this->g == eg && this->b == eb;
+    return this->r == r && this->g == g && this->b == b;
 }
 
 #line 81 "sharp-test/unit/extensions/ext_method_advanced.ce"
@@ -458,13 +458,13 @@ int FluentCounter__get(FluentCounter * this) {
 }
 
 #line 182 "sharp-test/unit/extensions/ext_method_advanced.ce"
-Painter * Painter__move_to(Painter * this, int mx, int my) {
+Painter * Painter__move_to(Painter * this, int x, int y) {
 
 #line 183 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    this->x = mx;
+    this->x = x;
 
 #line 184 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    this->y = my;
+    this->y = y;
 
 #line 185 "sharp-test/unit/extensions/ext_method_advanced.ce"
     return this;

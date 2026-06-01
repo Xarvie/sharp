@@ -1,0 +1,68 @@
+class Color {
+    int r;
+    int g;
+    int b;
+};
+
+void Color.set_rgb(this, int r, int g, int b) {
+    this->r = r;
+    this->g = g;
+    this->b = b;
+}
+
+int Color.sum_rgb(this) const {
+    return this->r + this->g + this->b;
+}
+
+class Vec2 {
+    int x;
+    int y;
+};
+
+void Vec2.set(this, int x, int y) {
+    this->x = x;
+    this->y = y;
+}
+
+int Vec2.dot(this, int x, int y) const {
+    return this->x * x + this->y * y;
+}
+
+class Node {
+    int val;
+    Node* next;
+};
+
+void Node.init(this, int val, Node* next) {
+    this->val = val;
+    this->next = next;
+}
+
+int Node.get_val(this) const { return this->val; }
+
+int main(void) {
+    Color c;
+    c.r = 0; c.g = 0; c.b = 0;
+    c.set_rgb(100, 200, 50);
+    if (c.r != 100) return 1;
+    if (c.g != 200) return 2;
+    if (c.b != 50) return 3;
+    if (c.sum_rgb() != 350) return 4;
+
+    Vec2 v;
+    v.x = 0; v.y = 0;
+    v.set(3, 7);
+    if (v.x != 3) return 5;
+    if (v.y != 7) return 6;
+    if (v.dot(2, 5) != 41) return 7;
+
+    Node a;
+    a.init(42, (void*)0);
+    if (a.get_val() != 42) return 8;
+    Node b;
+    b.init(99, &a);
+    if (b.get_val() != 99) return 9;
+    if (b.next != &a) return 10;
+
+    return 0;
+}
