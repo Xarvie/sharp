@@ -61,6 +61,10 @@ typedef enum {
     STOK_NULLPTR,       /* 'nullptr'— C23: null pointer constant            */
     STOK_TYPEOF_UNQUAL, /* 'typeof_unqual' — C23: typeof without qualifiers */
     STOK_BITINT,        /* '_BitInt'— C23: bit-precise integer              */
+    STOK_ALIGNAS,       /* 'alignas' — C23: alias for _Alignas              */
+    STOK_ALIGNOF,       /* 'alignof' — C23: alias for _Alignof              */
+    STOK_STATIC_ASSERT_KW, /* 'static_assert' — C23: alias for _Static_assert */
+    STOK_THREAD_LOCAL,  /* 'thread_local' — C23: alias for _Thread_local   */
 
     /* ── Sharp keywords ─────────────────────────────────────────────────── */
     STOK_DEFER,      /* 'defer'    — Sharp scope-exit statement            */

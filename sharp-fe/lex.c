@@ -30,6 +30,8 @@ typedef struct { const char *word; SharpTokKind kind; } KwEntry;
  * 'this') live here too; they are promoted alongside C keywords. */
 static const KwEntry kw_table[] = {
     /* a */ { "auto",             STOK_AUTO          },
+            { "alignas",          STOK_ALIGNAS       },  /* C23: alias for _Alignas */
+            { "alignof",          STOK_ALIGNOF       },  /* C23: alias for _Alignof */
     /* b */ { "break",            STOK_BREAK         },
             { "bool",             STOK_BOOL          },  /* C23: alias for _Bool */
     /* c */ { "case",             STOK_CASE          },
@@ -62,9 +64,11 @@ static const KwEntry kw_table[] = {
             { "signed",           STOK_SIGNED        },
             { "sizeof",           STOK_SIZEOF        },
             { "static",           STOK_STATIC        },
+            { "static_assert",    STOK_STATIC_ASSERT_KW },  /* C23: alias for _Static_assert */
             { "struct",           STOK_STRUCT        },
             { "switch",           STOK_SWITCH        },
     /* t */ { "this",             STOK_THIS          },  /* Phase 1: Sharp */
+            { "thread_local",     STOK_THREAD_LOCAL  },  /* C23: alias for _Thread_local */
             { "true",             STOK_TRUE          },  /* C23: boolean constant 1 */
             { "typedef",          STOK_TYPEDEF       },
             { "typeof_unqual",    STOK_TYPEOF_UNQUAL },  /* C23: typeof without qualifiers */
@@ -588,7 +592,7 @@ void lex_free(SharpTok *toks) {
 }
 
 bool lex_is_keyword(SharpTokKind k) {
-    return k >= STOK_AUTO && k <= STOK_BITINT;
+    return k >= STOK_AUTO && k <= STOK_THREAD_LOCAL;
 }
 
 const char *lex_tok_kind_name(SharpTokKind k) {
@@ -605,6 +609,7 @@ const char *lex_tok_kind_name(SharpTokKind k) {
         "_Imaginary","_Noreturn","_Static_assert","_Thread_local",
         /* C23 new keywords */
         "bool","true","false","nullptr","typeof_unqual","_BitInt",
+        "alignas","alignof","static_assert","thread_local",
         /* Sharp keywords (matches lex.h enum order) */
         "defer","operator","this","class",
         "constexpr",            /* C23: compile-time constant specifier */
