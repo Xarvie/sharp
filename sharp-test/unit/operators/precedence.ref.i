@@ -18,7 +18,7 @@ Num Num__op_mul(Num * this, Num other);
 Num Num__op_div(Num * this, Num other);
 
 #line 22 "sharp-test/unit/operators/precedence.ce"
-_Bool Num__op_eq(Num * this, Num other);
+bool Num__op_eq(Num * this, Num other);
 
 #line 27 "sharp-test/unit/operators/precedence.ce"
 typedef struct Score Score;
@@ -27,19 +27,19 @@ struct Score {
 };
 
 #line 30 "sharp-test/unit/operators/precedence.ce"
-_Bool Score__op_eq(Score * this, Score other);
+bool Score__op_eq(Score * this, Score other);
 
 #line 33 "sharp-test/unit/operators/precedence.ce"
-_Bool Score__op_lt(Score * this, Score other);
+bool Score__op_lt(Score * this, Score other);
 
 #line 36 "sharp-test/unit/operators/precedence.ce"
-_Bool Score__op_gt(Score * this, Score other);
+bool Score__op_gt(Score * this, Score other);
 
 #line 39 "sharp-test/unit/operators/precedence.ce"
-_Bool Score__op_le(Score * this, Score other);
+bool Score__op_le(Score * this, Score other);
 
 #line 42 "sharp-test/unit/operators/precedence.ce"
-_Bool Score__op_ge(Score * this, Score other);
+bool Score__op_ge(Score * this, Score other);
 
 #line 10 "sharp-test/unit/operators/precedence.ce"
 Num Num__op_add(Num * this, Num other) {
@@ -78,42 +78,42 @@ Num Num__op_div(Num * this, Num other) {
 }
 
 #line 22 "sharp-test/unit/operators/precedence.ce"
-_Bool Num__op_eq(Num * this, Num other) {
+bool Num__op_eq(Num * this, Num other) {
 
 #line 23 "sharp-test/unit/operators/precedence.ce"
     return this->val == other.val;
 }
 
 #line 30 "sharp-test/unit/operators/precedence.ce"
-_Bool Score__op_eq(Score * this, Score other) {
+bool Score__op_eq(Score * this, Score other) {
 
 #line 31 "sharp-test/unit/operators/precedence.ce"
     return this->pts == other.pts;
 }
 
 #line 33 "sharp-test/unit/operators/precedence.ce"
-_Bool Score__op_lt(Score * this, Score other) {
+bool Score__op_lt(Score * this, Score other) {
 
 #line 34 "sharp-test/unit/operators/precedence.ce"
     return this->pts < other.pts;
 }
 
 #line 36 "sharp-test/unit/operators/precedence.ce"
-_Bool Score__op_gt(Score * this, Score other) {
+bool Score__op_gt(Score * this, Score other) {
 
 #line 37 "sharp-test/unit/operators/precedence.ce"
     return this->pts > other.pts;
 }
 
 #line 39 "sharp-test/unit/operators/precedence.ce"
-_Bool Score__op_le(Score * this, Score other) {
+bool Score__op_le(Score * this, Score other) {
 
 #line 40 "sharp-test/unit/operators/precedence.ce"
     return this->pts <= other.pts;
 }
 
 #line 42 "sharp-test/unit/operators/precedence.ce"
-_Bool Score__op_ge(Score * this, Score other) {
+bool Score__op_ge(Score * this, Score other) {
 
 #line 43 "sharp-test/unit/operators/precedence.ce"
     return this->pts >= other.pts;

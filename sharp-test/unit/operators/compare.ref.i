@@ -6,60 +6,60 @@ struct Score {
 };
 
 #line 8 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_eq(Score * this, Score other);
+bool Score__op_eq(Score * this, Score other);
 
 #line 11 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_ne(Score * this, Score other);
+bool Score__op_ne(Score * this, Score other);
 
 #line 14 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_lt(Score * this, Score other);
+bool Score__op_lt(Score * this, Score other);
 
 #line 17 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_gt(Score * this, Score other);
+bool Score__op_gt(Score * this, Score other);
 
 #line 20 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_le(Score * this, Score other);
+bool Score__op_le(Score * this, Score other);
 
 #line 23 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_ge(Score * this, Score other);
+bool Score__op_ge(Score * this, Score other);
 
 #line 8 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_eq(Score * this, Score other) {
+bool Score__op_eq(Score * this, Score other) {
 
 #line 9 "sharp-test/unit/operators/compare.ce"
     return this->pts == other.pts;
 }
 
 #line 11 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_ne(Score * this, Score other) {
+bool Score__op_ne(Score * this, Score other) {
 
 #line 12 "sharp-test/unit/operators/compare.ce"
     return this->pts != other.pts;
 }
 
 #line 14 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_lt(Score * this, Score other) {
+bool Score__op_lt(Score * this, Score other) {
 
 #line 15 "sharp-test/unit/operators/compare.ce"
     return this->pts < other.pts;
 }
 
 #line 17 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_gt(Score * this, Score other) {
+bool Score__op_gt(Score * this, Score other) {
 
 #line 18 "sharp-test/unit/operators/compare.ce"
     return this->pts > other.pts;
 }
 
 #line 20 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_le(Score * this, Score other) {
+bool Score__op_le(Score * this, Score other) {
 
 #line 21 "sharp-test/unit/operators/compare.ce"
     return this->pts <= other.pts;
 }
 
 #line 23 "sharp-test/unit/operators/compare.ce"
-_Bool Score__op_ge(Score * this, Score other) {
+bool Score__op_ge(Score * this, Score other) {
 
 #line 24 "sharp-test/unit/operators/compare.ce"
     return this->pts >= other.pts;

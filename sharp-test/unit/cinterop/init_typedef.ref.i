@@ -80,10 +80,10 @@ int main() {
         return 2;
 
 #line 47 "sharp-test/unit/cinterop/init_typedef.ce"
-    _Bool b = { 0 };
+    bool b = { 0 };
 
 #line 48 "sharp-test/unit/cinterop/init_typedef.ce"
-    if (b != 0) 
+    if (b != false) 
         return 3;
 
 #line 50 "sharp-test/unit/cinterop/init_typedef.ce"

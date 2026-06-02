@@ -485,8 +485,14 @@ extern void * memcpy(void * __restrict __dest, const void * __restrict __src, si
 #line 51 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
 extern void * memmove(void * __dest, const void * __src, size_t __n) __attribute__((__nothrow__)) __attribute__((__nonnull__(1,2)));
 
+#line 58 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
+extern void * memccpy(void * __restrict __dest, const void * __restrict __src, int __c, size_t __n) __attribute__((__nothrow__)) __attribute__((__nonnull__(1,2)));
+
 #line 65 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
 extern void * memset(void * __s, int __c, size_t __n) __attribute__((__nothrow__)) __attribute__((__nonnull__(1)));
+
+#line 70 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
+extern void * memset_explicit(void * __s, int __c, size_t __n) __attribute__((__nothrow__)) __attribute__((__nonnull__(1)));
 
 #line 75 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
 extern int memcmp(const void * __s1, const void * __s2, size_t __n) __attribute__((__nothrow__)) __attribute__((__pure__)) __attribute__((__nonnull__(1,2)));
@@ -520,6 +526,12 @@ extern int strcoll(const char * __s1, const char * __s2) __attribute__((__nothro
 
 #line 181 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
 extern size_t strxfrm(char * __restrict __dest, const char * __restrict __src, size_t __n) __attribute__((__nothrow__)) __attribute__((__nonnull__(2)));
+
+#line 202 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
+extern char * strdup(const char * __s) __attribute__((__nothrow__)) __attribute__((__malloc__)) __attribute__((__nonnull__(1)));
+
+#line 210 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
+extern char * strndup(const char * __string, size_t __n) __attribute__((__nothrow__)) __attribute__((__malloc__)) __attribute__((__nonnull__(1)));
 
 #line 261 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
 extern char * strchr(const char * __s, int __c) __attribute__((__nothrow__)) __attribute__((__pure__)) __attribute__((__nonnull__(1)));
@@ -614,6 +626,15 @@ extern long long int strtoll(const char * __restrict __nptr, char * * __restrict
 #line 210 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
 extern unsigned long long int strtoull(const char * __restrict __nptr, char * * __restrict __endptr, int __base) __attribute__((__nothrow__)) __attribute__((__nonnull__(1)));
 
+#line 282 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern int strfromd(char * __dest, size_t __size, const char * __format, double __f) __attribute__((__nothrow__)) __attribute__((__nonnull__(3)));
+
+#line 286 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern int strfromf(char * __dest, size_t __size, const char * __format, float __f) __attribute__((__nothrow__)) __attribute__((__nonnull__(3)));
+
+#line 290 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern int strfroml(char * __dest, size_t __size, const char * __format, long double __f) __attribute__((__nothrow__)) __attribute__((__nonnull__(3)));
+
 #line 577 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
 extern int rand(void) __attribute__((__nothrow__));
 
@@ -631,6 +652,12 @@ extern void * realloc(void * __ptr, size_t __size) __attribute__((__nothrow__)) 
 
 #line 697 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
 extern void free(void * __ptr) __attribute__((__nothrow__));
+
+#line 708 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern void free_sized(void * __ptr, size_t __size) __attribute__((__nothrow__));
+
+#line 713 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern void free_aligned_sized(void * __ptr, size_t __alignment, size_t __size) __attribute__((__nothrow__));
 
 #line 758 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
 extern void * aligned_alloc(size_t __alignment, size_t __size) __attribute__((__nothrow__)) __attribute__((__malloc__)) __attribute__((__alloc_align__(1)));
@@ -701,6 +728,95 @@ extern size_t mbstowcs(wchar_t * __restrict __pwcs, const char * __restrict __s,
 #line 1123 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
 extern size_t wcstombs(char * __restrict __s, const wchar_t * __restrict __pwcs, size_t __n) __attribute__((__nothrow__));
 
+#line 28 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/atomic_wide_counter.h"
+
+#line 25 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/atomic_wide_counter.h"
+
+#line 33 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/atomic_wide_counter.h"
+typedef union {
+    unsigned long long int __value64;
+    struct {
+    unsigned int __low;
+    unsigned int __high;
+} __value32;
+} __atomic_wide_counter;
+
+#line 51 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/thread-shared-types.h"
+
+#line 55 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/thread-shared-types.h"
+typedef struct __pthread_internal_list {
+    struct __pthread_internal_list * __prev;
+    struct __pthread_internal_list * __next;
+} __pthread_list_t;
+
+#line 57 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/thread-shared-types.h"
+
+#line 60 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/thread-shared-types.h"
+typedef struct __pthread_internal_slist {
+    struct __pthread_internal_slist * __next;
+} __pthread_slist_t;
+
+#line 22 "/root/code/sharp/zig/lib/libc/include/x86-linux-gnu/bits/struct_mutex.h"
+struct __pthread_mutex_s {
+    int __lock;
+    unsigned int __count;
+    int __owner;
+    unsigned int __nusers;
+    int __kind;
+    short __spins;
+    short __unused;
+    __pthread_list_t __list;
+};
+
+#line 23 "/root/code/sharp/zig/lib/libc/include/x86-linux-gnu/bits/struct_rwlock.h"
+struct __pthread_rwlock_arch_t {
+    unsigned int __readers;
+    unsigned int __writers;
+    unsigned int __wrphase_futex;
+    unsigned int __writers_futex;
+    unsigned int __pad3;
+    unsigned int __pad4;
+    int __cur_writer;
+    int __shared;
+    unsigned long int __pad1;
+    unsigned long int __pad2;
+    unsigned int __flags;
+};
+
+#line 94 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/thread-shared-types.h"
+struct __pthread_cond_s {
+    __atomic_wide_counter __wseq;
+    __atomic_wide_counter __g1_start;
+    unsigned int __g_size[2];
+    unsigned int __g1_orig_size;
+    unsigned int __wrefs;
+    unsigned int __g_signals[2];
+    unsigned int __unused_initialized_1;
+    unsigned int __unused_initialized_2;
+};
+
+#line 106 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/thread-shared-types.h"
+typedef unsigned int __tss_t;
+
+#line 107 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/thread-shared-types.h"
+typedef unsigned long int __thrd_t;
+
+#line 109 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/thread-shared-types.h"
+
+#line 112 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/thread-shared-types.h"
+typedef struct {
+    int __data;
+} __once_flag;
+
+#line 24 "/root/code/sharp/zig/lib/libc/include/generic-glibc/bits/types/once_flag.h"
+typedef __once_flag once_flag;
+
+#line 1207 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern void call_once(once_flag * __flag, void (*__func)(void));
+
+#line 1211 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern size_t memalignment(const void * __p);
+
 #line 9 "sharp-test/unit/modules/stdlib.ce"
 typedef long isize;
 
@@ -715,7 +831,7 @@ struct Str {
 isize Str__size(Str * this);
 
 #line 17 "sharp-test/unit/modules/stdlib.ce"
-_Bool Str__eq(Str * this, Str other);
+bool Str__eq(Str * this, Str other);
 
 #line 31 "sharp-test/unit/modules/stdlib.ce"
 typedef struct String String;
@@ -922,8 +1038,14 @@ extern void * memcpy(void * __restrict __dest, const void * __restrict __src, si
 #line 51 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
 extern void * memmove(void * __dest, const void * __src, size_t __n) __attribute__((__nothrow__)) __attribute__((__nonnull__(1,2)));
 
+#line 58 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
+extern void * memccpy(void * __restrict __dest, const void * __restrict __src, int __c, size_t __n) __attribute__((__nothrow__)) __attribute__((__nonnull__(1,2)));
+
 #line 65 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
 extern void * memset(void * __s, int __c, size_t __n) __attribute__((__nothrow__)) __attribute__((__nonnull__(1)));
+
+#line 70 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
+extern void * memset_explicit(void * __s, int __c, size_t __n) __attribute__((__nothrow__)) __attribute__((__nonnull__(1)));
 
 #line 75 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
 extern int memcmp(const void * __s1, const void * __s2, size_t __n) __attribute__((__nothrow__)) __attribute__((__pure__)) __attribute__((__nonnull__(1,2)));
@@ -957,6 +1079,12 @@ extern int strcoll(const char * __s1, const char * __s2) __attribute__((__nothro
 
 #line 181 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
 extern size_t strxfrm(char * __restrict __dest, const char * __restrict __src, size_t __n) __attribute__((__nothrow__)) __attribute__((__nonnull__(2)));
+
+#line 202 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
+extern char * strdup(const char * __s) __attribute__((__nothrow__)) __attribute__((__malloc__)) __attribute__((__nonnull__(1)));
+
+#line 210 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
+extern char * strndup(const char * __string, size_t __n) __attribute__((__nothrow__)) __attribute__((__malloc__)) __attribute__((__nonnull__(1)));
 
 #line 261 "/root/code/sharp/zig/lib/libc/include/generic-glibc/string.h"
 extern char * strchr(const char * __s, int __c) __attribute__((__nothrow__)) __attribute__((__pure__)) __attribute__((__nonnull__(1)));
@@ -1024,6 +1152,15 @@ extern long long int strtoll(const char * __restrict __nptr, char * * __restrict
 #line 210 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
 extern unsigned long long int strtoull(const char * __restrict __nptr, char * * __restrict __endptr, int __base) __attribute__((__nothrow__)) __attribute__((__nonnull__(1)));
 
+#line 282 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern int strfromd(char * __dest, size_t __size, const char * __format, double __f) __attribute__((__nothrow__)) __attribute__((__nonnull__(3)));
+
+#line 286 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern int strfromf(char * __dest, size_t __size, const char * __format, float __f) __attribute__((__nothrow__)) __attribute__((__nonnull__(3)));
+
+#line 290 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern int strfroml(char * __dest, size_t __size, const char * __format, long double __f) __attribute__((__nothrow__)) __attribute__((__nonnull__(3)));
+
 #line 577 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
 extern int rand(void) __attribute__((__nothrow__));
 
@@ -1041,6 +1178,12 @@ extern void * realloc(void * __ptr, size_t __size) __attribute__((__nothrow__)) 
 
 #line 697 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
 extern void free(void * __ptr) __attribute__((__nothrow__));
+
+#line 708 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern void free_sized(void * __ptr, size_t __size) __attribute__((__nothrow__));
+
+#line 713 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern void free_aligned_sized(void * __ptr, size_t __alignment, size_t __size) __attribute__((__nothrow__));
 
 #line 758 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
 extern void * aligned_alloc(size_t __alignment, size_t __size) __attribute__((__nothrow__)) __attribute__((__malloc__)) __attribute__((__alloc_align__(1)));
@@ -1108,27 +1251,33 @@ extern size_t mbstowcs(wchar_t * __restrict __pwcs, const char * __restrict __s,
 #line 1123 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
 extern size_t wcstombs(char * __restrict __s, const wchar_t * __restrict __pwcs, size_t __n) __attribute__((__nothrow__));
 
+#line 1207 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern void call_once(once_flag * __flag, void (*__func)(void));
+
+#line 1211 "/root/code/sharp/zig/lib/libc/include/generic-glibc/stdlib.h"
+extern size_t memalignment(const void * __p);
+
 #line 16 "sharp-test/unit/modules/stdlib.ce"
 isize Str__size(Str * this) {
     return this->len;
 }
 
 #line 17 "sharp-test/unit/modules/stdlib.ce"
-_Bool Str__eq(Str * this, Str other) {
+bool Str__eq(Str * this, Str other) {
 
 #line 18 "sharp-test/unit/modules/stdlib.ce"
     if (this->len != other.len) 
-        return 0;
+        return false;
 
 #line 19 "sharp-test/unit/modules/stdlib.ce"
     for (long i = 0; i < this->len; i = i + 1) 
 
 #line 20 "sharp-test/unit/modules/stdlib.ce"
         if (this->ptr[i] != other.ptr[i]) 
-            return 0;
+            return false;
 
 #line 21 "sharp-test/unit/modules/stdlib.ce"
-    return 1;
+    return true;
 }
 
 #line 23 "sharp-test/unit/modules/stdlib.ce"
@@ -1148,7 +1297,7 @@ Str str_from_lit(const char * lit) {
 }
 
 #line 28 "sharp-test/unit/modules/stdlib.ce"
-_Bool str_eq(Str a, Str b) {
+bool str_eq(Str a, Str b) {
     return Str__eq(&a, b);
 }
 

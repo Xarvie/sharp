@@ -39,7 +39,7 @@ void Color__set_rgb(Color * this, int r, int g, int b);
 void Color__blend(Color * this, int dr, int dg, int db, int alpha);
 
 #line 71 "sharp-test/unit/extensions/ext_method_advanced.ce"
-_Bool Color__equals_rgb(Color * this, int r, int g, int b);
+bool Color__equals_rgb(Color * this, int r, int g, int b);
 
 #line 76 "sharp-test/unit/extensions/ext_method_advanced.ce"
 typedef struct Point Point;
@@ -135,14 +135,14 @@ int Painter__render(Painter * this);
 typedef struct Container__int Container__int;
 struct Container__int {
     int data;
-    _Bool valid;
+    bool valid;
 };
 
 
 typedef struct Container__long Container__long;
 struct Container__long {
     long data;
-    _Bool valid;
+    bool valid;
 };
 
 
@@ -157,7 +157,7 @@ struct Pair__int {
 
 
 #line 212 "sharp-test/unit/extensions/ext_method_advanced.ce"
-_Bool Container__int__is_valid(Container__int * this);
+bool Container__int__is_valid(Container__int * this);
 
 #line 220 "sharp-test/unit/extensions/ext_method_advanced.ce"
 int Container__int__get_or(Container__int * this, int default_val);
@@ -286,7 +286,7 @@ void Color__blend(Color * this, int dr, int dg, int db, int alpha) {
 }
 
 #line 71 "sharp-test/unit/extensions/ext_method_advanced.ce"
-_Bool Color__equals_rgb(Color * this, int r, int g, int b) {
+bool Color__equals_rgb(Color * this, int r, int g, int b) {
 
 #line 72 "sharp-test/unit/extensions/ext_method_advanced.ce"
     return this->r == r && this->g == g && this->b == b;
@@ -729,7 +729,7 @@ int main(void) {
     Container__int ci;
 
 #line 318 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    ci.valid = 0;
+    ci.valid = false;
 
 #line 319 "sharp-test/unit/extensions/ext_method_advanced.ce"
     if (Container__int__is_valid(&ci)) 
@@ -765,7 +765,7 @@ int main(void) {
     Container__long cl;
 
 #line 329 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    cl.valid = 0;
+    cl.valid = false;
 
 #line 330 "sharp-test/unit/extensions/ext_method_advanced.ce"
     Container__long__set(&cl, 999L);
@@ -807,7 +807,7 @@ int main(void) {
 }
 
 #line 212 "sharp-test/unit/extensions/ext_method_advanced.ce"
-__attribute__((weak)) _Bool Container__int__is_valid(Container__int * this) {
+__attribute__((weak)) bool Container__int__is_valid(Container__int * this) {
 
 #line 213 "sharp-test/unit/extensions/ext_method_advanced.ce"
     return this->valid;
@@ -833,7 +833,7 @@ __attribute__((weak)) void Container__int__set(Container__int * this, int v) {
     this->data = v;
 
 #line 209 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    this->valid = 1;
+    this->valid = true;
 }
 
 
@@ -849,7 +849,7 @@ __attribute__((weak)) int Container__int__get(Container__int * this) {
 __attribute__((weak)) void Container__int__reset(Container__int * this) {
 
 #line 217 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    this->valid = 0;
+    this->valid = false;
 }
 
 
@@ -860,7 +860,7 @@ __attribute__((weak)) void Container__long__set(Container__long * this, long v) 
     this->data = v;
 
 #line 209 "sharp-test/unit/extensions/ext_method_advanced.ce"
-    this->valid = 1;
+    this->valid = true;
 }
 
 

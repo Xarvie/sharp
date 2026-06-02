@@ -31,6 +31,7 @@ typedef struct { const char *word; SharpTokKind kind; } KwEntry;
 static const KwEntry kw_table[] = {
     /* a */ { "auto",             STOK_AUTO          },
     /* b */ { "break",            STOK_BREAK         },
+            { "bool",             STOK_BOOL          },  /* C23: alias for _Bool */
     /* c */ { "case",             STOK_CASE          },
             { "char",             STOK_CHAR          },
             { "class",            STOK_CLASS         },  /* Sharp: class = struct + methods + auto-typedef */
@@ -46,12 +47,14 @@ static const KwEntry kw_table[] = {
             { "extern",           STOK_EXTERN        },
     /* f */ { "float",            STOK_FLOAT         },
             { "for",              STOK_FOR           },
+            { "false",            STOK_FALSE         },  /* C23: boolean constant 0 */
     /* g */ { "goto",             STOK_GOTO          },
     /* i */ { "if",               STOK_IF            },
             { "inline",           STOK_INLINE        },
             { "int",              STOK_INT           },
     /* l */ { "long",             STOK_LONG          },
     /* o */ { "operator",         STOK_OPERATOR      },  /* Sharp */
+    /* n */ { "nullptr",          STOK_NULLPTR       },  /* C23: null pointer constant */
     /* r */ { "register",         STOK_REGISTER      },
             { "restrict",         STOK_RESTRICT      },
             { "return",           STOK_RETURN        },
@@ -62,7 +65,9 @@ static const KwEntry kw_table[] = {
             { "struct",           STOK_STRUCT        },
             { "switch",           STOK_SWITCH        },
     /* t */ { "this",             STOK_THIS          },  /* Phase 1: Sharp */
+            { "true",             STOK_TRUE          },  /* C23: boolean constant 1 */
             { "typedef",          STOK_TYPEDEF       },
+            { "typeof_unqual",    STOK_TYPEOF_UNQUAL },  /* C23: typeof without qualifiers */
     /* u */ { "union",            STOK_UNION         },
             { "unsigned",         STOK_UNSIGNED      },
     /* v */ { "void",             STOK_VOID          },
@@ -72,6 +77,7 @@ static const KwEntry kw_table[] = {
             { "_Alignof",         STOK__ALIGNOF      },
             { "_Atomic",          STOK__ATOMIC       },
             { "_Bool",            STOK__BOOL         },
+            { "_BitInt",          STOK_BITINT        },  /* C23: bit-precise integer */
             { "_Complex",         STOK__COMPLEX      },
             { "_Generic",         STOK__GENERIC      },
             { "_Imaginary",       STOK__IMAGINARY    },
@@ -582,8 +588,7 @@ void lex_free(SharpTok *toks) {
 }
 
 bool lex_is_keyword(SharpTokKind k) {
-    /* Range covers all C11 + Sharp keywords including STOK_CONSTEXPR. */
-    return k >= STOK_AUTO && k <= STOK_CONSTEXPR;
+    return k >= STOK_AUTO && k <= STOK_BITINT;
 }
 
 const char *lex_tok_kind_name(SharpTokKind k) {
@@ -595,8 +600,11 @@ const char *lex_tok_kind_name(SharpTokKind k) {
         "int","long","register","restrict","return","short","signed","sizeof",
         "static","struct","switch","typedef","union","unsigned","void",
         "volatile","while",
-        "_Alignas","_Alignof","_Atomic","_Bool","_Complex","_Generic",
+        "_Alignas","_Alignof","_Atomic","_Bool","typeof",
+        "_Complex","_Generic",
         "_Imaginary","_Noreturn","_Static_assert","_Thread_local",
+        /* C23 new keywords */
+        "bool","true","false","nullptr","typeof_unqual","_BitInt",
         /* Sharp keywords (matches lex.h enum order) */
         "defer","operator","this","class",
         "constexpr",            /* C23: compile-time constant specifier */

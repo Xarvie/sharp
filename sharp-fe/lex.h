@@ -51,9 +51,16 @@ typedef enum {
     STOK_UNSIGNED, STOK_VOID, STOK_VOLATILE, STOK_WHILE,
     /* C11 underscore keywords */
     STOK__ALIGNAS, STOK__ALIGNOF, STOK__ATOMIC, STOK__BOOL,
-    STOK_TYPEOF,       /* typeof / __typeof__ / __typeof  — GCC extension */
+    STOK_TYPEOF,       /* typeof / __typeof__ / __typeof  — GCC extension / C23 */
     STOK__COMPLEX, STOK__GENERIC, STOK__IMAGINARY, STOK__NORETURN,
     STOK__STATIC_ASSERT, STOK__THREAD_LOCAL,
+    /* C23 new keywords */
+    STOK_BOOL,          /* 'bool'   — C23: alias for _Bool                  */
+    STOK_TRUE,          /* 'true'   — C23: boolean constant 1               */
+    STOK_FALSE,         /* 'false'  — C23: boolean constant 0               */
+    STOK_NULLPTR,       /* 'nullptr'— C23: null pointer constant            */
+    STOK_TYPEOF_UNQUAL, /* 'typeof_unqual' — C23: typeof without qualifiers */
+    STOK_BITINT,        /* '_BitInt'— C23: bit-precise integer              */
 
     /* ── Sharp keywords ─────────────────────────────────────────────────── */
     STOK_DEFER,      /* 'defer'    — Sharp scope-exit statement            */

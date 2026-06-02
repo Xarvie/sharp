@@ -37,7 +37,7 @@ struct Arr__int {
 int Pair__int__float__first_val(Pair__int__float * this);
 
 #line 13 "sharp-test/unit/generics/operator.ce"
-_Bool Vec2__int__equals(Vec2__int * this, Vec2__int other);
+bool Vec2__int__equals(Vec2__int * this, Vec2__int other);
 
 #line 17 "sharp-test/unit/generics/operator.ce"
 void Vec2__int__add_into(Vec2__int * this, Vec2__int other);
@@ -231,7 +231,7 @@ __attribute__((weak)) int Pair__int__float__first_val(Pair__int__float * this) {
 
 
 #line 13 "sharp-test/unit/generics/operator.ce"
-__attribute__((weak)) _Bool Vec2__int__equals(Vec2__int * this, Vec2__int other) {
+__attribute__((weak)) bool Vec2__int__equals(Vec2__int * this, Vec2__int other) {
 
 #line 14 "sharp-test/unit/generics/operator.ce"
     return this->x == other.x && this->y == other.y;

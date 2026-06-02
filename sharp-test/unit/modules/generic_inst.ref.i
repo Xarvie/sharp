@@ -26,10 +26,10 @@ void RingBuf__int__init(RingBuf__int * this, int * buf, long capacity);
 long RingBuf__int__size(RingBuf__int * this);
 
 #line 25 "sharp-test/unit/modules/generic_inst.he"
-_Bool RingBuf__int__push(RingBuf__int * this, int val);
+bool RingBuf__int__push(RingBuf__int * this, int val);
 
 #line 33 "sharp-test/unit/modules/generic_inst.he"
-_Bool RingBuf__int__pop(RingBuf__int * this, int * out);
+bool RingBuf__int__pop(RingBuf__int * this, int * out);
 
 #line 17 "sharp-test/unit/modules/generic_inst.he"
 
@@ -201,11 +201,11 @@ __attribute__((weak)) long RingBuf__int__size(RingBuf__int * this) {
 
 
 #line 25 "sharp-test/unit/modules/generic_inst.he"
-__attribute__((weak)) _Bool RingBuf__int__push(RingBuf__int * this, int val) {
+__attribute__((weak)) bool RingBuf__int__push(RingBuf__int * this, int val) {
 
 #line 26 "sharp-test/unit/modules/generic_inst.he"
     if (this->count >= this->cap) 
-        return 0;
+        return false;
 
 #line 27 "sharp-test/unit/modules/generic_inst.he"
     this->data[this->tail] = val;
@@ -217,16 +217,16 @@ __attribute__((weak)) _Bool RingBuf__int__push(RingBuf__int * this, int val) {
     this->count = this->count + 1;
 
 #line 30 "sharp-test/unit/modules/generic_inst.he"
-    return 1;
+    return true;
 }
 
 
 #line 33 "sharp-test/unit/modules/generic_inst.he"
-__attribute__((weak)) _Bool RingBuf__int__pop(RingBuf__int * this, int * out) {
+__attribute__((weak)) bool RingBuf__int__pop(RingBuf__int * this, int * out) {
 
 #line 34 "sharp-test/unit/modules/generic_inst.he"
     if (this->count == 0) 
-        return 0;
+        return false;
 
 #line 35 "sharp-test/unit/modules/generic_inst.he"
     *out = this->data[this->head];
@@ -238,6 +238,6 @@ __attribute__((weak)) _Bool RingBuf__int__pop(RingBuf__int * this, int * out) {
     this->count = this->count - 1;
 
 #line 38 "sharp-test/unit/modules/generic_inst.he"
-    return 1;
+    return true;
 }
 

@@ -875,7 +875,7 @@ capture_zig_cc_verbose(const char *zig_exe, const char *target)
 
     /* zig cc -E -v outputs verbose info to stderr */
     snprintf(cmd, sizeof(cmd),
-             "%s cc -E -v -std=c11%s%s%s -x c %s >\"%s\" 2>\"%s\"",
+             "%s cc -E -v -std=c23%s%s%s -x c %s >\"%s\" 2>\"%s\"",
              zig_exe,
              target ? " -target " : "",
              target ? target : "",

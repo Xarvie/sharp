@@ -647,8 +647,8 @@ int sum_ints(int count, ...) {
 #line 8 "sharp-test/unit/cinterop/variadic.ce"
     va_list ap;
 
-#line 17 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
-    __builtin_va_start(ap, count);
+#line 14 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
+    __builtin_c23_va_start(ap, count);
 
 #line 10 "sharp-test/unit/cinterop/variadic.ce"
     int total = 0;
@@ -672,8 +672,8 @@ double sum_doubles(int count, ...) {
 #line 19 "sharp-test/unit/cinterop/variadic.ce"
     va_list ap;
 
-#line 17 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
-    __builtin_va_start(ap, count);
+#line 14 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
+    __builtin_c23_va_start(ap, count);
 
 #line 21 "sharp-test/unit/cinterop/variadic.ce"
     double total = 0.0;
@@ -697,8 +697,8 @@ int max_int(int count, ...) {
 #line 30 "sharp-test/unit/cinterop/variadic.ce"
     va_list ap;
 
-#line 17 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
-    __builtin_va_start(ap, count);
+#line 14 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
+    __builtin_c23_va_start(ap, count);
 
 #line 32 "sharp-test/unit/cinterop/variadic.ce"
     int result = __builtin_va_arg(ap ,int);
@@ -727,8 +727,8 @@ int parse_fmt(const char * fmt, ...) {
 #line 45 "sharp-test/unit/cinterop/variadic.ce"
     va_list ap;
 
-#line 17 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
-    __builtin_va_start(ap, fmt);
+#line 14 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
+    __builtin_c23_va_start(ap, fmt);
 
 #line 47 "sharp-test/unit/cinterop/variadic.ce"
     int count = 0;
@@ -791,8 +791,8 @@ int str_lengths(int count, ...) {
 #line 69 "sharp-test/unit/cinterop/variadic.ce"
     va_list ap;
 
-#line 17 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
-    __builtin_va_start(ap, count);
+#line 14 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
+    __builtin_c23_va_start(ap, count);
 
 #line 71 "sharp-test/unit/cinterop/variadic.ce"
     int total = 0;
@@ -827,8 +827,8 @@ int sum_then_max(int count, ...) {
 #line 84 "sharp-test/unit/cinterop/variadic.ce"
     va_list ap;
 
-#line 17 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
-    __builtin_va_start(ap, count);
+#line 14 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
+    __builtin_c23_va_start(ap, count);
 
 #line 87 "sharp-test/unit/cinterop/variadic.ce"
     va_list ap2;
@@ -873,8 +873,8 @@ int first_arg(int n, ...) {
 #line 107 "sharp-test/unit/cinterop/variadic.ce"
     va_list ap;
 
-#line 17 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
-    __builtin_va_start(ap, n);
+#line 14 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
+    __builtin_c23_va_start(ap, n);
 
 #line 109 "sharp-test/unit/cinterop/variadic.ce"
     int result = __builtin_va_arg(ap ,int);
@@ -892,8 +892,8 @@ long long sum_longs(int count, ...) {
 #line 116 "sharp-test/unit/cinterop/variadic.ce"
     va_list ap;
 
-#line 17 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
-    __builtin_va_start(ap, count);
+#line 14 "/root/code/sharp/zig/lib/include/__stdarg_va_arg.h"
+    __builtin_c23_va_start(ap, count);
 
 #line 118 "sharp-test/unit/cinterop/variadic.ce"
     long long total = 0;

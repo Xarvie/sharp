@@ -33,7 +33,7 @@ CppCtx *cpp_ctx_new(void) {
     ctx->keep_whitespace   = false;
     ctx->keep_comments     = false;
     ctx->max_include_depth = 200;
-    ctx->lang_std          = 201112L;  /* Always C11 — Sharp only supports C11 */
+    ctx->lang_std          = 202311L;  /* C23 — Sharp targets C23 by default */
     /* Phase R12: phase 6 (adjacent string concat) defaults OFF to match
      * gcc -E / clang -E output.  Standalone consumers can opt-in via
      * cpp_set_phase6_concat(ctx, true).                                  */

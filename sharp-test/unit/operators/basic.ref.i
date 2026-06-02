@@ -37,22 +37,22 @@ IntBox IntBox__op_div(IntBox * this, IntBox other);
 IntBox IntBox__op_mod(IntBox * this, IntBox other);
 
 #line 46 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_eq(IntBox * this, IntBox other);
+bool IntBox__op_eq(IntBox * this, IntBox other);
 
 #line 49 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_ne(IntBox * this, IntBox other);
+bool IntBox__op_ne(IntBox * this, IntBox other);
 
 #line 52 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_lt(IntBox * this, IntBox other);
+bool IntBox__op_lt(IntBox * this, IntBox other);
 
 #line 55 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_gt(IntBox * this, IntBox other);
+bool IntBox__op_gt(IntBox * this, IntBox other);
 
 #line 58 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_le(IntBox * this, IntBox other);
+bool IntBox__op_le(IntBox * this, IntBox other);
 
 #line 61 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_ge(IntBox * this, IntBox other);
+bool IntBox__op_ge(IntBox * this, IntBox other);
 
 #line 66 "sharp-test/unit/operators/basic.ce"
 struct Point {
@@ -149,42 +149,42 @@ IntBox IntBox__op_mod(IntBox * this, IntBox other) {
 }
 
 #line 46 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_eq(IntBox * this, IntBox other) {
+bool IntBox__op_eq(IntBox * this, IntBox other) {
 
 #line 47 "sharp-test/unit/operators/basic.ce"
     return this->value == other.value;
 }
 
 #line 49 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_ne(IntBox * this, IntBox other) {
+bool IntBox__op_ne(IntBox * this, IntBox other) {
 
 #line 50 "sharp-test/unit/operators/basic.ce"
     return this->value != other.value;
 }
 
 #line 52 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_lt(IntBox * this, IntBox other) {
+bool IntBox__op_lt(IntBox * this, IntBox other) {
 
 #line 53 "sharp-test/unit/operators/basic.ce"
     return this->value < other.value;
 }
 
 #line 55 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_gt(IntBox * this, IntBox other) {
+bool IntBox__op_gt(IntBox * this, IntBox other) {
 
 #line 56 "sharp-test/unit/operators/basic.ce"
     return this->value > other.value;
 }
 
 #line 58 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_le(IntBox * this, IntBox other) {
+bool IntBox__op_le(IntBox * this, IntBox other) {
 
 #line 59 "sharp-test/unit/operators/basic.ce"
     return this->value <= other.value;
 }
 
 #line 61 "sharp-test/unit/operators/basic.ce"
-_Bool IntBox__op_ge(IntBox * this, IntBox other) {
+bool IntBox__op_ge(IntBox * this, IntBox other) {
 
 #line 62 "sharp-test/unit/operators/basic.ce"
     return this->value >= other.value;

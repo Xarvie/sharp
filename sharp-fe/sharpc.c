@@ -738,7 +738,7 @@ static void usage(FILE *out) {
 "  -D <NAME>[=V]       define macro\n"
 "  -U <NAME>           undefine macro\n"
 "  -P                  suppress linemarkers\n"
-"  -std=c11            language standard (C11 only)\n"
+"  -std=c23            language standard (C23 default)\n"
 "\n"
 "Compilation control:\n"
 "  -E                  preprocess only; do not compile, assemble or link\n"
@@ -933,7 +933,7 @@ static CppCtx *setup_cpp_context(const char *target, long lang_std,
     CppCtx *cctx = cpp_ctx_new();
     cpp_probe_zig_macros(cctx, target);
     cpp_emit_linemarkers(cctx, linemarkers);
-    if (lang_std >= 0) cpp_set_lang_std(cctx, lang_std);
+    cpp_set_lang_std(cctx, lang_std);
 
     for (size_t i = 0; i < user_inc->len; i++)
         cpp_add_user_include(cctx, user_inc->data[i]);
@@ -1158,7 +1158,7 @@ static char *write_tmp_file(const char *prefix, const char *suffix,
 static char *compile_input_to_obj(const char *zig_exe, const char *target,
                                    const char *sysroot, StrVec *link_other,
                                    StrVec *user_inc, StrVec *sys_inc,
-                                   InputFile *inf) {
+                                   InputFile *inf, long lang_std) {
     const char *obj_path = make_tmp_name(inf->path, ".o");
     if (!obj_path) return NULL;
 
@@ -1204,6 +1204,9 @@ static char *compile_input_to_obj(const char *zig_exe, const char *target,
     if (!tmp_i) return NULL;
 
     StrVec args = zig_cc_prefix(zig_exe, target, sysroot, link_other);
+    if (lang_std >= 202311L)      sv_push(&args, "-std=c23");
+    else if (lang_std >= 201710L) sv_push(&args, "-std=c17");
+    else if (lang_std >= 201112L) sv_push(&args, "-std=c11");
     sv_push(&args, "-x");
     sv_push(&args, "c");
     sv_push(&args, "-c");
@@ -1271,7 +1274,7 @@ int main(int argc, char *argv[]) {
     StrVec      link_paths  = {0};   /* -L<dir> */
     StrVec      link_other  = {0};   /* extra linker flags (-shared, -static, etc.) */
     StrVec      force_includes = {0}; /* -include <file> */
-    long        lang_std    = -1;
+    long        lang_std    = 202311L;  /* default: C23 */
     InputVec    inputs      = {0};
     int         ret         = 0;
 
@@ -1362,11 +1365,18 @@ int main(int argc, char *argv[]) {
         /* ── -std=... ────────────────────────────────────────────── */
         } else if (strncmp(a, "-std=", 5) == 0) {
             const char *s = a + 5;
-            if (strcmp(s, "c11") == 0 || strcmp(s, "gnu11") == 0 ||
-                strcmp(s, "iso9899:2011") == 0)
+            if (strcmp(s, "c23") == 0 || strcmp(s, "gnu23") == 0 ||
+                strcmp(s, "iso9899:2024") == 0 || strcmp(s, "c2x") == 0 ||
+                strcmp(s, "gnu2x") == 0)
+                lang_std = 202311L;
+            else if (strcmp(s, "c17") == 0 || strcmp(s, "gnu17") == 0 ||
+                     strcmp(s, "iso9899:2018") == 0)
+                lang_std = 201710L;
+            else if (strcmp(s, "c11") == 0 || strcmp(s, "gnu11") == 0 ||
+                     strcmp(s, "iso9899:2011") == 0)
                 lang_std = 201112L;
             else
-                fprintf(stderr, "sharpc: only -std=c11 is supported, ignoring -std=%s\n", s);
+                fprintf(stderr, "sharpc: unsupported -std=%s (use c23, c17 or c11)\n", s);
 
         /* ── Linker flags (-l, -L, -shared, -static) ─────────────── */
         } else if (strncmp(a, "-l", 2) == 0 && a[2]) {
@@ -1630,6 +1640,9 @@ int main(int argc, char *argv[]) {
 
             if (inf->tmp_is_zig_direct) {
                 StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
+                if (lang_std >= 202311L)      sv_push(&zig_args, "-std=c23");
+                else if (lang_std >= 201710L) sv_push(&zig_args, "-std=c17");
+                else if (lang_std >= 201112L) sv_push(&zig_args, "-std=c11");
                 sv_push(&zig_args, "-S");
                 sv_push(&zig_args, inf->tmp_c);
                 sv_push(&zig_args, "-o");
@@ -1649,6 +1662,9 @@ int main(int argc, char *argv[]) {
                 if (!tmp_i) { ret = 2; goto cleanup; }
 
                 StrVec zig_args = zig_cc_prefix(zig_exe, target, sysroot, &link_other);
+                if (lang_std >= 202311L)      sv_push(&zig_args, "-std=c23");
+                else if (lang_std >= 201710L) sv_push(&zig_args, "-std=c17");
+                else if (lang_std >= 201112L) sv_push(&zig_args, "-std=c11");
                 sv_push(&zig_args, "-x");
                 sv_push(&zig_args, "c");
                 sv_push(&zig_args, "-S");
@@ -1704,7 +1720,8 @@ int main(int argc, char *argv[]) {
 
             char *obj_tmp = compile_input_to_obj(zig_exe, target, sysroot,
                                                   &link_other,
-                                                  &user_inc, &sys_inc, inf);
+                                                  &user_inc, &sys_inc, inf,
+                                                  lang_std);
             if (!obj_tmp) { ret = 3; goto cleanup; }
 
             if (strcmp(obj_tmp, obj_out) != 0) {
@@ -1739,7 +1756,8 @@ int main(int argc, char *argv[]) {
 
         char *obj_tmp = compile_input_to_obj(zig_exe, target, sysroot,
                                               &link_other,
-                                              &user_inc, &sys_inc, inf);
+                                              &user_inc, &sys_inc, inf,
+                                              lang_std);
         if (!obj_tmp) { ret = 3; goto cleanup; }
 
         sv_push(&obj_files, obj_tmp);

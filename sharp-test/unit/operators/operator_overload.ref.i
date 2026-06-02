@@ -16,10 +16,10 @@ Vec2 Vec2__op_sub(Vec2 * this, Vec2 other);
 Vec2 Vec2__op_mul(Vec2 * this, int s);
 
 #line 31 "sharp-test/unit/operators/operator_overload.ce"
-_Bool Vec2__op_eq(Vec2 * this, Vec2 other);
+bool Vec2__op_eq(Vec2 * this, Vec2 other);
 
 #line 35 "sharp-test/unit/operators/operator_overload.ce"
-_Bool Vec2__op_ne(Vec2 * this, Vec2 other);
+bool Vec2__op_ne(Vec2 * this, Vec2 other);
 
 #line 39 "sharp-test/unit/operators/operator_overload.ce"
 typedef struct Vec2f Vec2f;
@@ -38,10 +38,10 @@ Vec2f Vec2f__op_sub(Vec2f * this, Vec2f other);
 Vec2f Vec2f__op_mul(Vec2f * this, float s);
 
 #line 65 "sharp-test/unit/operators/operator_overload.ce"
-_Bool Vec2f__op_eq(Vec2f * this, Vec2f other);
+bool Vec2f__op_eq(Vec2f * this, Vec2f other);
 
 #line 69 "sharp-test/unit/operators/operator_overload.ce"
-_Bool Vec2f__op_ne(Vec2f * this, Vec2f other);
+bool Vec2f__op_ne(Vec2f * this, Vec2f other);
 
 #line 10 "sharp-test/unit/operators/operator_overload.ce"
 Vec2 Vec2__op_add(Vec2 * this, Vec2 other) {
@@ -92,14 +92,14 @@ Vec2 Vec2__op_mul(Vec2 * this, int s) {
 }
 
 #line 31 "sharp-test/unit/operators/operator_overload.ce"
-_Bool Vec2__op_eq(Vec2 * this, Vec2 other) {
+bool Vec2__op_eq(Vec2 * this, Vec2 other) {
 
 #line 32 "sharp-test/unit/operators/operator_overload.ce"
     return this->x == other.x && this->y == other.y;
 }
 
 #line 35 "sharp-test/unit/operators/operator_overload.ce"
-_Bool Vec2__op_ne(Vec2 * this, Vec2 other) {
+bool Vec2__op_ne(Vec2 * this, Vec2 other) {
 
 #line 36 "sharp-test/unit/operators/operator_overload.ce"
     return this->x != other.x || this->y != other.y;
@@ -154,14 +154,14 @@ Vec2f Vec2f__op_mul(Vec2f * this, float s) {
 }
 
 #line 65 "sharp-test/unit/operators/operator_overload.ce"
-_Bool Vec2f__op_eq(Vec2f * this, Vec2f other) {
+bool Vec2f__op_eq(Vec2f * this, Vec2f other) {
 
 #line 66 "sharp-test/unit/operators/operator_overload.ce"
     return this->x == other.x && this->y == other.y;
 }
 
 #line 69 "sharp-test/unit/operators/operator_overload.ce"
-_Bool Vec2f__op_ne(Vec2f * this, Vec2f other) {
+bool Vec2f__op_ne(Vec2f * this, Vec2f other) {
 
 #line 70 "sharp-test/unit/operators/operator_overload.ce"
     return this->x != other.x || this->y != other.y;

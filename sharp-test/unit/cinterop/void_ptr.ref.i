@@ -83,7 +83,7 @@ void AnyBox__set_float(AnyBox * this, float * p) {
 }
 
 #line 29 "sharp-test/unit/cinterop/void_ptr.ce"
-_Bool ptr_equals(void * a, void * b) {
+bool ptr_equals(void * a, void * b) {
     return a == b;
 }
 

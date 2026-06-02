@@ -38,22 +38,22 @@ struct RingBuf__float {
 void RingBuf__int__init(RingBuf__int * this, int * buf, long capacity);
 
 #line 49 "sharp-test/unit/modules/module_advanced.he"
-_Bool RingBuf__int__is_empty(RingBuf__int * this);
+bool RingBuf__int__is_empty(RingBuf__int * this);
 
 #line 47 "sharp-test/unit/modules/module_advanced.he"
 long RingBuf__int__size(RingBuf__int * this);
 
 #line 21 "sharp-test/unit/modules/module_advanced.he"
-_Bool RingBuf__int__push(RingBuf__int * this, int val);
+bool RingBuf__int__push(RingBuf__int * this, int val);
 
 #line 37 "sharp-test/unit/modules/module_advanced.he"
 int RingBuf__int__peek(RingBuf__int * this);
 
 #line 29 "sharp-test/unit/modules/module_advanced.he"
-_Bool RingBuf__int__pop(RingBuf__int * this, int * out);
+bool RingBuf__int__pop(RingBuf__int * this, int * out);
 
 #line 50 "sharp-test/unit/modules/module_advanced.he"
-_Bool RingBuf__int__is_full(RingBuf__int * this);
+bool RingBuf__int__is_full(RingBuf__int * this);
 
 #line 41 "sharp-test/unit/modules/module_advanced.he"
 void RingBuf__int__clear(RingBuf__int * this);
@@ -62,7 +62,7 @@ void RingBuf__int__clear(RingBuf__int * this);
 void RingBuf__float__init(RingBuf__float * this, float * buf, long capacity);
 
 #line 21 "sharp-test/unit/modules/module_advanced.he"
-_Bool RingBuf__float__push(RingBuf__float * this, float val);
+bool RingBuf__float__push(RingBuf__float * this, float val);
 
 #line 47 "sharp-test/unit/modules/module_advanced.he"
 long RingBuf__float__size(RingBuf__float * this);
@@ -71,7 +71,7 @@ long RingBuf__float__size(RingBuf__float * this);
 long RingBuf__float__capacity(RingBuf__float * this);
 
 #line 29 "sharp-test/unit/modules/module_advanced.he"
-_Bool RingBuf__float__pop(RingBuf__float * this, float * out);
+bool RingBuf__float__pop(RingBuf__float * this, float * out);
 
 #line 37 "sharp-test/unit/modules/module_advanced.he"
 float RingBuf__float__peek(RingBuf__float * this);
@@ -429,7 +429,7 @@ __attribute__((weak)) void RingBuf__int__init(RingBuf__int * this, int * buf, lo
 
 
 #line 49 "sharp-test/unit/modules/module_advanced.he"
-__attribute__((weak)) _Bool RingBuf__int__is_empty(RingBuf__int * this) {
+__attribute__((weak)) bool RingBuf__int__is_empty(RingBuf__int * this) {
     return this->count == 0;
 }
 
@@ -441,11 +441,11 @@ __attribute__((weak)) long RingBuf__int__size(RingBuf__int * this) {
 
 
 #line 21 "sharp-test/unit/modules/module_advanced.he"
-__attribute__((weak)) _Bool RingBuf__int__push(RingBuf__int * this, int val) {
+__attribute__((weak)) bool RingBuf__int__push(RingBuf__int * this, int val) {
 
 #line 22 "sharp-test/unit/modules/module_advanced.he"
     if (this->count >= this->cap) 
-        return 0;
+        return false;
 
 #line 23 "sharp-test/unit/modules/module_advanced.he"
     this->data[this->tail] = val;
@@ -457,7 +457,7 @@ __attribute__((weak)) _Bool RingBuf__int__push(RingBuf__int * this, int val) {
     this->count = this->count + 1;
 
 #line 26 "sharp-test/unit/modules/module_advanced.he"
-    return 1;
+    return true;
 }
 
 
@@ -470,11 +470,11 @@ __attribute__((weak)) int RingBuf__int__peek(RingBuf__int * this) {
 
 
 #line 29 "sharp-test/unit/modules/module_advanced.he"
-__attribute__((weak)) _Bool RingBuf__int__pop(RingBuf__int * this, int * out) {
+__attribute__((weak)) bool RingBuf__int__pop(RingBuf__int * this, int * out) {
 
 #line 30 "sharp-test/unit/modules/module_advanced.he"
     if (this->count == 0) 
-        return 0;
+        return false;
 
 #line 31 "sharp-test/unit/modules/module_advanced.he"
     *out = this->data[this->head];
@@ -486,12 +486,12 @@ __attribute__((weak)) _Bool RingBuf__int__pop(RingBuf__int * this, int * out) {
     this->count = this->count - 1;
 
 #line 34 "sharp-test/unit/modules/module_advanced.he"
-    return 1;
+    return true;
 }
 
 
 #line 50 "sharp-test/unit/modules/module_advanced.he"
-__attribute__((weak)) _Bool RingBuf__int__is_full(RingBuf__int * this) {
+__attribute__((weak)) bool RingBuf__int__is_full(RingBuf__int * this) {
     return this->count >= this->cap;
 }
 
@@ -531,11 +531,11 @@ __attribute__((weak)) void RingBuf__float__init(RingBuf__float * this, float * b
 
 
 #line 21 "sharp-test/unit/modules/module_advanced.he"
-__attribute__((weak)) _Bool RingBuf__float__push(RingBuf__float * this, float val) {
+__attribute__((weak)) bool RingBuf__float__push(RingBuf__float * this, float val) {
 
 #line 22 "sharp-test/unit/modules/module_advanced.he"
     if (this->count >= this->cap) 
-        return 0;
+        return false;
 
 #line 23 "sharp-test/unit/modules/module_advanced.he"
     this->data[this->tail] = val;
@@ -547,7 +547,7 @@ __attribute__((weak)) _Bool RingBuf__float__push(RingBuf__float * this, float va
     this->count = this->count + 1;
 
 #line 26 "sharp-test/unit/modules/module_advanced.he"
-    return 1;
+    return true;
 }
 
 
@@ -564,11 +564,11 @@ __attribute__((weak)) long RingBuf__float__capacity(RingBuf__float * this) {
 
 
 #line 29 "sharp-test/unit/modules/module_advanced.he"
-__attribute__((weak)) _Bool RingBuf__float__pop(RingBuf__float * this, float * out) {
+__attribute__((weak)) bool RingBuf__float__pop(RingBuf__float * this, float * out) {
 
 #line 30 "sharp-test/unit/modules/module_advanced.he"
     if (this->count == 0) 
-        return 0;
+        return false;
 
 #line 31 "sharp-test/unit/modules/module_advanced.he"
     *out = this->data[this->head];
@@ -580,7 +580,7 @@ __attribute__((weak)) _Bool RingBuf__float__pop(RingBuf__float * this, float * o
     this->count = this->count - 1;
 
 #line 34 "sharp-test/unit/modules/module_advanced.he"
-    return 1;
+    return true;
 }
 
 

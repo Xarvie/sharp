@@ -539,7 +539,7 @@ static void register_builtins(Scope *g, FeDiagArr *diags) {
     static const char *builtins[] = {
         "void", "char", "short", "int", "long",
         "float", "double", "signed", "unsigned",
-        "_Bool", "__int128",
+        "bool", "_Bool", "__int128",
         NULL
     };
     for (int i = 0; builtins[i]; i++)

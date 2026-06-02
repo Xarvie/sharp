@@ -27,7 +27,7 @@ struct HasOps {
 int HasOps__op_add(HasOps * this, int x);
 
 #line 18 "sharp-test/unit/introspection/compile_time.ce"
-_Bool HasOps__op_eq(HasOps * this, HasOps o);
+bool HasOps__op_eq(HasOps * this, HasOps o);
 
 #line 7 "sharp-test/unit/introspection/compile_time.ce"
 void HasMethod__do_thing(HasMethod * this) {
@@ -45,7 +45,7 @@ int HasOps__op_add(HasOps * this, int x) {
 }
 
 #line 18 "sharp-test/unit/introspection/compile_time.ce"
-_Bool HasOps__op_eq(HasOps * this, HasOps o) {
+bool HasOps__op_eq(HasOps * this, HasOps o) {
     return this->v == o.v;
 }
 

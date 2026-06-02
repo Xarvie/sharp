@@ -23,7 +23,7 @@ Point Point__op_add(Point * this, Point rhs);
 Point Point__op_sub(Point * this, Point rhs);
 
 #line 58 "sharp-test/unit/operators/extension.ce"
-_Bool Pt__op_eq(Pt * this, Pt other);
+bool Pt__op_eq(Pt * this, Pt other);
 
 #line 13 "sharp-test/unit/operators/extension.ce"
 int test_before() {
@@ -130,7 +130,7 @@ Point Point__op_sub(Point * this, Point rhs) {
 }
 
 #line 58 "sharp-test/unit/operators/extension.ce"
-_Bool Pt__op_eq(Pt * this, Pt other) {
+bool Pt__op_eq(Pt * this, Pt other) {
 
 #line 59 "sharp-test/unit/operators/extension.ce"
     return this->x == other.x && this->y == other.y;

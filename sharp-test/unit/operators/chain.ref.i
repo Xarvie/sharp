@@ -26,7 +26,7 @@ struct Vec3 {
 Vec3 Vec3__op_add(Vec3 * this, Vec3 other);
 
 #line 31 "sharp-test/unit/operators/chain.ce"
-_Bool Vec3__op_eq(Vec3 * this, Vec3 other);
+bool Vec3__op_eq(Vec3 * this, Vec3 other);
 
 #line 10 "sharp-test/unit/operators/chain.ce"
 Counter * Counter__inc(Counter * this) {
@@ -73,7 +73,7 @@ Vec3 Vec3__op_add(Vec3 * this, Vec3 other) {
 }
 
 #line 31 "sharp-test/unit/operators/chain.ce"
-_Bool Vec3__op_eq(Vec3 * this, Vec3 other) {
+bool Vec3__op_eq(Vec3 * this, Vec3 other) {
 
 #line 32 "sharp-test/unit/operators/chain.ce"
     return this->x == other.x && this->y == other.y && this->z == other.z;

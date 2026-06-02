@@ -11,14 +11,14 @@ struct Point {
 #line 7 "sharp-test/unit/generics/embed.ce"
 typedef struct Maybe__int Maybe__int;
 struct Maybe__int {
-    _Bool has;
+    bool has;
     int val;
 };
 
 
 typedef struct Maybe__float Maybe__float;
 struct Maybe__float {
-    _Bool has;
+    bool has;
     float val;
 };
 
@@ -43,14 +43,14 @@ struct Labeled__float {
 #line 7 "sharp-test/unit/generics/embed.ce"
 typedef struct Maybe__Maybe__int Maybe__Maybe__int;
 struct Maybe__Maybe__int {
-    _Bool has;
+    bool has;
     Maybe__int val;
 };
 
 
 
 #line 12 "sharp-test/unit/generics/embed.ce"
-_Bool Maybe__int__has_val(Maybe__int * this);
+bool Maybe__int__has_val(Maybe__int * this);
 
 #line 14 "sharp-test/unit/generics/embed.ce"
 void Maybe__int__set_val(Maybe__int * this, int v);
@@ -59,7 +59,7 @@ void Maybe__int__set_val(Maybe__int * this, int v);
 int Maybe__int__get_val(Maybe__int * this);
 
 #line 12 "sharp-test/unit/generics/embed.ce"
-_Bool Maybe__float__has_val(Maybe__float * this);
+bool Maybe__float__has_val(Maybe__float * this);
 
 #line 14 "sharp-test/unit/generics/embed.ce"
 void Maybe__float__set_val(Maybe__float * this, float v);
@@ -86,7 +86,7 @@ void Labeled__float__set_label(Labeled__float * this, float val);
 float Labeled__float__get_label(Labeled__float * this);
 
 #line 12 "sharp-test/unit/generics/embed.ce"
-_Bool Maybe__Maybe__int__has_val(Maybe__Maybe__int * this);
+bool Maybe__Maybe__int__has_val(Maybe__Maybe__int * this);
 
 #line 14 "sharp-test/unit/generics/embed.ce"
 void Maybe__Maybe__int__set_val(Maybe__Maybe__int * this, Maybe__int v);
@@ -228,14 +228,14 @@ int main() {
 }
 
 #line 12 "sharp-test/unit/generics/embed.ce"
-__attribute__((weak)) _Bool Maybe__int__has_val(Maybe__int * this) {
+__attribute__((weak)) bool Maybe__int__has_val(Maybe__int * this) {
     return this->has;
 }
 
 
 #line 14 "sharp-test/unit/generics/embed.ce"
 __attribute__((weak)) void Maybe__int__set_val(Maybe__int * this, int v) {
-    this->has = 1;
+    this->has = true;
     this->val = v;
 }
 
@@ -247,14 +247,14 @@ __attribute__((weak)) int Maybe__int__get_val(Maybe__int * this) {
 
 
 #line 12 "sharp-test/unit/generics/embed.ce"
-__attribute__((weak)) _Bool Maybe__float__has_val(Maybe__float * this) {
+__attribute__((weak)) bool Maybe__float__has_val(Maybe__float * this) {
     return this->has;
 }
 
 
 #line 14 "sharp-test/unit/generics/embed.ce"
 __attribute__((weak)) void Maybe__float__set_val(Maybe__float * this, float v) {
-    this->has = 1;
+    this->has = true;
     this->val = v;
 }
 
@@ -303,14 +303,14 @@ __attribute__((weak)) float Labeled__float__get_label(Labeled__float * this) {
 
 
 #line 12 "sharp-test/unit/generics/embed.ce"
-__attribute__((weak)) _Bool Maybe__Maybe__int__has_val(Maybe__Maybe__int * this) {
+__attribute__((weak)) bool Maybe__Maybe__int__has_val(Maybe__Maybe__int * this) {
     return this->has;
 }
 
 
 #line 14 "sharp-test/unit/generics/embed.ce"
 __attribute__((weak)) void Maybe__Maybe__int__set_val(Maybe__Maybe__int * this, Maybe__int v) {
-    this->has = 1;
+    this->has = true;
     this->val = v;
 }
 

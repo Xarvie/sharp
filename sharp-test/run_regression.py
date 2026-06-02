@@ -157,7 +157,7 @@ class ZigBackend(CompilerBackend):
     @classmethod
     def preprocess_cmd(cls, compiler_path: str, source: str, includes: List[str],
                        target: Optional[str] = None) -> List[str]:
-        cmd = [compiler_path, "cc", "-E", "-std=c11"]
+        cmd = [compiler_path, "cc", "-E", "-std=c23"]
         if target:
             cmd.extend(["-target", target])
         cmd.append(source)
@@ -505,7 +505,7 @@ def _compile_and_run(gen_i_path: str, zig_path: str, timeout: int = 30) -> Tuple
     For cross-compiled targets, skip the run step (compile-only)."""
     exe_path = gen_i_path + ".exe"
 
-    zig_cmd = [zig_path, "cc", "-x", "c", gen_i_path, "-o", exe_path, "-std=c11", "-fno-sanitize=undefined"]
+    zig_cmd = [zig_path, "cc", "-x", "c", gen_i_path, "-o", exe_path, "-std=c23", "-fno-sanitize=undefined"]
     tag = _target_ref_tag()
     if tag:
         zig_cmd.extend(["-target", tag])
@@ -752,7 +752,7 @@ def run_bugs_tests(
             pass
         if not has_main:
             exe_path = tmp_out + ".o"
-            zig_cmd = [zig_path, "cc", "-c", tmp_out, "-o", exe_path, "-std=c11",
+            zig_cmd = [zig_path, "cc", "-c", tmp_out, "-o", exe_path, "-std=c23",
                        "-fno-sanitize=undefined"]
             tag = _target_ref_tag()
             if tag:

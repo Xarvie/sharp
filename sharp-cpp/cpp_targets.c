@@ -538,7 +538,7 @@ cpp_probe_zig_macros(CppCtx *ctx, const char *target)
     empty_file = "/dev/null";
 #endif
 
-    snprintf(cmd, sizeof(cmd), "%s cc -E -dM -std=c11%s -xc %s%s %s",
+    snprintf(cmd, sizeof(cmd), "%s cc -E -dM -std=c23%s -xc %s%s %s",
              zig_exe,
              is_apple ? " -fno-blocks" : "",
              target ? "-target " : "",

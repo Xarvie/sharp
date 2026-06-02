@@ -67,7 +67,7 @@ SHARP_SOURCES = [
 SHARPC_SOURCES = CPP_SOURCES + SHARP_SOURCES
 
 CFLAGS = [
-    "-std=c11",
+    "-std=c23",
     "-O2",
     "-Wall", "-Wextra", "-Wno-deprecated-declarations",
     "-DNDEBUG",

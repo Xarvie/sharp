@@ -283,7 +283,7 @@ struct CppCtx {
      * false to match `gcc -E`'s default behaviour (gcc only warns).     */
     bool trigraphs;
     int  max_include_depth;
-    /* Phase R9: language standard mode.  Default 201112 (C11).  Set via
+    /* Phase R9: language standard mode.  Default 202311 (C23).  Set via
      * cpp_set_lang_std() or via -ansi / -std=cXX in the CLI driver.
      * Used by directive.c to enforce #line range limits per the
      * targeted standard's §6.10.4 (32767 in C90, 2147483647 in C99+). */

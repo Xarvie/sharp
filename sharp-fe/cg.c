@@ -744,7 +744,7 @@ static void cg_type_from_ast(CgCtx *ctx, const AstNode *n) {
              strcmp(ast_nm, "signed") == 0 || strcmp(ast_nm, "short") == 0 ||
              strcmp(ast_nm, "long") == 0 || strcmp(ast_nm, "char") == 0 ||
              strcmp(ast_nm, "float") == 0 || strcmp(ast_nm, "double") == 0 ||
-             strcmp(ast_nm, "_Bool") == 0))) {
+             strcmp(ast_nm, "bool") == 0))) {
             /* Emit verbatim to preserve the spelling. */
             cg_puts(ctx, ast_nm);
         } else if (ast_nm && !n->u.type_name.is_struct_tag &&
@@ -991,7 +991,7 @@ static void cg_type(CgCtx *ctx, Type *t) {
     switch (t->kind) {
     case TY_ERROR:    cg_puts(ctx, "/* error */ int"); break;
     case TY_VOID:     cg_puts(ctx, "void");            break;
-    case TY_BOOL:     cg_puts(ctx, "_Bool");           break;
+    case TY_BOOL:     cg_puts(ctx, "bool");             break;
     case TY_CHAR:     cg_puts(ctx, "char");            break;
     case TY_SHORT:    cg_puts(ctx, "short");           break;
     case TY_INT:      cg_puts(ctx, "int");             break;

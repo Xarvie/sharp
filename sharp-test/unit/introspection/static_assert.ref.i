@@ -42,7 +42,7 @@ struct Kt {
 usize Kt__hash(Kt * this);
 
 #line 27 "sharp-test/unit/introspection/static_assert.ce"
-_Bool Kt__op_eq(Kt * this, Kt other);
+bool Kt__op_eq(Kt * this, Kt other);
 
 #line 31 "sharp-test/unit/introspection/static_assert.ce"
 struct MapEntry {
@@ -60,7 +60,7 @@ struct Map {
 };
 
 #line 43 "sharp-test/unit/introspection/static_assert.ce"
-_Bool Map__insert(Map * this, Kt key, int value);
+bool Map__insert(Map * this, Kt key, int value);
 
 #line 68 "sharp-test/unit/introspection/static_assert.ce"
 int * Map__get(Map * this, Kt key);
@@ -91,14 +91,14 @@ usize Kt__hash(Kt * this) {
 }
 
 #line 27 "sharp-test/unit/introspection/static_assert.ce"
-_Bool Kt__op_eq(Kt * this, Kt other) {
+bool Kt__op_eq(Kt * this, Kt other) {
 
 #line 28 "sharp-test/unit/introspection/static_assert.ce"
     return this->id == other.id;
 }
 
 #line 43 "sharp-test/unit/introspection/static_assert.ce"
-_Bool Map__insert(Map * this, Kt key, int value) {
+bool Map__insert(Map * this, Kt key, int value) {
 
 #line 44 "sharp-test/unit/introspection/static_assert.ce"
     /* @static_assert */ 1;
@@ -117,7 +117,7 @@ _Bool Map__insert(Map * this, Kt key, int value) {
 
 #line 50 "sharp-test/unit/introspection/static_assert.ce"
         if (!this->entries) 
-            return 0;
+            return false;
     }
 
 #line 52 "sharp-test/unit/introspection/static_assert.ce"
@@ -136,7 +136,7 @@ _Bool Map__insert(Map * this, Kt key, int value) {
             this->entries[i].value = value;
 
 #line 57 "sharp-test/unit/introspection/static_assert.ce"
-            return 0;
+            return false;
         }
 
 #line 59 "sharp-test/unit/introspection/static_assert.ce"
@@ -156,7 +156,7 @@ _Bool Map__insert(Map * this, Kt key, int value) {
     this->len = this->len + 1;
 
 #line 65 "sharp-test/unit/introspection/static_assert.ce"
-    return 1;
+    return true;
 }
 
 #line 68 "sharp-test/unit/introspection/static_assert.ce"

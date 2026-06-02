@@ -555,7 +555,7 @@ static TokStore *gcc_e_tokenise(const char *src_path, const Config *cfg,
     ArgVec av; av_init(&av);
     av_push(&av, "gcc");
     av_push(&av, "-E");
-    av_push(&av, "-std=gnu11")  /* tokcmp-fix: use gnu11 so __STRICT_ANSI__ not defined, matching sharpc preprocessor */;
+    av_push(&av, "-std=gnu23")  /* tokcmp-fix: use gnu23 so __STRICT_ANSI__ not defined, matching sharpc preprocessor */;
     av_push_isys(&av, cfg);
     av_push(&av, "-o"); av_push(&av, "-");
     av_push(&av, (char *)src_path);

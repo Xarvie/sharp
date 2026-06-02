@@ -570,7 +570,7 @@ static bool is_type_start(PS *ps) {
      * have already routed past this check. */
     case STOK_STATIC: case STOK_EXTERN: case STOK_REGISTER:
     case STOK_TYPEDEF: case STOK_INLINE: case STOK_VOLATILE:
-    case STOK_RESTRICT: case STOK__ATOMIC: case STOK_TYPEOF:
+    case STOK_RESTRICT: case STOK__ATOMIC: case STOK_TYPEOF: case STOK_TYPEOF_UNQUAL:
     /* Clang nullability annotations — macOS / iOS system headers */
     case STOK__NULLABLE: case STOK__NONNULL: case STOK__NULL_UNSPEC:
     /* GCC `__attribute__((…))` may legally lead a declaration:
@@ -589,7 +589,8 @@ static bool is_type_start(PS *ps) {
     case STOK_CONST: case STOK_STRUCT: case STOK_UNION: case STOK_ENUM: case STOK_CLASS:
     case STOK_VOID:  case STOK_INT:   case STOK_CHAR:  case STOK_LONG:
     case STOK_SHORT: case STOK_FLOAT: case STOK_DOUBLE:
-    case STOK_SIGNED:case STOK_UNSIGNED: case STOK__BOOL:
+    case STOK_SIGNED:case STOK_UNSIGNED: case STOK__BOOL: case STOK_BOOL:
+    case STOK_BITINT:
     case STOK_AUTO:
         return true;
     case STOK_IDENT:
@@ -616,7 +617,7 @@ static bool is_type_start(PS *ps) {
                 k3.kind == STOK_INT || k3.kind == STOK_CHAR ||
                 k3.kind == STOK_SHORT || k3.kind == STOK_LONG ||
                 k3.kind == STOK_FLOAT || k3.kind == STOK_DOUBLE ||
-                k3.kind == STOK__BOOL || k3.kind == STOK_VOID ||
+                k3.kind == STOK__BOOL || k3.kind == STOK_BOOL || k3.kind == STOK_VOID ||
                 k3.kind == STOK_SIGNED || k3.kind == STOK_UNSIGNED)
                 return true;
         }
@@ -677,7 +678,7 @@ static bool is_type_start(PS *ps) {
             case STOK_VOID:  case STOK_INT:   case STOK_CHAR:
             case STOK_LONG:  case STOK_SHORT: case STOK_FLOAT:
             case STOK_DOUBLE:case STOK_SIGNED:case STOK_UNSIGNED:
-            case STOK__BOOL: case STOK_IDENT:
+            case STOK__BOOL: case STOK_BOOL: case STOK_IDENT:
                 return true;
             default:
                 return false;  /* `i < 5`, `x < (a+b)` etc. */
@@ -875,7 +876,7 @@ static bool parse_generic_args(PS *ps, AstVec *args) {
                          k == STOK_CHAR   || k == STOK_LONG   ||
                          k == STOK_SHORT  || k == STOK_FLOAT  ||
                          k == STOK_DOUBLE || k == STOK_SIGNED ||
-                         k == STOK_UNSIGNED || k == STOK__BOOL ||
+                         k == STOK_UNSIGNED || k == STOK__BOOL || k == STOK_BOOL ||
                          k == STOK_AUTO   || k == STOK_IDENT);
         if (!ok_start) break;
 
@@ -974,13 +975,14 @@ static AstNode *parse_type(PS *ps) {
      * This handles the common case: `__typeof__(fread) *` → function
      * pointer type.  For our purposes, we store the whole `typeof(expr)`
      * as a verbatim type name so cc can resolve it in the generated C. */
-    if (t.kind == STOK_TYPEOF) {
+    if (t.kind == STOK_TYPEOF || t.kind == STOK_TYPEOF_UNQUAL) {
         CppLoc loc = t.loc;
-        ps_advance(ps);  /* eat typeof/__typeof__ */
+        bool is_unqual = (t.kind == STOK_TYPEOF_UNQUAL);
+        ps_advance(ps);  /* eat typeof/typeof_unqual */
         if (ps_at(ps, STOK_LPAREN)) {
-            /* Collect everything from '(' to matching ')' verbatim */
             char buf[256]; int blen = 0;
-            blen += snprintf(buf + blen, sizeof buf - blen, "__typeof__(");
+            blen += snprintf(buf + blen, sizeof buf - blen,
+                             is_unqual ? "typeof_unqual(" : "__typeof__(");
             if (blen >= (int)sizeof buf) blen = (int)sizeof buf - 1;
             ps_advance(ps);  /* eat '(' */
             int depth = 0;
@@ -1127,7 +1129,7 @@ static AstNode *parse_type(PS *ps) {
         t.kind == STOK_LONG      || t.kind == STOK_SHORT  ||
         t.kind == STOK_FLOAT     || t.kind == STOK_DOUBLE ||
         t.kind == STOK_SIGNED    || t.kind == STOK_UNSIGNED ||
-        t.kind == STOK__BOOL) {
+        t.kind == STOK__BOOL || t.kind == STOK_BOOL) {
         ps_advance(ps);
         char namebuf[64];
         size_t off = 0;
@@ -1353,7 +1355,7 @@ static AstNode *parse_type_unqual(PS *ps) {
     } else if (t.kind == STOK_IDENT || t.kind == STOK_INT || t.kind == STOK_CHAR ||
                t.kind == STOK_LONG  || t.kind == STOK_SHORT || t.kind == STOK_FLOAT ||
                t.kind == STOK_DOUBLE|| t.kind == STOK_SIGNED || t.kind == STOK_UNSIGNED ||
-               t.kind == STOK__BOOL) {
+               t.kind == STOK__BOOL || t.kind == STOK_BOOL) {
         ps_advance(ps);
         char namebuf[64];
         size_t off = 0;
@@ -1590,7 +1592,7 @@ static AstNode *tspec_resolve(PS *ps, TSpec *ts, CppLoc loc) {
     else if (ts->saw_long_count == 1)          PUSH("long");
     else if (ts->saw_float)                    PUSH("float");
     else if (ts->saw_double)                   PUSH("double");
-    else if (ts->saw_bool)                     PUSH("_Bool");
+    else if (ts->saw_bool)                     PUSH("bool");
     /* A4: when `int` is explicitly written, always include it in the name
      * so "signed int" stays "signed int" and not just "signed". */
     if (ts->saw_int) PUSH("int");
@@ -1639,6 +1641,7 @@ static bool tspec_try_consume(PS *ps, TSpec *ts) {
     switch (t.kind) {
     case STOK_VOID:    ts->saw_void++;     ps_advance(ps); return true;
     case STOK__BOOL:   ts->saw_bool++;     ps_advance(ps); return true;
+    case STOK_BOOL:    ts->saw_bool++;     ps_advance(ps); return true;
     case STOK_CHAR:    ts->saw_char++;     ps_advance(ps); return true;
     case STOK_SHORT:   ts->saw_short++;    ps_advance(ps); return true;
     case STOK_INT:     ts->saw_int++;      ps_advance(ps); return true;
@@ -1653,6 +1656,29 @@ static bool tspec_try_consume(PS *ps, TSpec *ts) {
     }
     case STOK_UNSIGNED:ts->saw_unsigned++; ps_advance(ps); return true;
     case STOK__COMPLEX: ts->saw_complex++; ps_advance(ps); return true;
+
+    case STOK_BITINT: {
+        /* C23: _BitInt(N) — bit-precise integer type specifier.
+         * Store the whole _BitInt(N) verbatim as the type name. */
+        if (ts->user_ty) return false;
+        ps_advance(ps);  /* eat _BitInt */
+        if (ps_at(ps, STOK_LPAREN)) {
+            ps_advance(ps);  /* eat '(' */
+            int depth = 0;
+            while (!ps_at(ps, STOK_EOF)) {
+                SharpTokKind _tk = ps_peek(ps).kind;
+                if (_tk == STOK_LPAREN) { depth++; ps_advance(ps); }
+                else if (_tk == STOK_RPAREN) {
+                    ps_advance(ps);
+                    if (depth == 0) break;
+                    depth--;
+                } else { ps_advance(ps); }
+            }
+        }
+        ts->user_ty = ast_node_new(AST_TYPE_NAME, t.loc);
+        ts->user_ty->u.type_name.name = cpp_xstrdup("_BitInt");
+        return true;
+    }
 
     case STOK_STRUCT:
     case STOK_UNION:
@@ -1840,18 +1866,20 @@ static bool tspec_try_consume(PS *ps, TSpec *ts) {
         return true;
     }
 
-    case STOK_TYPEOF: {
-        /*  typeof-root-fix: typeof(expr) / __typeof__(expr)
+    case STOK_TYPEOF: case STOK_TYPEOF_UNQUAL: {
+        /*  typeof-root-fix: typeof(expr) / __typeof__(expr) / typeof_unqual(expr)
          * as a type specifier.  Build the verbatim string for cg round-
          * trip AND save inner tokens to parse a lightweight expression
          * AST.  ty_from_ast uses the expr AST to infer the concrete C
          * type; if parsing fails, falls back to opaque struct. */
         if (ts->user_ty) return false;
         CppLoc loc = t.loc;
-        ps_advance(ps);  /* eat typeof token */
+        bool is_unqual = (t.kind == STOK_TYPEOF_UNQUAL);
+        ps_advance(ps);  /* eat typeof/typeof_unqual token */
         char buf[256]; int blen = 0;
         SharpTok saved_toks[256]; int ntoks = 0;
-        blen += snprintf(buf + blen, sizeof buf - blen, "__typeof__(");
+        blen += snprintf(buf + blen, sizeof buf - blen,
+                         is_unqual ? "typeof_unqual(" : "__typeof__(");
         if (blen >= (int)sizeof buf) blen = (int)sizeof buf - 1;
         if (ps_at(ps, STOK_LPAREN)) {
             ps_advance(ps);
@@ -2694,7 +2722,7 @@ static bool is_kr_param_list(const AstVec *params) {
         if (!tname) { all_bare = false; break; }
         static const char * const prims[] = {
             "int","char","short","long","float","double","void","unsigned",
-            "signed","_Bool","__int128", NULL };
+            "signed","bool","_Bool","__int128", NULL };
         for (int ki = 0; prims[ki]; ki++) {
             if (strcmp(tname, prims[ki]) == 0) { all_bare = false; break; }
         }
@@ -4793,7 +4821,7 @@ static AstNode *typeof_parse_primary(SharpTok *tokens, int ntoks, int *pos) {
     case STOK_VOID: case STOK_INT: case STOK_CHAR:
     case STOK_LONG: case STOK_SHORT: case STOK_FLOAT:
     case STOK_DOUBLE: case STOK_SIGNED: case STOK_UNSIGNED:
-    case STOK__BOOL: case STOK_STRUCT: case STOK_UNION: case STOK_CLASS:
+    case STOK__BOOL: case STOK_BOOL: case STOK_STRUCT: case STOK_UNION: case STOK_CLASS:
     case STOK_ENUM: case STOK_CONST:
         n = ast_node_new(AST_TYPE_NAME, t.loc);
         n->u.type_name.name = cpp_xstrndup(t.text, t.len);
@@ -4815,7 +4843,7 @@ static AstNode *typeof_parse_primary(SharpTok *tokens, int ntoks, int *pos) {
                 nk == STOK_CHAR || nk == STOK_LONG ||
                 nk == STOK_SHORT || nk == STOK_FLOAT ||
                 nk == STOK_DOUBLE || nk == STOK_SIGNED ||
-                nk == STOK_UNSIGNED || nk == STOK__BOOL ||
+                nk == STOK_UNSIGNED || nk == STOK__BOOL || nk == STOK_BOOL ||
                 nk == STOK_STRUCT || nk == STOK_UNION || nk == STOK_CLASS ||
                 nk == STOK_ENUM || nk == STOK_CONST) {
                 AstNode *cast = ast_node_new(AST_CAST, t.loc);
@@ -4966,6 +4994,35 @@ static AstNode *parse_primary(PS *ps) {
     }
     /* null was removed as a Sharp keyword — users write NULL (C macro) */
 
+    /* -- C23 boolean / nullptr constants -- */
+    case STOK_TRUE: {
+        AstNode *n = ast_node_new(AST_INT_LIT, t.loc);
+        n->u.int_lit.val         = 1;
+        n->u.int_lit.is_unsigned = false;
+        n->u.int_lit.is_long     = false;
+        n->u.int_lit.is_longlong = false;
+        n->u.int_lit.orig_text   = cpp_xstrdup("true");
+        return parse_postfix(ps, n);
+    }
+    case STOK_FALSE: {
+        AstNode *n = ast_node_new(AST_INT_LIT, t.loc);
+        n->u.int_lit.val         = 0;
+        n->u.int_lit.is_unsigned = false;
+        n->u.int_lit.is_long     = false;
+        n->u.int_lit.is_longlong = false;
+        n->u.int_lit.orig_text   = cpp_xstrdup("false");
+        return parse_postfix(ps, n);
+    }
+    case STOK_NULLPTR: {
+        AstNode *n = ast_node_new(AST_INT_LIT, t.loc);
+        n->u.int_lit.val         = 0;
+        n->u.int_lit.is_unsigned = false;
+        n->u.int_lit.is_long     = false;
+        n->u.int_lit.is_longlong = false;
+        n->u.int_lit.orig_text   = cpp_xstrdup("nullptr");
+        return parse_postfix(ps, n);
+    }
+
     /* -- GCC extension keyword — consumes __extension__ in
      *    expression context, then parses the real expression.
      *    Used extensively by glibc assert.h / stdatomic.h
@@ -5036,7 +5093,7 @@ static AstNode *parse_primary(PS *ps) {
      * Used as arguments to __builtin_types_compatible_p, etc.
      * Eat the balanced (...) payload and return a dummy 0 literal.
      * The enclosing __builtin_* call is handled by sema as returning int. */
-    case STOK_TYPEOF: {
+    case STOK_TYPEOF: case STOK_TYPEOF_UNQUAL: {
         if (ps_at(ps, STOK_LPAREN)) {
             ps_advance(ps);  /* eat '(' */
             int _td = 0;

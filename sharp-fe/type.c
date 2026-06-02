@@ -474,7 +474,7 @@ Type *ty_peel_to_struct(Type *t) {
 Type *ty_from_name(TyStore *ts, const char *name) {
     if (!name) return NULL;
     if (!strcmp(name,"void"))                        return ty_void(ts);
-    if (!strcmp(name,"_Bool")) return ty_bool(ts);
+    if (!strcmp(name,"_Bool") || !strcmp(name,"bool")) return ty_bool(ts);
     if (!strcmp(name,"char"))                        return ty_char(ts);
     if (!strcmp(name,"short"))                       return ty_short(ts);
     if (!strcmp(name,"int"))                         return ty_int(ts);
@@ -579,7 +579,7 @@ Type *ty_from_name(TyStore *ts, const char *name) {
 }
 
 static const char * const KNOWN_NAMES[] = {
-    "void", "_Bool", "char", "short", "int", "long", "float", "double",
+    "void", "bool", "_Bool", "char", "short", "int", "long", "float", "double",
     "signed", "unsigned", "__int128", "__signed__ __int128",
     "unsigned __int128", "__builtin_va_list",
     "signed char", "unsigned char",
@@ -943,6 +943,9 @@ Type *ty_from_ast_depth(TyStore *ts, const AstNode *node,
         }
         /* Look up in scope. */
         Symbol *sym = scope ? scope_lookup_type(scope, name) : NULL;
+        if (!sym && strcmp(name, "bool") == 0) {
+            return ty_bool(ts);
+        }
         if (!sym) {
             if (diags)
                 FE_ERROR(diags, node->loc, "unknown type '%s'", name);

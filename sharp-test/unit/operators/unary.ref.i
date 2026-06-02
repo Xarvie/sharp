@@ -27,7 +27,7 @@ Val Val__op_add(Val * this, Val other);
 Val Val__op_sub(Val * this);
 
 #line 29 "sharp-test/unit/operators/unary.ce"
-_Bool Val__op_eq(Val * this, Val other);
+bool Val__op_eq(Val * this, Val other);
 
 #line 10 "sharp-test/unit/operators/unary.ce"
 Vec2 Vec2__op_sub(Vec2 * this) {
@@ -67,7 +67,7 @@ Val Val__op_sub(Val * this) {
 }
 
 #line 29 "sharp-test/unit/operators/unary.ce"
-_Bool Val__op_eq(Val * this, Val other) {
+bool Val__op_eq(Val * this, Val other) {
 
 #line 30 "sharp-test/unit/operators/unary.ce"
     return this->x == other.x;
