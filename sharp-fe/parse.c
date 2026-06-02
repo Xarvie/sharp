@@ -594,6 +594,7 @@ static bool is_type_start(PS *ps) {
     case STOK_SHORT: case STOK_FLOAT: case STOK_DOUBLE:
     case STOK_SIGNED:case STOK_UNSIGNED: case STOK__BOOL: case STOK_BOOL:
     case STOK_BITINT:
+    case STOK__COMPLEX: case STOK__IMAGINARY:
     case STOK_AUTO:
         return true;
     case STOK_IDENT:
@@ -1127,6 +1128,39 @@ static AstNode *parse_type(PS *ps) {
      * primitive specifiers (`unsigned char`, `long long`, …) we compose
      * a canonical space-separated name so that ty_from_name() can
      * recognise the combined type. */
+    if (t.kind == STOK__COMPLEX || t.kind == STOK__IMAGINARY) {
+        /* C99: _Complex/_Imaginary type qualifier followed by a base type. */
+        SharpTok _cq = ps_advance(ps);
+        char buf[64];
+        int blen = 0;
+        if (_cq.len + 1 < (int)sizeof buf) {
+            memcpy(buf, _cq.text, _cq.len); buf[blen = _cq.len] = ' '; blen++;
+        }
+        SharpTok bt = ps_peek(ps);
+        if (bt.kind == STOK_FLOAT || bt.kind == STOK_DOUBLE) {
+            ps_advance(ps);
+            if (blen + bt.len < (int)sizeof buf) {
+                memcpy(buf + blen, bt.text, bt.len); blen += bt.len;
+            }
+        } else if (bt.kind == STOK_LONG) {
+            ps_advance(ps);
+            if (blen + bt.len + 1 < (int)sizeof buf) {
+                memcpy(buf + blen, bt.text, bt.len); blen += bt.len; buf[blen++] = ' ';
+            }
+            SharpTok bt2 = ps_peek(ps);
+            if (bt2.kind == STOK_DOUBLE) {
+                ps_advance(ps);
+                if (blen + bt2.len < (int)sizeof buf) {
+                    memcpy(buf + blen, bt2.text, bt2.len); blen += bt2.len;
+                }
+            }
+        }
+        buf[blen] = '\0';
+        AstNode *n = ast_node_new(AST_TYPE_NAME, t.loc);
+        n->u.type_name.name = cpp_xstrdup(buf);
+        goto try_generic;
+    }
+
     if (t.kind == STOK_BITINT) {
         /* C23: _BitInt(N) — bit-precise integer type specifier. */
         ps_advance(ps);
@@ -1435,6 +1469,41 @@ static AstNode *parse_type_unqual(PS *ps) {
                         memcpy(buf + blen, _tk_full.text, _tk_full.len); blen += _tk_full.len;
                     }
                     ps_advance(ps);
+                }
+            }
+        }
+        buf[blen] = '\0';
+        base = ast_node_new(AST_TYPE_NAME, t.loc);
+        base->u.type_name.name = cpp_xstrdup(buf);
+    } else if (t.kind == STOK__COMPLEX || t.kind == STOK__IMAGINARY) {
+        /* C99: _Complex/_Imaginary type qualifier followed by a base type.
+         * Consume _Complex/_Imaginary and the following base type, emitting
+         * the combined name verbatim (e.g. "_Complex double"). */
+        SharpTok _cq = ps_advance(ps);
+        char buf[64];
+        int blen = 0;
+        if (_cq.len + 1 < (int)sizeof buf) {
+            memcpy(buf, _cq.text, _cq.len); buf[blen = _cq.len] = ' '; blen++;
+        }
+        /* Parse the following base type — it must be float or double. */
+        SharpTok bt = ps_peek(ps);
+        if (bt.kind == STOK_FLOAT || bt.kind == STOK_DOUBLE) {
+            ps_advance(ps);
+            if (blen + bt.len < (int)sizeof buf) {
+                memcpy(buf + blen, bt.text, bt.len); blen += bt.len;
+            }
+        } else if (bt.kind == STOK_LONG || bt.kind == STOK_DOUBLE) {
+            /* _Complex long double */
+            ps_advance(ps);
+            if (blen + bt.len + 1 < (int)sizeof buf) {
+                memcpy(buf + blen, bt.text, bt.len); blen += bt.len; buf[blen++] = ' ';
+            }
+            /* Check for 'double' after 'long' */
+            SharpTok bt2 = ps_peek(ps);
+            if (bt2.kind == STOK_DOUBLE) {
+                ps_advance(ps);
+                if (blen + bt2.len < (int)sizeof buf) {
+                    memcpy(buf + blen, bt2.text, bt2.len); blen += bt2.len;
                 }
             }
         }
