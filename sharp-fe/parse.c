@@ -582,6 +582,9 @@ static bool is_type_start(PS *ps) {
     case STOK_ASM:
     /* C11 keywords that can lead a declaration */
     case STOK__NORETURN: case STOK__ALIGNAS: case STOK__THREAD_LOCAL:
+    /* C23 non-underscore aliases */
+    case STOK_ALIGNAS: case STOK_ALIGNOF: case STOK_THREAD_LOCAL:
+    case STOK_STATIC_ASSERT_KW:
     /* C23: constexpr can lead a declaration */
     case STOK_CONSTEXPR:
     case STOK__EXTENSION__:
@@ -2043,9 +2046,9 @@ static DeclSpecs parse_decl_specifiers(PS *ps) {
             continue;
         }
 
-        /* C11 _Alignas(expression) alignment specifier.
-         * Consume _Alignas(...) and preserve the inner text verbatim. */
-        if (t.kind == STOK__ALIGNAS) {
+        /* C11 _Alignas(expression) / C23 alignas(expression) alignment specifier.
+         * Consume _Alignas(...) or alignas(...) and preserve the inner text verbatim. */
+        if (t.kind == STOK__ALIGNAS || t.kind == STOK_ALIGNAS) {
             ds.empty = false;
             ps_advance(ps);
             /* Expect '(' */
@@ -2074,8 +2077,8 @@ static DeclSpecs parse_decl_specifiers(PS *ps) {
             continue;
         }
 
-        /* C11 _Thread_local */
-        if (t.kind == STOK__THREAD_LOCAL) {
+        /* C11 _Thread_local / C23 thread_local */
+        if (t.kind == STOK__THREAD_LOCAL || t.kind == STOK_THREAD_LOCAL) {
             ds.is_thread_local = true;
             ds.empty           = false;
             ps_advance(ps);
@@ -3551,7 +3554,7 @@ static AstNode *parse_top_decl(PS *ps) {
     /* `_Static_assert(cond, "msg");` at file scope.
      * C7: preserve as AST_GCC_VERBATIM so C mode can emit it faithfully.
      * Sharp mode cg silently ignores AST_GCC_VERBATIM nodes. */
-    if (t.kind == STOK__STATIC_ASSERT) {
+    if (t.kind == STOK__STATIC_ASSERT || t.kind == STOK_STATIC_ASSERT_KW) {
         size_t start_pos = ps->pos;
         ps_advance(ps);
         if (ps_match(ps, STOK_LPAREN)) {
@@ -5145,11 +5148,11 @@ static AstNode *parse_primary(PS *ps) {
         return n;
     }
 
-    /* `_Alignof(T)` / `__alignof(T)` / `__alignof__(T)`.
+    /* `_Alignof(T)` / `alignof(T)` / `__alignof(T)` / `__alignof__(T)`.
      * Returns the alignment requirement of T as a size_t constant.
      * We parse the type operand and emit `_Alignof(T)` in cg (standard C11
      * form accepted by all downstream compilers). */
-    case STOK__ALIGNOF: {
+    case STOK__ALIGNOF: case STOK_ALIGNOF: {
         AstNode *n = ast_node_new(AST_SIZEOF, t.loc);  /* reuse sizeof node */
         ps_expect(ps, STOK_LPAREN, "_Alignof '('");
         if (is_type_start(ps)) {
@@ -5622,7 +5625,7 @@ static AstNode *parse_stmt(PS *ps) {
 
     /*  C7: `_Static_assert(cond, "msg");` as a statement.
      * Preserve as AST_GCC_VERBATIM for C mode passthrough. */
-    if (t.kind == STOK__STATIC_ASSERT) {
+    if (t.kind == STOK__STATIC_ASSERT || t.kind == STOK_STATIC_ASSERT_KW) {
         size_t start_pos = ps->pos;
         ps_advance(ps);
         if (ps_match(ps, STOK_LPAREN)) {
