@@ -1127,6 +1127,50 @@ static AstNode *parse_type(PS *ps) {
      * primitive specifiers (`unsigned char`, `long long`, …) we compose
      * a canonical space-separated name so that ty_from_name() can
      * recognise the combined type. */
+    if (t.kind == STOK_BITINT) {
+        /* C23: _BitInt(N) — bit-precise integer type specifier. */
+        ps_advance(ps);
+        char buf[64];
+        int blen = 7;  /* "_BitInt" */
+        memcpy(buf, "_BitInt", 7);
+        if (ps_at(ps, STOK_LPAREN)) {
+            ps_advance(ps);  /* eat '(' */
+            if (blen + 1 < (int)sizeof buf) buf[blen++] = '(';
+            int depth = 0;
+            while (!ps_at(ps, STOK_EOF)) {
+                SharpTokKind _tk = ps_peek(ps).kind;
+                SharpTok _tk_full = ps_peek(ps);
+                if (_tk == STOK_LPAREN) {
+                    depth++;
+                    if (blen + (int)_tk_full.len + 1 < (int)sizeof buf) {
+                        memcpy(buf + blen, _tk_full.text, _tk_full.len); blen += _tk_full.len;
+                    }
+                    ps_advance(ps);
+                }
+                else if (_tk == STOK_RPAREN) {
+                    if (depth == 0) {
+                        if (blen + 1 < (int)sizeof buf) buf[blen++] = ')';
+                        ps_advance(ps); break;
+                    }
+                    depth--;
+                    if (blen + (int)_tk_full.len + 1 < (int)sizeof buf) {
+                        memcpy(buf + blen, _tk_full.text, _tk_full.len); blen += _tk_full.len;
+                    }
+                    ps_advance(ps);
+                } else {
+                    if (blen + (int)_tk_full.len + 1 < (int)sizeof buf) {
+                        memcpy(buf + blen, _tk_full.text, _tk_full.len); blen += _tk_full.len;
+                    }
+                    ps_advance(ps);
+                }
+            }
+        }
+        buf[blen] = '\0';
+        AstNode *n = ast_node_new(AST_TYPE_NAME, t.loc);
+        n->u.type_name.name = cpp_xstrdup(buf);
+        goto try_generic;
+    }
+
     if (t.kind == STOK_IDENT     ||
         t.kind == STOK_INT       || t.kind == STOK_CHAR   ||
         t.kind == STOK_LONG      || t.kind == STOK_SHORT  ||
@@ -1355,6 +1399,48 @@ static AstNode *parse_type_unqual(PS *ps) {
         base = ast_node_new(AST_TYPE_NAME, t.loc);
         base->u.type_name.name = cpp_xstrndup(nm.text, nm.len);
         /* class names are bare type names (typedef auto-injected) */
+    } else if (t.kind == STOK_BITINT) {
+        /* C23: _BitInt(N) — bit-precise integer type specifier.
+         * Store the whole _BitInt(N) verbatim as the type name. */
+        ps_advance(ps);
+        char buf[64];
+        int blen = 7;  /* "_BitInt" */
+        memcpy(buf, "_BitInt", 7);
+        if (ps_at(ps, STOK_LPAREN)) {
+            ps_advance(ps);  /* eat '(' */
+            if (blen + 1 < (int)sizeof buf) buf[blen++] = '(';
+            int depth = 0;
+            while (!ps_at(ps, STOK_EOF)) {
+                SharpTokKind _tk = ps_peek(ps).kind;
+                SharpTok _tk_full = ps_peek(ps);
+                if (_tk == STOK_LPAREN) {
+                    depth++;
+                    if (blen + (int)_tk_full.len + 1 < (int)sizeof buf) {
+                        memcpy(buf + blen, _tk_full.text, _tk_full.len); blen += _tk_full.len;
+                    }
+                    ps_advance(ps);
+                }
+                else if (_tk == STOK_RPAREN) {
+                    if (depth == 0) {
+                        if (blen + 1 < (int)sizeof buf) buf[blen++] = ')';
+                        ps_advance(ps); break;
+                    }
+                    depth--;
+                    if (blen + (int)_tk_full.len + 1 < (int)sizeof buf) {
+                        memcpy(buf + blen, _tk_full.text, _tk_full.len); blen += _tk_full.len;
+                    }
+                    ps_advance(ps);
+                } else {
+                    if (blen + (int)_tk_full.len + 1 < (int)sizeof buf) {
+                        memcpy(buf + blen, _tk_full.text, _tk_full.len); blen += _tk_full.len;
+                    }
+                    ps_advance(ps);
+                }
+            }
+        }
+        buf[blen] = '\0';
+        base = ast_node_new(AST_TYPE_NAME, t.loc);
+        base->u.type_name.name = cpp_xstrdup(buf);
     } else if (t.kind == STOK_IDENT || t.kind == STOK_INT || t.kind == STOK_CHAR ||
                t.kind == STOK_LONG  || t.kind == STOK_SHORT || t.kind == STOK_FLOAT ||
                t.kind == STOK_DOUBLE|| t.kind == STOK_SIGNED || t.kind == STOK_UNSIGNED ||
