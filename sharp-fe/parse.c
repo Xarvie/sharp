@@ -1677,7 +1677,7 @@ typedef struct {
     int      saw_long_count;
     int      saw_float, saw_double;
     int      saw_signed, saw_unsigned;
-    int      saw_complex;
+    int      saw_complex, saw_imaginary;
     AstNode *user_ty;
     const char *signed_kw;   /* p45: "__signed" / "__signed__" / "signed" */
     AstNode *enum_body_ref;  /* C8-fix: non-owning ref to inline enum def */
@@ -1687,7 +1687,7 @@ static bool tspec_has_anything(const TSpec *t) {
     return t->saw_void || t->saw_bool || t->saw_char || t->saw_short ||
            t->saw_int  || t->saw_long_count > 0 ||
            t->saw_float|| t->saw_double || t->saw_signed || t->saw_unsigned ||
-           t->saw_complex || t->user_ty;
+           t->saw_complex || t->saw_imaginary || t->user_ty;
 }
 
 /* Resolve TSpec into a single AstNode type tree.  The resulting node is
@@ -1739,6 +1739,7 @@ static AstNode *tspec_resolve(PS *ps, TSpec *ts, CppLoc loc) {
     if (ts->saw_signed && !ts->saw_unsigned) PUSH("signed");
     if (ts->saw_unsigned)                     PUSH("unsigned");
     if (ts->saw_complex)                      PUSH("_Complex");
+    if (ts->saw_imaginary)                    PUSH("_Imaginary");
     if (ts->saw_char)                          PUSH("char");
     else if (ts->saw_short)                    PUSH("short");
     else if (ts->saw_long_count == 2)          PUSH("long long");
@@ -1814,6 +1815,7 @@ static bool tspec_try_consume(PS *ps, TSpec *ts) {
     }
     case STOK_UNSIGNED:ts->saw_unsigned++; ps_advance(ps); return true;
     case STOK__COMPLEX: ts->saw_complex++; ps_advance(ps); return true;
+    case STOK__IMAGINARY: ts->saw_imaginary++; ps_advance(ps); return true;
 
     case STOK_BITINT: {
         /* C23: _BitInt(N) — bit-precise integer type specifier.
