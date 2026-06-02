@@ -1665,21 +1665,44 @@ static bool tspec_try_consume(PS *ps, TSpec *ts) {
          * Store the whole _BitInt(N) verbatim as the type name. */
         if (ts->user_ty) return false;
         ps_advance(ps);  /* eat _BitInt */
+        char buf[64];
+        int blen = 7;  /* "_BitInt" */
+        memcpy(buf, "_BitInt", 7);
         if (ps_at(ps, STOK_LPAREN)) {
             ps_advance(ps);  /* eat '(' */
+            if (blen + 1 < (int)sizeof buf) buf[blen++] = '(';
             int depth = 0;
             while (!ps_at(ps, STOK_EOF)) {
                 SharpTokKind _tk = ps_peek(ps).kind;
-                if (_tk == STOK_LPAREN) { depth++; ps_advance(ps); }
-                else if (_tk == STOK_RPAREN) {
+                SharpTok _tk_full = ps_peek(ps);
+                if (_tk == STOK_LPAREN) {
+                    depth++;
+                    if (blen + (int)_tk_full.len + 1 < (int)sizeof buf) {
+                        memcpy(buf + blen, _tk_full.text, _tk_full.len); blen += _tk_full.len;
+                    }
                     ps_advance(ps);
-                    if (depth == 0) break;
+                }
+                else if (_tk == STOK_RPAREN) {
+                    if (depth == 0) {
+                        if (blen + 1 < (int)sizeof buf) buf[blen++] = ')';
+                        ps_advance(ps); break;
+                    }
                     depth--;
-                } else { ps_advance(ps); }
+                    if (blen + (int)_tk_full.len + 1 < (int)sizeof buf) {
+                        memcpy(buf + blen, _tk_full.text, _tk_full.len); blen += _tk_full.len;
+                    }
+                    ps_advance(ps);
+                } else {
+                    if (blen + (int)_tk_full.len + 1 < (int)sizeof buf) {
+                        memcpy(buf + blen, _tk_full.text, _tk_full.len); blen += _tk_full.len;
+                    }
+                    ps_advance(ps);
+                }
             }
         }
+        buf[blen] = '\0';
         ts->user_ty = ast_node_new(AST_TYPE_NAME, t.loc);
-        ts->user_ty->u.type_name.name = cpp_xstrdup("_BitInt");
+        ts->user_ty->u.type_name.name = cpp_xstrdup(buf);
         return true;
     }
 
