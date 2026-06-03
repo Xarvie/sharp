@@ -133,10 +133,11 @@ def deploy_to_env(exe_path):
         dst_dir = Path(sharp_root) / "bin"
     else:
         dst_dir = ROOT.parent / "env" / "sharpc" / "bin"
-    if dst_dir.is_dir():
-        dst = dst_dir / exe_path.name
-        shutil.copy2(str(exe_path), str(dst))
-        print(f"  CP {exe_path.name} -> {dst}")
+    if not dst_dir.is_dir():
+        dst_dir.mkdir(parents=True, exist_ok=True)
+    dst = dst_dir / exe_path.name
+    shutil.copy2(str(exe_path), str(dst))
+    print(f"  CP {exe_path.name} -> {dst}")
 
 
 def build_sharpc():

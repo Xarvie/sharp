@@ -325,14 +325,32 @@ def strip_builtin_preamble(text: str) -> str:
     return text
 
 
+_SHARP_ROOT_HELP = """\
+ERROR: SHARP_ROOT environment variable not set.
+
+Set SHARP_ROOT to your sharp installation root.  Expected layout:
+
+  sharpc/:
+    bin  std  zig
+
+  sharpc/bin:
+    sharpc.exe  spkg.exe
+
+  sharpc/std:
+    cjson.sp  cjson.sph  hashmap.sph  str.sph  string.sph  types.sph  vec.sph
+
+  sharpc/zig:
+    LICENSE  README.md  doc  lib  zig.exe
+
+Example:
+  set SHARP_ROOT=C:\\path\\to\\env\\sharpc
+"""
+
+
 def _get_sharpc_env() -> dict:
     env = os.environ.copy()
-    # Ensure SHARP_ROOT is set so sharpc can find std/ and zig/
     if "SHARP_ROOT" not in env:
-        # Derive from sharpc location: project_root of the sharp repo
-        project_root = find_project_root(Path(__file__).resolve().parent)
-        if project_root:
-            env["SHARP_ROOT"] = str(project_root)
+        raise SystemExit(_SHARP_ROOT_HELP)
     return env
 
 
@@ -381,13 +399,16 @@ def _cleanup_files(*paths: str) -> None:
         _cleanup_gen_file(p)
 
 
-def _find_zig(project_root: Path) -> Optional[str]:
-    """Find zig binary: project's zig/ first, then PATH."""
+def _find_zig() -> Optional[str]:
+    """Find zig binary from SHARP_ROOT/zig/."""
+    sharp_root = os.environ.get("SHARP_ROOT", "")
+    if not sharp_root:
+        return None
     for name in ("zig.exe", "zig"):
-        candidate = project_root / "zig" / name
+        candidate = Path(sharp_root) / "zig" / name
         if candidate.is_file():
             return str(candidate)
-    return find_file_in_path("zig", os.environ.get("PATH", ""))
+    return None
 
 
 _override_target: Optional[str] = None
@@ -1017,9 +1038,13 @@ def main():
     print(f"[build] sharpc = {sharpc_path} ({build_info})")
 
     project_root = find_project_root(script_dir)
-    zig_path = _find_zig(project_root) if project_root else None
+
+    if "SHARP_ROOT" not in os.environ:
+        raise SystemExit(_SHARP_ROOT_HELP)
+
+    zig_path = _find_zig()
     if not zig_path:
-        raise SystemExit("ERROR: cannot find zig (checked project's zig/ and PATH)")
+        raise SystemExit("ERROR: cannot find zig (checked $SHARP_ROOT/zig/)")
     print(f"[build] zig    = {zig_path}")
 
     grand_pass = grand_fail = grand_error = 0
