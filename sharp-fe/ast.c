@@ -400,9 +400,15 @@ AstNode *ast_clone_type(const AstNode *node) {
         break;
     case AST_TYPE_CONST:
         n->u.type_const.base = ast_clone_type(node->u.type_const.base);
+        n->u.type_const.kw = node->u.type_const.kw
+            ? cpp_xstrdup(node->u.type_const.kw) : NULL;
+        n->u.type_const.is_postfix = node->u.type_const.is_postfix;
         break;
     case AST_TYPE_VOLATILE:
         n->u.type_volatile.base = ast_clone_type(node->u.type_volatile.base);
+        n->u.type_volatile.kw = node->u.type_volatile.kw
+            ? cpp_xstrdup(node->u.type_volatile.kw) : NULL;
+        n->u.type_volatile.is_postfix = node->u.type_volatile.is_postfix;
         break;
     case AST_TYPE_ATOMIC:
         n->u.type_atomic.base = ast_clone_type(node->u.type_atomic.base);

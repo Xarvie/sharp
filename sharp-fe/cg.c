@@ -4389,9 +4389,9 @@ static void cg_func(CgCtx *ctx, const AstNode *fn, const char *sname) {
         /* C8/C5: in C mode, use cg_type_from_ast to preserve typedef
          * aliases in return types (e.g. `Opaque *make(...)` not
          * `struct OpaqueStruct *make(...)`). */
-        if (ret_node)
+        if (ret_node) {
             cg_type_from_ast(ctx, ret_node);
-        else
+        } else
             cg_type(ctx, ret_t);
         cg_puts(ctx, " ");
     }
