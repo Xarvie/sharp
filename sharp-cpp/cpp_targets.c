@@ -205,7 +205,7 @@ install_macros_from_zig(CppCtx *ctx, const char *zig_output)
 }
 
 /* -----------------------------------------------------------------
- * Find zig executable path
+ * Find zig executable path (Windows)
  * ----------------------------------------------------------------- */
 #ifdef _WIN32
 #include <windows.h>
@@ -216,99 +216,16 @@ static const char *find_zig_exe(void)
         return g_sess.zig_exe[0] ? g_sess.zig_exe : NULL;
     g_sess.zig_found = 1;
 
-    char exe_path[MAX_PATH];
-    DWORD exe_len = GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
-
-    if (exe_len > 0 && exe_len < sizeof(exe_path)) {
-        char *last_sep = NULL;
-        {
-            char *bs = strrchr(exe_path, '\\');
-            char *fs = strrchr(exe_path, '/');
-            last_sep = (bs > fs) ? bs : fs;
-        }
-        if (last_sep) {
-            size_t dirlen = (size_t)(last_sep - exe_path);
-
-            if (dirlen + 9 < sizeof(g_sess.zig_exe)) {
-                memcpy(g_sess.zig_exe, exe_path, dirlen);
-                memcpy(g_sess.zig_exe + dirlen, "\\zig.exe", 9);
-                DWORD a = GetFileAttributesA(g_sess.zig_exe);
-                if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY))
-                    return g_sess.zig_exe;
-            }
-
-            if (dirlen + 13 < sizeof(g_sess.zig_exe)) {
-                memcpy(g_sess.zig_exe, exe_path, dirlen);
-                memcpy(g_sess.zig_exe + dirlen, "\\zig\\zig.exe", 13);
-                DWORD a1b = GetFileAttributesA(g_sess.zig_exe);
-                if (a1b != INVALID_FILE_ATTRIBUTES && !(a1b & FILE_ATTRIBUTE_DIRECTORY))
-                    return g_sess.zig_exe;
-            }
-
-            if (dirlen >= 1) {
-                char parent_dir[MAX_PATH];
-                memcpy(parent_dir, exe_path, dirlen);
-                parent_dir[dirlen] = '\0';
-                char *parent_sep = NULL;
-                {
-                    char *bs2 = strrchr(parent_dir, '\\');
-                    char *fs2 = strrchr(parent_dir, '/');
-                    parent_sep = (bs2 > fs2) ? bs2 : fs2;
-                }
-                if (parent_sep) {
-                    size_t pdirlen = (size_t)(parent_sep - parent_dir);
-                    if (pdirlen + 13 < sizeof(g_sess.zig_exe)) {
-                        memcpy(g_sess.zig_exe, parent_dir, pdirlen);
-                        memcpy(g_sess.zig_exe + pdirlen, "\\zig\\zig.exe", 13);
-                        DWORD a2 = GetFileAttributesA(g_sess.zig_exe);
-                        if (a2 != INVALID_FILE_ATTRIBUTES && !(a2 & FILE_ATTRIBUTE_DIRECTORY))
-                            return g_sess.zig_exe;
-                    }
-                }
-            }
-
-            {
-                char dir[MAX_PATH];
-                memcpy(dir, exe_path, dirlen);
-                dir[dirlen] = '\0';
-                for (int depth = 0; depth < 6; depth++) {
-                    char *sep = NULL;
-                    {
-                        char *bs = strrchr(dir, '\\');
-                        char *fs = strrchr(dir, '/');
-                        sep = (bs > fs) ? bs : fs;
-                    }
-                    if (!sep) break;
-                    size_t plen = (size_t)(sep - dir);
-                    char cand[MAX_PATH];
-                    if (plen + 13 < sizeof(cand)) {
-                        memcpy(cand, dir, plen);
-                        memcpy(cand + plen, "\\zig\\zig.exe", 13);
-                        DWORD a3 = GetFileAttributesA(cand);
-                        if (a3 != INVALID_FILE_ATTRIBUTES && !(a3 & FILE_ATTRIBUTE_DIRECTORY)) {
-                            memcpy(g_sess.zig_exe, cand, plen + 13);
-                            return g_sess.zig_exe;
-                        }
-                    }
-                    dir[plen] = '\0';
-                }
-            }
-        }
-    }
-
-    if (SearchPathA(NULL, "zig.exe", NULL, sizeof(g_sess.zig_exe), g_sess.zig_exe, NULL))
-        return g_sess.zig_exe;
-
-    const char *fallbacks[] = {
-        "C:\\Program Files\\zig\\zig.exe",
-        "C:\\zig\\zig.exe",
-    };
-    for (size_t k = 0; k < sizeof(fallbacks)/sizeof(fallbacks[0]); k++) {
-        DWORD a = GetFileAttributesA(fallbacks[k]);
-        if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) {
-            strncpy(g_sess.zig_exe, fallbacks[k], sizeof(g_sess.zig_exe) - 1);
-            g_sess.zig_exe[sizeof(g_sess.zig_exe) - 1] = '\0';
-            return g_sess.zig_exe;
+    const char *root = getenv("SHARP_ROOT");
+    if (root && root[0]) {
+        size_t rlen = strlen(root);
+        size_t need = rlen + 13; /* "\\zig\\zig.exe" + NUL */
+        if (need < sizeof(g_sess.zig_exe)) {
+            memcpy(g_sess.zig_exe, root, rlen);
+            memcpy(g_sess.zig_exe + rlen, "\\zig\\zig.exe", 13);
+            DWORD a = GetFileAttributesA(g_sess.zig_exe);
+            if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY))
+                return g_sess.zig_exe;
         }
     }
 
@@ -321,115 +238,29 @@ const char *cpp_find_zig_exe(void)
 }
 #else
 
+/* -----------------------------------------------------------------
+ * Find zig executable path (POSIX)
+ * ----------------------------------------------------------------- */
 static const char *find_zig_exe(void)
 {
     if (g_sess.zig_found)
         return g_sess.zig_exe[0] ? g_sess.zig_exe : NULL;
     g_sess.zig_found = 1;
 
-    char exe_path[4096];
-    ssize_t exe_len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (exe_len > 0 && (size_t)exe_len < sizeof(exe_path)) {
-        exe_path[exe_len] = '\0';
-        char *last_sep = strrchr(exe_path, '/');
-        if (last_sep) {
-            size_t dirlen = (size_t)(last_sep - exe_path);
-
-            if (dirlen + 5 < sizeof(g_sess.zig_exe)) {
-                memcpy(g_sess.zig_exe, exe_path, dirlen);
-                memcpy(g_sess.zig_exe + dirlen, "/zig", 5);
-                struct stat st1a;
-                if (stat(g_sess.zig_exe, &st1a) == 0 && !S_ISDIR(st1a.st_mode) &&
-                    access(g_sess.zig_exe, X_OK) == 0)
-                    return g_sess.zig_exe;
-            }
-
-            if (dirlen + 9 < sizeof(g_sess.zig_exe)) {
-                memcpy(g_sess.zig_exe, exe_path, dirlen);
-                memcpy(g_sess.zig_exe + dirlen, "/zig/zig", 9);
-                struct stat st1b;
-                if (stat(g_sess.zig_exe, &st1b) == 0 && !S_ISDIR(st1b.st_mode) &&
-                    access(g_sess.zig_exe, X_OK) == 0)
-                    return g_sess.zig_exe;
-            }
-
-            if (dirlen >= 1) {
-                char parent_dir[4096];
-                memcpy(parent_dir, exe_path, dirlen);
-                parent_dir[dirlen] = '\0';
-                char *parent_sep = strrchr(parent_dir, '/');
-                if (parent_sep) {
-                    size_t pdirlen = (size_t)(parent_sep - parent_dir);
-                    if (pdirlen + 9 < sizeof(g_sess.zig_exe)) {
-                        memcpy(g_sess.zig_exe, parent_dir, pdirlen);
-                        memcpy(g_sess.zig_exe + pdirlen, "/zig/zig", 9);
-                        struct stat st1c;
-                        if (stat(g_sess.zig_exe, &st1c) == 0 && !S_ISDIR(st1c.st_mode) &&
-                            access(g_sess.zig_exe, X_OK) == 0)
-                            return g_sess.zig_exe;
-                    }
-                }
-            }
-
-            {
-                char dir[4096];
-                memcpy(dir, exe_path, dirlen);
-                dir[dirlen] = '\0';
-                for (int depth = 0; depth < 6; depth++) {
-                    char *sep = strrchr(dir, '/');
-                    if (!sep) break;
-                    size_t plen = (size_t)(sep - dir);
-                    char cand[4096];
-                    if (plen + 9 < sizeof(cand)) {
-                        memcpy(cand, dir, plen);
-                        memcpy(cand + plen, "/zig/zig", 9);
-                        struct stat st_up;
-                        if (stat(cand, &st_up) == 0 && !S_ISDIR(st_up.st_mode) &&
-                            access(cand, X_OK) == 0) {
-                            memcpy(g_sess.zig_exe, cand, plen + 9);
-                            return g_sess.zig_exe;
-                        }
-                    }
-                    dir[plen] = '\0';
-                }
-            }
+    const char *root = getenv("SHARP_ROOT");
+    if (root && root[0]) {
+        size_t rlen = strlen(root);
+        size_t need = rlen + 9; /* "/zig/zig" + NUL */
+        if (need < sizeof(g_sess.zig_exe)) {
+            memcpy(g_sess.zig_exe, root, rlen);
+            memcpy(g_sess.zig_exe + rlen, "/zig/zig", 9);
+            struct stat st;
+            if (stat(g_sess.zig_exe, &st) == 0 && !S_ISDIR(st.st_mode) &&
+                access(g_sess.zig_exe, X_OK) == 0)
+                return g_sess.zig_exe;
         }
     }
 
-    const char *path_env = getenv("PATH");
-    if (path_env) {
-        const char *start = path_env;
-        while (*start) {
-            const char *end = strchr(start, ':');
-            size_t len = end ? (size_t)(end - start) : strlen(start);
-            if (len > 0 && len < sizeof(g_sess.zig_exe) - 5) {
-                memcpy(g_sess.zig_exe, start, len);
-                memcpy(g_sess.zig_exe + len, "/zig", 5);
-                struct stat st2;
-                if (stat(g_sess.zig_exe, &st2) == 0 && !S_ISDIR(st2.st_mode) &&
-                    access(g_sess.zig_exe, X_OK) == 0)
-                    return g_sess.zig_exe;
-            }
-            if (!end) break;
-            start = end + 1;
-        }
-    }
-
-    const char *fallbacks[] = {
-        "/usr/local/zig/zig",
-        "/usr/bin/zig",
-        "/usr/local/bin/zig",
-        "/opt/zig/zig",
-    };
-    for (size_t k = 0; k < sizeof(fallbacks)/sizeof(fallbacks[0]); k++) {
-        struct stat st3;
-        if (stat(fallbacks[k], &st3) == 0 && !S_ISDIR(st3.st_mode) &&
-            access(fallbacks[k], X_OK) == 0) {
-            strncpy(g_sess.zig_exe, fallbacks[k], sizeof(g_sess.zig_exe) - 1);
-            g_sess.zig_exe[sizeof(g_sess.zig_exe) - 1] = '\0';
-            return g_sess.zig_exe;
-        }
-    }
     return NULL;
 }
 
@@ -440,7 +271,7 @@ const char *cpp_find_zig_exe(void)
 #endif
 
 /* -----------------------------------------------------------------
- * Find zig installation directory (derived from zig exe path)
+ * Find zig installation directory (from SHARP_ROOT)
  * ----------------------------------------------------------------- */
 const char *cpp_find_zig_install_dir(void)
 {
@@ -450,37 +281,22 @@ const char *cpp_find_zig_install_dir(void)
         return zig_install_dir[0] ? zig_install_dir : NULL;
     cached = 1;
 
-    const char *zig_exe = find_zig_exe();
-    if (!zig_exe) return NULL;
-
+    const char *root = getenv("SHARP_ROOT");
+    if (root && root[0]) {
 #ifdef _WIN32
-    const char *last_sep = strrchr(zig_exe, '\\');
-    const char *last_fs = strrchr(zig_exe, '/');
-    if (last_fs > last_sep) last_sep = last_fs;
+        snprintf(zig_install_dir, sizeof(zig_install_dir), "%s\\zig", root);
+        DWORD attrs = GetFileAttributesA(zig_install_dir);
+        if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
+            return zig_install_dir;
 #else
-    const char *last_sep = strrchr(zig_exe, '/');
+        snprintf(zig_install_dir, sizeof(zig_install_dir), "%s/zig", root);
+        struct stat st;
+        if (stat(zig_install_dir, &st) == 0 && S_ISDIR(st.st_mode))
+            return zig_install_dir;
 #endif
-    if (!last_sep) return NULL;
+    }
 
-    size_t dirlen = (size_t)(last_sep - zig_exe);
-    if (dirlen >= sizeof(zig_install_dir)) return NULL;
-    memcpy(zig_install_dir, zig_exe, dirlen);
-    zig_install_dir[dirlen] = '\0';
-
-    char test[MAX_PATH];
-#ifdef _WIN32
-    snprintf(test, sizeof(test), "%s\\lib\\libc", zig_install_dir);
-    DWORD attrs = GetFileAttributesA(test);
-    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY))
-        return NULL;
-#else
-    snprintf(test, sizeof(test), "%s/lib/libc", zig_install_dir);
-    struct stat st;
-    if (stat(test, &st) != 0 || !S_ISDIR(st.st_mode))
-        return NULL;
-#endif
-
-    return zig_install_dir;
+    return NULL;
 }
 
 /* -----------------------------------------------------------------

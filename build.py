@@ -30,13 +30,23 @@ else:
     TARGET = "x86_64-linux-gnu"
 
 # ── zig path ───────────────────────────────────────────────────────────
+_sharp_root = os.environ.get("SHARP_ROOT", "")
+if _sharp_root:
+    if _SYS == "win32":
+        ZIG = str(Path(_sharp_root) / "zig" / "zig.exe")
+    else:
+        ZIG = str(Path(_sharp_root) / "zig" / "zig")
+else:
+    if _SYS == "win32":
+        ZIG = str(ROOT / "zig" / "zig.exe")
+    else:
+        ZIG = str(ROOT / "zig" / "zig")
+
 if _SYS == "win32":
-    ZIG = str(ROOT / "zig" / "zig.exe")
     OBJ_EXT = ".obj"
     EXE_EXT = ".exe"
     LINK_FLAGS = ["-lshlwapi", "-static"]
 else:
-    ZIG = str(ROOT / "zig" / "zig")
     OBJ_EXT = ".o"
     EXE_EXT = ""
     LINK_FLAGS = []
@@ -118,9 +128,13 @@ def link_exe(objs, out_rel, extra_flags=None):
 
 
 def deploy_to_env(exe_path):
-    env_bin = ROOT.parent / "env" / "sharpc" / "bin"
-    if env_bin.is_dir():
-        dst = env_bin / exe_path.name
+    sharp_root = os.environ.get("SHARP_ROOT", "")
+    if sharp_root:
+        dst_dir = Path(sharp_root) / "bin"
+    else:
+        dst_dir = ROOT.parent / "env" / "sharpc" / "bin"
+    if dst_dir.is_dir():
+        dst = dst_dir / exe_path.name
         shutil.copy2(str(exe_path), str(dst))
         print(f"  CP {exe_path.name} -> {dst}")
 

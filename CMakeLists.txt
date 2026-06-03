@@ -55,6 +55,12 @@ if(WIN32)
   target_link_libraries(sharpc PRIVATE shlwapi)
 endif()
 
+# ── Install to $ENV{SHARP_ROOT}/bin if set, otherwise use cmake default ────
+if(DEFINED ENV{SHARP_ROOT} AND NOT DEFINED CMAKE_INSTALL_PREFIX)
+  set(CMAKE_INSTALL_PREFIX "$ENV{SHARP_ROOT}")
+endif()
+install(TARGETS sharpc RUNTIME DESTINATION bin)
+
 add_executable(probe_cpp
   ${CPP_SOURCES}
   sharp-cpp/probe.c

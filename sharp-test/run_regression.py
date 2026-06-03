@@ -327,10 +327,12 @@ def strip_builtin_preamble(text: str) -> str:
 
 def _get_sharpc_env() -> dict:
     env = os.environ.copy()
-    if sys.platform == "win32":
-        zig_home = os.environ.get("ZIG_HOME", "")
-        if zig_home and os.path.isdir(zig_home):
-            env["PATH"] = zig_home + os.pathsep + env.get("PATH", "")
+    # Ensure SHARP_ROOT is set so sharpc can find std/ and zig/
+    if "SHARP_ROOT" not in env:
+        # Derive from sharpc location: project_root of the sharp repo
+        project_root = find_project_root(Path(__file__).resolve().parent)
+        if project_root:
+            env["SHARP_ROOT"] = str(project_root)
     return env
 
 

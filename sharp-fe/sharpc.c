@@ -52,128 +52,35 @@
 #include "cpp_sys_paths.h"
 #include "sharp_internal.h"
 
-/* ── Std library path: derived from sharpc executable location ────── */
+/* ── Std library path ─────────────────────────────────────────────── */
 /*
- * Finds {sharp_root}/std/ by locating the directory of the
- * sharpc executable and walking up to its project root.
+ * Finds {SHARP_ROOT}/std/.
  *
- * Resolution order (first found wins):
- *   1. <exe_dir>/std/               (exe is at repo root)
- *   2. <exe_dir>/../std/            (exe is in build/)
- *   3. SHARP_ROOT environment variable
+ * Resolution: SHARP_ROOT environment variable → $SHARP_ROOT/std
  *
  * Returns a malloc'd string (caller frees), or NULL if not found.
  */
 static char *sharp_find_std_dir(void) {
-#ifdef _WIN32
-    char exe_path[MAX_PATH];
-    DWORD len = GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
-    if (len == 0 || len >= sizeof(exe_path)) return NULL;
-#elif defined(__APPLE__)
-    char exe_path[4096];
-    uint32_t size = sizeof(exe_path);
-    if (_NSGetExecutablePath(exe_path, &size) != 0) return NULL;
-    char *rp = realpath(exe_path, NULL);
-    if (!rp) return NULL;
-    /* copy to stack since we need to free rp */
-    size_t rplen = strlen(rp);
-    if (rplen >= sizeof(exe_path)) { free(rp); return NULL; }
-    memcpy(exe_path, rp, rplen + 1);
-    free(rp);
-#else
-    char exe_path[4096];
-    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (len <= 0 || (size_t)len >= sizeof(exe_path)) return NULL;
-    exe_path[len] = '\0';
-#endif
-
-    /* Get the directory containing the executable */
-    char exe_dir[4096];
-    {
-        /* Find last separator */
-        const char *sep = NULL;
-#ifdef _WIN32
-        const char *bs = strrchr(exe_path, '\\');
-        const char *fs = strrchr(exe_path, '/');
-        sep = (bs > fs) ? bs : fs;
-#else
-        sep = strrchr(exe_path, '/');
-#endif
-        if (!sep) return NULL;
-        size_t dirlen = (size_t)(sep - exe_path);
-        if (dirlen >= sizeof(exe_dir)) return NULL;
-        memcpy(exe_dir, exe_path, dirlen);
-        exe_dir[dirlen] = '\0';
-    }
-
-    const char *candidates[] = {
-        "std",
-        "../std",
-    };
-
-    for (int i = 0; i < 2; i++) {
+    const char *root = getenv("SHARP_ROOT");
+    if (root && root[0]) {
         char candidate[4096];
-        int n = snprintf(candidate, sizeof(candidate),
-                        "%s/%s", exe_dir, candidates[i]);
-        if (n <= 0 || (size_t)n >= sizeof(candidate)) continue;
 #ifdef _WIN32
-        DWORD attr = GetFileAttributesA(candidate);
-        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        int n = snprintf(candidate, sizeof(candidate), "%s\\std", root);
 #else
-        struct stat st;
-        if (stat(candidate, &st) == 0 && S_ISDIR(st.st_mode)) {
+        int n = snprintf(candidate, sizeof(candidate), "%s/std", root);
 #endif
-            return strdup(candidate);
-        }
-    }
-
-    {
-        char dir[4096];
-        size_t dlen = strlen(exe_dir);
-        if (dlen < sizeof(dir)) {
-            memcpy(dir, exe_dir, dlen);
-            dir[dlen] = '\0';
-            for (int depth = 0; depth < 6; depth++) {
-                char *sep = NULL;
-#ifdef _WIN32
-                {
-                    const char *bs = strrchr(dir, '\\');
-                    const char *fs = strrchr(dir, '/');
-                    sep = (bs > fs) ? bs : fs;
-                }
-#else
-                sep = strrchr(dir, '/');
-#endif
-                if (!sep) break;
-                size_t plen = (size_t)(sep - dir);
-                char candidate[4096];
-                int n = snprintf(candidate, sizeof(candidate),
-                                "%.*s/std", (int)plen, dir);
-                if (n > 0 && (size_t)n < sizeof(candidate)) {
-#ifdef _WIN32
-                    DWORD attr = GetFileAttributesA(candidate);
-                    if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
-#else
-                    struct stat st_up;
-                    if (stat(candidate, &st_up) == 0 && S_ISDIR(st_up.st_mode))
-#endif
-                        return strdup(candidate);
-                }
-                dir[plen] = '\0';
-            }
-        }
-    }
-
-    /* SHARP_ROOT env var fallback */
-    const char *env = getenv("SHARP_ROOT");
-    if (env && env[0]) {
-        char candidate[4096];
-        int n = snprintf(candidate, sizeof(candidate), "%s/std", env);
         if (n > 0 && (size_t)n < sizeof(candidate)) {
-            return strdup(candidate);
+#ifdef _WIN32
+            DWORD attr = GetFileAttributesA(candidate);
+            if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
+                return strdup(candidate);
+#else
+            struct stat st;
+            if (stat(candidate, &st) == 0 && S_ISDIR(st.st_mode))
+                return strdup(candidate);
+#endif
         }
     }
-
     return NULL;
 }
 
@@ -1511,8 +1418,8 @@ int main(int argc, char *argv[]) {
         } else {
             fprintf(stderr,
                 "sharpc: warning: cannot locate std/ directory.\n"
-                "  Set SHARP_ROOT env var pointing to your sharp repository root.\n"
-                "  Example: export SHARP_ROOT=/path/to/sharp\n");
+                "  Set SHARP_ROOT env var to your sharp installation root.\n"
+                "  Example: export SHARP_ROOT=/opt/sharp\n");
         }
     }
 
