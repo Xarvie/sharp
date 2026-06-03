@@ -863,7 +863,33 @@ static void handle_include(CppState *st, TokList *line, CppLoc loc,
     int cond_depth_before = st->cond_depth;
     /* Phase R12: emit `# 1 "<include>" 1 [3]` to match gcc/clang.
      * process_include_file forwards the flags into emit_linemarker_ex.   */
+
+    /* ── Include-guard auto-detection: set up tracking ─────────────
+     * Save any existing guard state from the outer file, then reset
+     * for the new file.  We'll restore after process_include_file.      */
+    const char *saved_guard_candidate = st->guard_candidate;
+    const char *saved_guard_file      = st->guard_file;
+    bool        saved_guard_confirmed = st->guard_confirmed;
+    st->guard_candidate = NULL;
+    st->guard_file      = found_interned;
+    st->guard_confirmed = false;
+
     process_include_file(st, found_interned, is_sys_header);
+
+    /* ── Include-guard auto-detection: register if confirmed ───────
+     * If the file had a confirmed #ifndef X / #define X guard and the
+     * cond-stack depth is back to where it started (the #endif matched
+     * the opening #ifndef), register the guard so future includes of
+     * this file can be skipped entirely.                                */
+    if (st->guard_confirmed && st->cond_depth == cond_depth_before) {
+        guard_set(st, found_interned, st->guard_candidate);
+    }
+
+    /* Restore outer file's guard state */
+    st->guard_candidate = saved_guard_candidate;
+    st->guard_file      = saved_guard_file;
+    st->guard_confirmed = saved_guard_confirmed;
+
     if (st->cond_depth < cond_depth_before) {
         emit_diag(st, CPP_DIAG_ERROR, loc,
                   "in file '%s': '#endif' without matching '#if'",
@@ -893,6 +919,20 @@ static void handle_include(CppState *st, TokList *line, CppLoc loc,
 
 /* Process a #define directive line. */
 static void handle_define(CppState *st, TokList *line, CppLoc loc) {
+    /* ── Include-guard auto-detection ──────────────────────────────
+     * If we have a pending guard candidate, check if this #define
+     * matches it by extracting the macro name from the token list
+     * before parsing (MacroDef is opaque).                             */
+    if (st->guard_candidate && !st->guard_confirmed) {
+        TokNode *n = line->head;
+        while (n && n->tok.kind == CPPT_SPACE) n = n->next;
+        if (n && n->tok.kind == CPPT_IDENT) {
+            const char *name = intern_cstr(st->interns, pptok_spell(&n->tok));
+            if (name == st->guard_candidate)
+                st->guard_confirmed = true;
+        }
+    }
+
     MacroDef *def = macro_parse_define(line, st->interns, st->diags);
     if (def) macro_define(st->macros, def, st->diags, loc);
 }
@@ -1213,6 +1253,17 @@ static void handle_ifdef(CppState *st, TokList *line, CppLoc loc, bool invert) {
     bool is_has_x = is_has_family(idname);
     bool defined = is_has_x || macro_lookup(st->macros, idname) != NULL;
     handle_if_common(st, invert ? !defined : defined, loc);
+
+    /* ── Include-guard auto-detection ──────────────────────────────
+     * If this is #ifndef X at the very start of a file (cond_depth
+     * was 0 before handle_if_common pushed the frame, and no output
+     * has been produced yet for this file), record X as a guard
+     * candidate.  The next #define X will confirm it.                  */
+    if (invert && st->cond_depth == 1 && !st->guard_candidate) {
+        st->guard_candidate = intern_cstr(st->interns, idname);
+        st->guard_confirmed = false;
+    }
+
     /* GCC-style: warn if anything follows the macro name. */
     warn_trailing(st, invert ? "ifndef" : "ifdef", line, n, loc);
 }

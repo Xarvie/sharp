@@ -1,0 +1,6 @@
+#ifndef BUG_INCLUDE_GUARD_HDR_H
+#define BUG_INCLUDE_GUARD_HDR_H
+
+#define GUARD_VAL 42
+
+#endif /* BUG_INCLUDE_GUARD_HDR_H */

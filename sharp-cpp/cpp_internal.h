@@ -359,6 +359,16 @@ struct CppState {
     /* Include guard map */
     GuardEntry  *guards[GUARD_BUCKETS];
 
+    /* Include-guard auto-detection:
+     * When the first directive in an included file is #ifndef X followed
+     * immediately by #define X, we record X as a guard candidate.  When the
+     * file's #endif pops the cond-stack back to its original depth, we
+     * register the guard so that subsequent #include of the same file can
+     * be skipped entirely — matching GCC/Clang behaviour.                    */
+    const char  *guard_candidate;   /* interned macro name, or NULL */
+    const char  *guard_file;        /* interned filename being tracked */
+    bool         guard_confirmed;   /* #define X seen after #ifndef X */
+
     /* Pragma callback */
     CppPragmaHandler pragma_cb;
     void            *pragma_ud;

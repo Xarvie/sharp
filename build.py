@@ -31,16 +31,12 @@ else:
 
 # ── zig path ───────────────────────────────────────────────────────────
 _sharp_root = os.environ.get("SHARP_ROOT", "")
-if _sharp_root:
-    if _SYS == "win32":
-        ZIG = str(Path(_sharp_root) / "zig" / "zig.exe")
-    else:
-        ZIG = str(Path(_sharp_root) / "zig" / "zig")
+if not _sharp_root:
+    raise SystemExit("ERROR: SHARP_ROOT environment variable not set.")
+if _SYS == "win32":
+    ZIG = str(Path(_sharp_root) / "zig" / "zig.exe")
 else:
-    if _SYS == "win32":
-        ZIG = str(ROOT / "zig" / "zig.exe")
-    else:
-        ZIG = str(ROOT / "zig" / "zig")
+    ZIG = str(Path(_sharp_root) / "zig" / "zig")
 
 if _SYS == "win32":
     OBJ_EXT = ".obj"
