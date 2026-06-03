@@ -5270,11 +5270,31 @@ static AstNode *parse_primary(PS *ps) {
                     cl->u.compound_lit.init = parse_init_list(ps);
                     return parse_postfix(ps, cl);
                 }
-                /* cast */
-                AstNode *c = ast_node_new(AST_CAST, t.loc);
-                c->u.cast.type    = ty;
-                c->u.cast.operand = parse_expr_prec(ps, 14); /* unary prec */
-                return parse_postfix(ps, c);
+                /* cast — speculative: (Type) might actually be a
+                 * parenthesised expression when a local variable
+                 * shadows a typedef name (e.g. `typedef unsigned
+                 * char byte;` followed by `uint32_t byte` param).
+                 * Peek at the next token: if it cannot start a
+                 * unary expression (prec 14), fall back to
+                 * treating it as a parenthesised expression. */
+                {
+                    SharpTokKind nk = ps_peek(ps).kind;
+                    int can_be_unary =
+                        !(nk == STOK_SEMI    || nk == STOK_COLON   ||
+                          nk == STOK_COMMA   || nk == STOK_RPAREN ||
+                          nk == STOK_RBRACKET|| nk == STOK_RBRACE  ||
+                          nk == STOK_EOF);
+                    if (!can_be_unary) {
+                        ast_node_free(ty);
+                        ty = NULL;  /* prevent double-free in "not a cast" path */
+                        ps_restore(ps, sv_cast);
+                    } else {
+                        AstNode *c = ast_node_new(AST_CAST, t.loc);
+                        c->u.cast.type    = ty;
+                        c->u.cast.operand = parse_expr_prec(ps, 14);
+                        return parse_postfix(ps, c);
+                    }
+                }
             }
             /* not a cast — rollback */
             ast_node_free(ty);
