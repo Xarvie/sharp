@@ -614,6 +614,13 @@ const char *lex_tok_kind_name(SharpTokKind k) {
         "defer","operator","this","class",
         "constexpr",            /* C23: compile-time constant specifier */
         "extern_struct",
+        /* GCC extension keywords */
+        "__extension__",
+        "__attribute__",
+        "__asm__",
+        "__declspec",
+        /* Clang nullability annotations */
+        "_Nullable","_Nonnull","_Null_unspecified",
         /* Identity */
         "IDENT",
         /* Literals */

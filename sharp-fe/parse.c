@@ -600,6 +600,15 @@ static bool is_type_start(PS *ps) {
     case STOK_IDENT:
         if (k2 == STOK_IDENT || k2 == STOK_STAR || k2 == STOK_OPERATOR)
             return true;
+        /* IDENT SEMI — anonymous struct/union member using typedef name
+         * (MSVC extension: `typedef struct { ULONG64 Token; } TOKEN;
+         *  struct { TOKEN; } instance;).  Only a type-start when the
+         * IDENT is a known typedef name. */
+        if (k2 == STOK_SEMI) {
+            SharpTok t0 = ps_peek(ps);
+            if (name_is_known_type(ps, t0.text, t0.len))
+                return true;
+        }
         {
             SharpTok t = ps_peek(ps);
             char _nbuf[64];
@@ -640,13 +649,12 @@ static bool is_type_start(PS *ps) {
              * 'struct'/'union' keyword.  e.g. `struct epollop {…}`;
              * `return (epollop);` — parenthesised var, NOT a cast.
              *
-             * In Sharp, as in standard C:
-             *   - struct name is only in tag_names, not in typedefs
-             *   - only typedef brings it into typedefs
-             * So if it's in tag_names but NOT in typedefs → not a type
-             * If it's in both → it is a type (from typedef) */
-            if (td_has_n(&ps->tag_names, t.text, t.len) &&
-                !td_has_n(&ps->typedefs, t.text, t.len))
+             * In Sharp, struct names are auto-added to typedefs so
+             * they work as type names (C++ semantics), but for the
+             * IDENT-RPAREN cast heuristic, a bare (tag_name) is
+             * still NOT a cast — it must be a parenthesised variable.
+             * So if it's in tag_names → not a type for cast purposes. */
+            if (td_has_n(&ps->tag_names, t.text, t.len))
                 return false;
             return td_has_n(&ps->typedefs, t.text, t.len);
         }
@@ -3217,7 +3225,17 @@ static AstNode *parse_struct_def(PS *ps) {
             bool is_struct_union_type =
                 field_ty && field_ty->kind == AST_TYPE_NAME &&
                 field_ty->u.type_name.is_struct_tag;
-            if (is_anon_aggregate || is_struct_union_type) {
+            /* MSVC anonymous member using typedef name:
+             *   struct { INET_PORT_RESERVATION; INET_PORT_RESERVATION_TOKEN; }
+             * The typedef name alone (no field declarator) declares an
+             * anonymous member whose members are promoted into the
+             * enclosing struct.  We synthesise a field name. */
+            bool is_typedef_anon_member =
+                field_ty && field_ty->kind == AST_TYPE_NAME &&
+                field_ty->u.type_name.name &&
+                !field_ty->u.type_name.is_struct_tag &&
+                strncmp(field_ty->u.type_name.name, "__anon_", 7) != 0;
+            if (is_anon_aggregate || is_struct_union_type || is_typedef_anon_member) {
                 char synth[40];
                 snprintf(synth, sizeof synth,
                          "__anon_field_%u", ps->anon_struct_counter++);
