@@ -934,7 +934,7 @@ static void handle_define(CppState *st, TokList *line, CppLoc loc) {
     }
 
     MacroDef *def = macro_parse_define(line, st->interns, st->diags);
-    if (def) macro_define(st->macros, def, st->diags, loc);
+    if (def) macro_define(st->macros, def, st->diags, loc, st->cur_file_is_sys);
 }
 
 /* Process a #undef directive line. */

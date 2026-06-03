@@ -191,7 +191,8 @@ static bool macro_bodies_equal(const MacroDef *a, const MacroDef *b) {
     }
 }
 
-void macro_define(MacroTable *t, MacroDef *def, CppDiagArr *diags, CppLoc loc) {
+void macro_define(MacroTable *t, MacroDef *def, CppDiagArr *diags, CppLoc loc,
+                  bool is_system) {
     def->def_loc = loc;
 
     /* Phase R4 (e_vargs): C99 §6.10.8/4 — `defined` and `__VA_ARGS__`
@@ -219,9 +220,13 @@ void macro_define(MacroTable *t, MacroDef *def, CppDiagArr *diags, CppLoc loc) {
             MacroDef *old = *pp;
             /* Check if bodies are identical */
             if (!macro_bodies_equal(old, def)) {
-                CppDiag d = { CPP_DIAG_WARNING, def->def_loc,
-                              cpp_xstrdup("macro redefined with different body") };
-                da_push(diags, d);
+                /* Suppress redefinition warnings in system headers
+                 * (matching GCC/Clang -isystem behaviour). */
+                if (!is_system) {
+                    CppDiag d = { CPP_DIAG_WARNING, def->def_loc,
+                                  cpp_xstrdup("macro redefined with different body") };
+                    da_push(diags, d);
+                }
             }
             def->next = old->next;
             *pp = def;
@@ -1694,7 +1699,7 @@ void macro_define_object(MacroTable *t, InternTable *interns,
 
     MacroDef *def = macro_parse_define(&line, interns, &dummy);
     tl_free(&line);
-    if (def) { def->def_loc = loc; macro_define(t, def, &dummy, loc); }
+    if (def) { def->def_loc = loc; macro_define(t, def, &dummy, loc, false); }
 
     for (size_t i = 0; i < dummy.len; i++)
         free(dummy.data[i].msg);
@@ -1762,7 +1767,7 @@ void macro_pop_state(MacroTable *t, const char *name, CppDiagArr *diags) {
         for (TokNode *n = f->body.head; n; n = n->next)
             tl_append_copy(&def->body, &n->tok);
 
-        macro_define(t, def, diags, f->def_loc);
+        macro_define(t, def, diags, f->def_loc, false);
     }
 
     if (f->param_names) {

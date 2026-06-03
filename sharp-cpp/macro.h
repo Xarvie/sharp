@@ -38,8 +38,11 @@ bool macro_lookup_is_func(MacroTable *t, const char *name);
  */
 bool macro_def_is_func(const MacroDef *def);
 
-/** Install or replace a macro definition. */
-void macro_define(MacroTable *t, MacroDef *def, CppDiagArr *diags, CppLoc loc);
+/** Install or replace a macro definition.
+ *  `is_system` suppresses redefinition warnings inside system headers,
+ *  matching GCC/Clang -isystem behaviour. */
+void macro_define(MacroTable *t, MacroDef *def, CppDiagArr *diags, CppLoc loc,
+                  bool is_system);
 
 /** Remove a macro definition (no-op if not defined). */
 void macro_undef(MacroTable *t, const char *name);
