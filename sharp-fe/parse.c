@@ -559,7 +559,7 @@ static bool name_is_known_type(PS *ps, const char *name, size_t len) {
  * is_type_start: can the current token begin a type expression
  *                or a declaration (with storage-class specifier)?
  * ====================================================================== */
-static bool is_type_start(PS *ps) {
+static bool is_type_start(PS *ps, bool in_sizeof_context) {
     SharpTokKind k  = ps_peek(ps).kind;
     SharpTokKind k2 = ps_peek2(ps).kind;
     switch (k) {
@@ -653,9 +653,13 @@ static bool is_type_start(PS *ps) {
              * they work as type names (C++ semantics), but for the
              * IDENT-RPAREN cast heuristic, a bare (tag_name) is
              * still NOT a cast — it must be a parenthesised variable.
-             * So if it's in tag_names → not a type for cast purposes. */
+             * So if it's in tag_names → not a type for cast purposes.
+             *
+             * However, in sizeof/_Alignof context (in_sizeof_context=true),
+             * sizeof(tag_name) is unambiguously a type operand — there
+             * is no ambiguity with a parenthesised variable. */
             if (td_has_n(&ps->tag_names, t.text, t.len))
-                return false;
+                return in_sizeof_context;
             return td_has_n(&ps->typedefs, t.text, t.len);
         }
         /* IDENT '(' — only a type-start when the IDENT is a
@@ -3168,7 +3172,7 @@ static AstNode *parse_struct_def(PS *ps) {
             if (_et.kind == STOK__EXTENSION__)
                 ps_advance(ps);
         }
-        if (!is_type_start(ps)) {
+        if (!is_type_start(ps, false)) {
             ps_error(ps, ps_peek(ps).loc, "unexpected token in struct body");
             ps_advance(ps);
             continue;
@@ -3960,7 +3964,7 @@ static AstNode *parse_top_decl(PS *ps) {
         ps_restore(ps, sv);
     }
 
-    if (!is_type_start(ps)) {
+    if (!is_type_start(ps, false)) {
         /* Extension method with generic return type: `Stack<T> Stack.new()`.
          * is_type_start returns false for `Stack` followed by `<`, but it
          * is still a valid extension method pattern.  Try pre-scanning for
@@ -3986,7 +3990,7 @@ static AstNode *parse_top_decl(PS *ps) {
                     if (gp && gp->kind == AST_GENERIC_PARAM && gp->u.generic_param.name)
                         td_add(&ps->typedefs, gp->u.generic_param.name);
                 }
-                if (is_type_start(ps)) {
+                if (is_type_start(ps, false)) {
                     PsSave sv2 = ps_save(ps);
                     DeclSpecs probe = parse_decl_specifiers(ps);
                     if (!probe.empty && probe.base_ty &&
@@ -5256,7 +5260,7 @@ static AstNode *parse_primary(PS *ps) {
             had_leading_attr = true;
         }
         if (had_leading_attr) sv_cast = ps_save(ps);
-        if (is_type_start(ps)) {
+        if (is_type_start(ps, false)) {
             AstNode *ty = parse_type(ps);
             if (ps_at(ps, STOK_RPAREN)) {
                 ps_advance(ps);
@@ -5347,7 +5351,7 @@ static AstNode *parse_primary(PS *ps) {
             return n;
         }
         ps_advance(ps);  /* consume '(' */
-        if (is_type_start(ps)) {
+        if (is_type_start(ps, true)) {
             AstNode *ty = parse_type(ps);
             /* `sizeof(T[expr])` — VLA/array-type operand.
              * After parsing the base type, consume any `[size]` suffixes so
@@ -5373,7 +5377,7 @@ static AstNode *parse_primary(PS *ps) {
     case STOK__ALIGNOF: case STOK_ALIGNOF: {
         AstNode *n = ast_node_new(AST_SIZEOF, t.loc);  /* reuse sizeof node */
         ps_expect(ps, STOK_LPAREN, "_Alignof '('");
-        if (is_type_start(ps)) {
+        if (is_type_start(ps, true)) {
             AstNode *ty = parse_type(ps);
             if (ps_at(ps, STOK_LBRACKET))
                 ty = parse_array_suffix(ps, ty);
@@ -5962,7 +5966,7 @@ static AstNode *parse_stmt(PS *ps) {
         ps_expect(ps, STOK_LPAREN, "for '('");
         /* init */
         if (!ps_at(ps, STOK_SEMI)) {
-            if (is_type_start(ps)) {
+            if (is_type_start(ps, false)) {
                 CppLoc init_loc = ps_peek(ps).loc;
                 AstNode *init = parse_stmt(ps);  /* decl stmt */
                 /* Multi-variable form `for (int i=0, j=1; …)`: the
@@ -6077,7 +6081,7 @@ static AstNode *parse_stmt(PS *ps) {
      * `static int g = 5;`, `const char *s = "abc";`, etc.  We use the
      * full DeclSpecs path so storage-class specifiers and type
      * qualifiers in block scope round-trip to the generated C. */
-    if (is_type_start(ps)) {
+    if (is_type_start(ps, false)) {
         DeclSpecs ds = parse_decl_specifiers(ps);
         if (ds.empty || !ds.base_ty) {
             ps_error(ps, t.loc, "missing type specifier in declaration");

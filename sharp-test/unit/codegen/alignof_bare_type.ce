@@ -1,0 +1,29 @@
+// _Alignof(TypeName) with bare struct/class tags
+// Regression: _Alignof should handle bare type names same as sizeof
+
+#include <stdlib.h>
+#include <stdalign.h>
+
+struct AlignTest {
+    char c;
+    int i;
+};
+
+class Vec2 {
+    int x;
+    int y;
+};
+
+int main() {
+    // _Alignof with bare struct tag
+    if (_Alignof(struct AlignTest) < 1) return 1;
+
+    // _Alignof with Sharp class
+    if (_Alignof(Vec2) < sizeof(int)) return 2;
+
+    // _Alignof used in conditional - check it compiles and runs
+    // (alignment of struct with int field should be >= sizeof(int))
+    if (_Alignof(struct AlignTest) < sizeof(int)) return 3;
+
+    return 0;
+}

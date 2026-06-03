@@ -1,0 +1,94 @@
+// sizeof(TypeName) with bare struct/union/enum/class tags
+// Regression: sizeof(CIface) was parsed as expression, not type
+
+#include <stdlib.h>
+#include <stdbool.h>
+
+// === bare struct tag ===
+struct Node {
+    int value;
+    struct Node *next;
+};
+
+// === bare union tag ===
+union Value {
+    int i;
+    float f;
+    void *p;
+};
+
+// === bare enum tag ===
+enum Color {
+    RED,
+    GREEN,
+    BLUE
+};
+
+// === Sharp class (auto-typedef'd) ===
+class Point {
+    int x;
+    int y;
+};
+
+typedef struct Node NodeAlias;
+
+int main() {
+    // sizeof with bare struct tag
+    if (sizeof(Node) < sizeof(int)) return 1;
+
+    // sizeof with bare union tag
+    if (sizeof(union Value) < sizeof(int)) return 2;
+
+    // sizeof with bare enum tag
+    if (sizeof(enum Color) != sizeof(int)) return 3;
+
+    // sizeof with Sharp class
+    if (sizeof(Point) != 8) return 4;
+
+    // sizeof with typedef alias
+    if (sizeof(NodeAlias) != sizeof(Node)) return 5;
+
+    // sizeof in expression context
+    if (sizeof(Node) * 2 != sizeof(Node) * 2) return 6;
+
+    // sizeof with pointer
+    if (sizeof(Node*) != sizeof(void*)) return 7;
+
+    // sizeof with allocated struct through pointer
+    Node *n = (Node*)malloc(sizeof(Node));
+    if (!n) return 8;
+    n->value = 42;
+    if (n->value != 42) return 9;
+    free(n);
+
+    // sizeof with union as malloc arg
+    union Value *v = (union Value*)malloc(sizeof(union Value));
+    if (!v) return 10;
+    v->i = 100;
+    if (v->i != 100) return 11;
+    free(v);
+
+    // sizeof with class as malloc arg
+    Point *p = (Point*)malloc(sizeof(Point));
+    if (!p) return 12;
+    p->x = 3;
+    p->y = 4;
+    if (p->x != 3 || p->y != 4) return 13;
+    free(p);
+
+    // sizeof with typedef in malloc
+    NodeAlias *na = (NodeAlias*)malloc(sizeof(NodeAlias));
+    if (!na) return 14;
+    free(na);
+
+    // sizeof in array context
+    Node *arr = (Node*)calloc(4, sizeof(Node));
+    if (!arr) return 15;
+    free(arr);
+
+    // sizeof in compound expression
+    int sz = (int)(sizeof(Node) + sizeof(Point));
+    if (sz <= 0) return 16;
+
+    return 0;
+}
