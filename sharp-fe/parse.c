@@ -1377,8 +1377,20 @@ apply_suffix:
      * placeholder-splice mechanism, including doubly-nested forms like
      * `void(*(*)(void*,const char*))(void)` used in sqlite3's dlsym wrapper. */
     if (ps_at(ps, STOK_LPAREN) && ps_peek2(ps).kind == STOK_STAR) {
+        PsSave sv = ps_save(ps);
+        AstNode *saved_base = base;
         char *dummy_name = NULL;
         base = parse_direct_declarator(ps, base, &dummy_name);
+        if (dummy_name != NULL) {
+            /* A named identifier was consumed inside (*name…).  This is
+             * a declarator (e.g. typedef int (*F(void))(int)), not an
+             * abstract function-pointer type (e.g. cast (int(*)(int))).
+             * Restore the parser state and return the base type so the
+             * caller's declarator parser can handle it correctly. */
+            free(dummy_name);
+            ps_restore(ps, sv);
+            return saved_base;
+        }
         /* dummy_name is always NULL for abstract declarators (no IDENT
          * inside the `(*...)` group).  No free needed — it was never set. */
     }

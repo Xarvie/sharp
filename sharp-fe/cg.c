@@ -6270,6 +6270,61 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
         AstNode *ret_ast = target->u.type_func.ret;
         Type *ret_t = ret_ast ? ty_from_ast(ctx->ts, ret_ast,
                                              cg_type_scope(ctx), NULL) : NULL;
+
+        /* When the return type is a pointer-to-function, ISO C requires
+         * a nested declarator form:
+         *   typedef  ret (*name(params))(inner_params);
+         * instead of the flat (invalid C) form:
+         *   typedef  ret (*)(inner_params) name(params);
+         *
+         * Detect by peeling TY_PTR layers from the return type until
+         * we land on a TY_FUNC.  Also handle the doubly-nested case:
+         *   typedef  R (*(*name)(P))(Q)
+         * where the inner function pointer return type recursively
+         * contains another function pointer. */
+        if (ret_t) {
+            TyPtrPeel rpp = ty_peel_ptr(ret_t);
+            if (rpp.nstars > 0 && rpp.base && rpp.base->kind == TY_FUNC) {
+                const Type *outer_fn = rpp.base;
+                const Type *inner_ret = outer_fn->u.func.ret;
+                TyPtrPeel ipp = ty_peel_ptr((Type *)inner_ret);
+                if (ipp.nstars > 0 && ipp.base && ipp.base->kind == TY_FUNC) {
+                    /* Doubly-nested: R (*(*name)(P))(Q)
+                     * where P = target params, Q = outer_fn params,
+                     * inner_c = ipp.base, R = inner_c->ret */
+                    const Type *inner_c = ipp.base;
+                    cg_puts(ctx, "typedef ");
+                    cg_type(ctx, inner_c->u.func.ret);           /* R */
+                    cg_puts(ctx, " (");
+                    cg_emit_stars(ctx, rpp.nstars);              /* outer * */
+                    cg_puts(ctx, "(");
+                    cg_emit_stars(ctx, ipp.nstars);              /* inner * */
+                    cg_printf(ctx, "%s", cname);                 /* name */
+                    cg_puts(ctx, "(");
+                    cg_emit_func_params_ast(ctx, target);        /* P */
+                    cg_puts(ctx, "))(");
+                    cg_func_params(ctx, outer_fn);               /* Q */
+                    cg_puts(ctx, "))(");
+                    cg_func_params(ctx, inner_c);                /* inner params */
+                    cg_puts(ctx, ");\n");
+                    return;
+                }
+                /* Single-level: ret (*name(params))(inner_params) */
+                cg_puts(ctx, "typedef ");
+                cg_type(ctx, outer_fn->u.func.ret);              /* ret */
+                cg_puts(ctx, " (");
+                cg_emit_stars(ctx, rpp.nstars);                  /* * */
+                cg_printf(ctx, "%s", cname);                     /* name */
+                cg_puts(ctx, "(");
+                cg_emit_func_params_ast(ctx, target);            /* params */
+                cg_puts(ctx, "))(");
+                cg_func_params(ctx, outer_fn);                   /* inner_params */
+                cg_puts(ctx, ");\n");
+                return;
+            }
+        }
+
+        /* Simple function typedef: typedef ret_type alias(params); */
         cg_puts(ctx, "typedef ");
         if (ret_t) cg_type(ctx, ret_t);
         else        cg_puts(ctx, "void");
@@ -6449,6 +6504,22 @@ static void cg_typedef_c(CgCtx *ctx, const AstNode *d) {
                 while (inner && inner->kind == AST_TYPE_PTR)
                     inner = inner->u.type_ptr.base;
                 if (inner && inner->kind == AST_TYPE_FUNC) {
+                    /* Check if the function return type is itself a fn-ptr
+                     * (doubly-nested): typedef R (*(*Alias)(P))(Q) */
+                    const AstNode *fn_ret = inner->u.type_func.ret;
+                    if (fn_ret && fn_ret->kind == AST_TYPE_PTR &&
+                        fn_ret->u.type_ptr.base &&
+                        fn_ret->u.type_ptr.base->kind == AST_TYPE_FUNC) {
+                        const AstNode *inner_fn = fn_ret->u.type_ptr.base;
+                        cg_puts(ctx, "typedef ");
+                        cg_type_from_ast(ctx, inner_fn->u.type_func.ret);
+                        cg_printf(ctx, " (*(*%s)(", cname);
+                        cg_emit_func_params_ast(ctx, inner);
+                        cg_puts(ctx, "))(");
+                        cg_emit_func_params_ast(ctx, inner_fn);
+                        cg_puts(ctx, ");\n");
+                        goto typedef_done;
+                    }
                     /* Emit: typedef ret (*Alias)(params) with AST param names */
                     const AstNode *fn = inner;
                     cg_puts(ctx, "typedef ");

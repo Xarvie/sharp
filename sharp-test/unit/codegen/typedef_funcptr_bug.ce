@@ -1,0 +1,48 @@
+// Regression test for typedef of function returning pointer to function.
+// Bug: `typedef T (*name(params))(params2)` was producing wrong output.
+// Fix: codegen now emits the nested declarator form.
+
+// === BUG 1: Direct typedef of function returning pointer to function ===
+typedef int (*FnRetFP(void))(int);
+
+// === BUG 2: With multiple params ===
+typedef int (*FnRetFP2(int x, int y))(int);
+
+// === BUG 3: Pointer to function returning pointer to function ===
+typedef int (*(*PtrToFnRet)(int))(int);
+
+// === BUG 4: Using existing function-pointer typedef as return type ===
+typedef int (*InnerFP)(int);
+typedef InnerFP FnRetFP3(void);
+
+// === BUG 5: Doubly-nested function pointer typedef ===
+typedef int (*(*DoubleNest(void))(int))(float);
+
+// === EXTENDED CASE 1: Signal handler pattern ===
+typedef void (*SignalHandler(int sig))(int);
+
+// === EXTENDED CASE 2: Complex nested function pointer ===
+typedef char (*(*ComplexFP(int a, float b))(double))(short);
+
+// === EXTENDED CASE 3: const pointer variant ===
+typedef int (* const ConstFnRet(void))(int);
+
+// === EXTENDED CASE 4: void return + void params ===
+typedef void (*VoidFn(void))(void);
+
+// === EXTENDED CASE 5: Multiple params in outer function ===
+typedef int (*MultiParam(int a, int b, int c))(int);
+
+// === EXTENDED CASE 6: Existing typedef with inner function pointer ===
+typedef int (*OtherFP)(float);
+typedef OtherFP ChainFn(void);
+
+// === EXTENDED CASE 7: Simple function returning function pointer ===
+typedef int (*SingleDeep(void))(int);
+
+// === EXTENDED CASE 8: Sizeof with function pointer type ===
+int sz1 = (int)sizeof(int (*)(int));
+
+int main(void) {
+    return 0;
+}
